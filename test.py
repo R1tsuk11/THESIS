@@ -55,6 +55,13 @@ class Module:
         print("Levels List: ")
         while True:
             for level in self.levels:
+                if all (level.completed for level in self.levels):
+                    module.completed = True
+                    print("This module is already completed.")
+                    return
+                if level.completed:
+                    print(f"Level {self.levels.index(level) + 1} (Completed)")
+                    continue
                 num = self.levels.index(level) + 1
                 print(f"Level {num}")
 
@@ -146,11 +153,15 @@ class LearningApp:
     def run_modules(self):
         print("Opening Modules...")
         print("Modules List: ")
-        for module in self.modules:
-            num = self.modules.index(module) + 1
-            print(f"Module {num}: {module.name}")
-
+        
         while True:
+            for module in self.modules:
+                if module.completed:
+                    print(f"Module {self.modules.index(module) + 1}: {module.name} (Completed)")
+                    continue
+                num = self.modules.index(module) + 1
+                print(f"Module {num}: {module.name}")
+
             choice = int(input("Choose a module number to start (Enter 0 to go back): "))
             try:
                 choice = int(choice)
@@ -175,8 +186,7 @@ class LearningApp:
                 continue
             else:
                 print("Invalid input. Try again.")
-                continue
-            break    
+                continue   
 
     def final_exam(self):
         print("Final Exam Starting...")
