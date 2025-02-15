@@ -28,6 +28,11 @@ class Level:
         self.completed = False
         self.pass_threshold = 1
 
+class ChapterTest:
+    def __init__(self, questions_answers):
+        self.questions_answers = questions_answers
+        self.completed = False
+        self.pass_threshold = 2
 
 class Module:
     def __init__(self, name):
@@ -43,33 +48,43 @@ class Module:
         ]
     
     def create_chapter_test(self):
-        return {
-            "Q1": "A1",
-            "Q2": "A2",
-            "Q3": "A3",
-            "Q4": "A4"
-        }
+        return ChapterTest({"Q1": "A1", "Q2": "A2", "Q3": "A3", "Q4": "A4"})
 
-    def run_levels(self, module, user):
+    def run_levels_list(self, user):
         print("Opening levels...")
         print("Levels List: ")
         while True:
             for level in self.levels:
-                if all (level.completed for level in self.levels):
-                    module.completed = True
-                    print("This module is already completed.")
-                    return
                 if level.completed:
                     print(f"Level {self.levels.index(level) + 1} (Completed)")
                     continue
                 num = self.levels.index(level) + 1
                 print(f"Level {num}")
-
-            choice = int(input("Choose a level number to start (Enter 0 to go back): "))
+            if all(level.completed for level in self.levels):
+                print("Chapter Test")
+            else:
+                print("Chapter Test (Locked)")
+            choice = input(f"Choose a level number to start (Enter 0 to go back) (Enter {len(self.levels) + 1} to attempt Chapter Test): ")
             try:
                 choice = int(choice)
                 if choice == 0:
                     return
+                elif choice == len(self.levels) + 1:
+                    if all(level.completed for level in self.levels):
+                        self.run_chapter_test(user)
+                        if user.analyze_proficiency() >= self.chapter_test.pass_threshold:
+                            self.chapter_test.completed = True
+                            print("Chapter Test completed!")
+                            if all(level.completed for level in self.levels) and self.chapter_test.completed:
+                                self.completed = True
+                                print("Module complete!")
+                                return
+                        else:
+                            print("Chapter Test not passed. Review required.")
+                            continue
+                    else:
+                        print("Chapter Test is locked. Complete all levels first.")
+                        continue
                 elif choice not in range(1, len(self.levels) + 1):
                     print("Invalid number. Try again.")
                     continue
@@ -105,6 +120,12 @@ class Module:
             user.record_answer(question, answer == correct_answer)
         return
 
+    def run_chapter_test(self, user):
+        print(f"Chapter Test for {self.name}")
+        for question, correct_answer in self.chapter_test.questions_answers.items():
+            print(f"Question: {question}")
+            answer = input()
+            user.record_answer(question, answer == correct_answer)
 
 class LearningApp:
     def __init__(self):
@@ -117,21 +138,6 @@ class LearningApp:
             Module("Greetings"),
         ]
 
-    def run_chapter_test(self):
-        for module in self.modules:
-            print(f"Chapter Test for {module.name}")
-            for question, correct_answer in module.chapter_test.items():
-                print(f"Question: {question}")
-                answer = input()
-                self.user.record_answer(question, answer == correct_answer)
-            
-            if self.user.analyze_proficiency() >= module.pass_threshold:
-                module.completed = True
-                print(f"{module.name} completed!")
-            else:
-                print("Review required before proceeding.")
-                break
-
     def start(self):
         if self.user.first_time:
             self.user.signup()
@@ -141,14 +147,16 @@ class LearningApp:
 
     def main_menu(self):
         while True:
-            choice = input("Choose: (1) Start (2) About (3) Exit: ")
+            choice = input("Choose: (1) Start (2) About (0) Exit: ")
             if choice == "1":
                 self.run_modules()
             elif choice == "2":
                 print("About Us: This is a Waray Learning App.")
-            elif choice == "3":
+            elif choice == "0":
                 print("Exiting...")
                 break
+            else:
+                print("Invalid choice. Try again.")
 
     def run_modules(self):
         print("Opening Modules...")
@@ -162,7 +170,7 @@ class LearningApp:
                 num = self.modules.index(module) + 1
                 print(f"Module {num}: {module.name}")
 
-            choice = int(input("Choose a module number to start (Enter 0 to go back): "))
+            choice = input("Choose a module number to start (Enter 0 to go back): ")
             try:
                 choice = int(choice)
                 if choice == 0:
@@ -180,25 +188,13 @@ class LearningApp:
                 continue
 
             if module in self.modules and not module.completed:
-                module.run_levels(module, self.user)
+                module.run_levels_list(self.user)
             elif module in self.modules and module.completed:
                 print("Module already completed.")
                 continue
             else:
                 print("Invalid input. Try again.")
-                continue   
-
-    def final_exam(self):
-        print("Final Exam Starting...")
-        for i in range(3):
-            answer = input(f"Final Q{i+1}: ")
-            self.user.record_answer(f"Final Q{i+1}", answer == "correct")
-        
-        if self.user.analyze_proficiency() >= self.pass_threshold:
-            print("Congratulations! You earned the certificate.")
-        else:
-            print("Remedial lesson required. Retaking final exam.")
-            self.final_exam()
+                continue
 
 
 if __name__ == "__main__":
