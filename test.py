@@ -6,6 +6,7 @@ class User:
         self.word_library = []
         self.questions_wrong = {}
         self.questions_correct = {}
+        self.achievements = Achievements()
 
     def signup(self):
         print("Signing up new user...")
@@ -21,8 +22,29 @@ class User:
         if correct:
             self.proficiency += 1
             self.questions_correct[question] = answer
+            self.word_library.append(answer)
         else:
             self.questions_wrong[question] = answer
+
+
+class Achievements:
+    def __init__(self):
+        self.achievements = {
+            "First Level Completed": False,
+            "First Module Completed": False,
+            "All Modules Completed": False,
+            "All Levels Completed": False,
+            "All Chapter Tests Passed": False,
+            "All Achievements Unlocked": False
+        }
+
+    def unlock_achievement(self, achievement):
+        self.achievements[achievement] = True
+        print(f"Achievement Unlocked: {achievement}")
+
+    def display_achievements(self):
+        for achievement, unlocked in self.achievements.items():
+            print(f"{achievement}: {'Unlocked' if unlocked else 'Locked'}")
 
 
 class Level:
@@ -56,9 +78,6 @@ class Module:
         return ChapterTest({"Q1": "A1", "Q2": "A2", "Q3": "A3", "Q4": "A4"})
 
     def run_review(self, user):
-        if not user.questions_wrong:
-            print("No wrong answers to review.")
-            return
         print("Reviewing wrong answers...")
         while user.questions_wrong:
             for question, answer in list(user.questions_wrong.items()):
@@ -69,13 +88,20 @@ class Module:
                     if question in level.questions_answers:
                         correct_answer = level.questions_answers[question]
                         break
-                new_answer = input("Enter the correct answer: ")
-                if new_answer == correct_answer:
-                    user.record_answer(question, new_answer, True)
-                    del user.questions_wrong[question]
-                else:
-                    print("Incorrect. Please try again.")
+                if correct_answer is None and question in self.chapter_test.questions_answers:
+                    correct_answer = self.chapter_test.questions_answers[question]
+                
+                if correct_answer is not None:
+                    print(f"Correct answer: {correct_answer}")
+                    new_answer = input("Enter the correct answer: ")
+                    if new_answer == correct_answer:
+                        user.record_answer(question, new_answer, True)
+                        del user.questions_wrong[question]
+                    else:
+                        print("Incorrect. Please try again.")
         print("Review completed.")
+        if not user.questions_wrong:
+            print("No wrong answers to review.")
 
     def run_levels_list(self, user):
         print("Opening levels...")
@@ -99,12 +125,18 @@ class Module:
                 elif choice == len(self.levels) + 1:
                     if all(level.completed for level in self.levels):
                         self.run_chapter_test(user)
-                        if user.analyze_proficiency() >= self.chapter_test.pass_threshold:
+                        if user.analyze_proficiency(len(self.chapter_test.questions_answers)) >= self.chapter_test.pass_threshold:
                             self.chapter_test.completed = True
                             print("Chapter Test completed!")
+                            user.achievements.unlock_achievement("All Chapter Tests Passed")
                             if all(level.completed for level in self.levels) and self.chapter_test.completed:
                                 self.completed = True
                                 print("Module complete!")
+                                user.achievements.unlock_achievement("First Module Completed")
+                                if all(module.completed for module in user.modules):
+                                    user.achievements.unlock_achievement("All Modules Completed")
+                                    if all(user.achievements.achievements.values()):
+                                        user.achievements.unlock_achievement("All Achievements Unlocked")
                                 return
                         else:
                             print("Chapter Test not passed. Review required.")
@@ -131,6 +163,9 @@ class Module:
                 if proficiency_percentage >= level.pass_threshold:
                     level.completed = True
                     print(f"Level {choice} completed with {proficiency_percentage:.2f}% proficiency!")
+                    user.achievements.unlock_achievement("First Level Completed")
+                    if all(level.completed for level in self.levels):
+                        user.achievements.unlock_achievement("All Levels Completed")
                     continue
                 else:
                     print(f"Review required before proceeding. Proficiency: {proficiency_percentage:.2f}%")
@@ -180,16 +215,32 @@ class LearningApp:
 
     def main_menu(self):
         while True:
-            choice = input("Choose: (1) Start (2) About (0) Exit: ")
+            choice = input("Choose: (1) Start (2) Profile (3) Achievements (4) About (5) Settings (0) Exit: ")
             if choice == "1":
                 self.run_modules()
             elif choice == "2":
+                self.profile()
+            elif choice == "3":
+                self.achievements()
+            elif choice == "4":
                 print("About Us: This is a Waray Learning App.")
+            elif choice == "5":
+                print("Settings: Coming soon...")
             elif choice == "0":
                 print("Exiting...")
                 break
             else:
                 print("Invalid choice. Try again.")
+
+    def profile(self):
+        print("Profile")
+        print(f"User ID: {self.user.user_id}")
+        print(f"Proficiency: {self.user.proficiency}")
+        print(f"Word Library: {self.user.word_library}")
+    
+    def achievements(self):
+        print("Achievements")
+        self.user.achievements.display_achievements()
 
     def run_modules(self):
         print("Opening Modules...")
