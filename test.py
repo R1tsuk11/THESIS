@@ -4,6 +4,8 @@ class User:
         self.first_time = first_time
         self.proficiency = 0
         self.word_library = []
+        self.questions_wrong = {}
+        self.questions_correct = {}
 
     def signup(self):
         print("Signing up new user...")
@@ -12,27 +14,30 @@ class User:
     def login(self):
         print("Logging in existing user...")
 
-    def analyze_proficiency(self):
-        return self.proficiency
+    def analyze_proficiency(self, total_questions):
+        return (self.proficiency / total_questions) * 100
 
-    def record_answer(self, question, correct):
+    def record_answer(self, question, answer, correct):
         if correct:
             self.proficiency += 1
+            self.questions_correct[question] = answer
         else:
-            self.proficiency -= 1
+            self.questions_wrong[question] = answer
 
 
 class Level:
     def __init__(self, questions_answers):
         self.questions_answers = questions_answers
         self.completed = False
-        self.pass_threshold = 1
+        self.pass_threshold = 70
+
 
 class ChapterTest:
     def __init__(self, questions_answers):
         self.questions_answers = questions_answers
         self.completed = False
-        self.pass_threshold = 2
+        self.pass_threshold = 80
+
 
 class Module:
     def __init__(self, name):
@@ -49,6 +54,28 @@ class Module:
     
     def create_chapter_test(self):
         return ChapterTest({"Q1": "A1", "Q2": "A2", "Q3": "A3", "Q4": "A4"})
+
+    def run_review(self, user):
+        if not user.questions_wrong:
+            print("No wrong answers to review.")
+            return
+        print("Reviewing wrong answers...")
+        while user.questions_wrong:
+            for question, answer in list(user.questions_wrong.items()):
+                print(f"Question: {question}")
+                print(f"Your answer: {answer}")
+                correct_answer = None
+                for level in self.levels:
+                    if question in level.questions_answers:
+                        correct_answer = level.questions_answers[question]
+                        break
+                new_answer = input("Enter the correct answer: ")
+                if new_answer == correct_answer:
+                    user.record_answer(question, new_answer, True)
+                    del user.questions_wrong[question]
+                else:
+                    print("Incorrect. Please try again.")
+        print("Review completed.")
 
     def run_levels_list(self, user):
         print("Opening levels...")
@@ -81,6 +108,7 @@ class Module:
                                 return
                         else:
                             print("Chapter Test not passed. Review required.")
+                            self.run_review(user)
                             continue
                     else:
                         print("Chapter Test is locked. Complete all levels first.")
@@ -99,12 +127,14 @@ class Module:
 
             if level in self.levels and not level.completed:
                 self.run_level(level, user)
-                if user.analyze_proficiency() >= level.pass_threshold:
+                proficiency_percentage = user.analyze_proficiency(len(level.questions_answers))
+                if proficiency_percentage >= level.pass_threshold:
                     level.completed = True
-                    print(f"Level {choice} completed!")
+                    print(f"Level {choice} completed with {proficiency_percentage:.2f}% proficiency!")
                     continue
                 else:
-                    print("Review required before proceeding.")
+                    print(f"Review required before proceeding. Proficiency: {proficiency_percentage:.2f}%")
+                    self.run_review(user)
                     continue
             elif level in self.levels and level.completed:
                 print("Level already completed.")
@@ -114,18 +144,21 @@ class Module:
                 continue
 
     def run_level(self, level, user):
+        user.proficiency = 0
         for question, correct_answer in level.questions_answers.items():
             print(f"Question: {question}")
             answer = input()
-            user.record_answer(question, answer == correct_answer)
+            user.record_answer(question, answer, answer == correct_answer)
         return
 
     def run_chapter_test(self, user):
+        user.proficiency = 0
         print(f"Chapter Test for {self.name}")
         for question, correct_answer in self.chapter_test.questions_answers.items():
             print(f"Question: {question}")
             answer = input()
-            user.record_answer(question, answer == correct_answer)
+            user.record_answer(question, answer, answer == correct_answer)
+
 
 class LearningApp:
     def __init__(self):
