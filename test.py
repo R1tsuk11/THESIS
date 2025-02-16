@@ -1,8 +1,113 @@
+import mysql.connector
+
+def connect_to_db():
+    return mysql.connector.connect(
+        host="localhost",
+        user="adam",
+        password="adam123",
+        database="arami"
+    )
+
+def test_db_connection():
+    try:
+        db = connect_to_db()
+        if db.is_connected():
+            print("Successfully connected to the database.")
+        else:
+            print("Failed to connect to the database.")
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+    finally:
+        if 'db' in locals() and db.is_connected():
+            db.close()
+
+def insert_user(user):
+    db = connect_to_db()
+    cursor = db.cursor()
+
+    cursor.execute("""
+    INSERT INTO users (user_name, password, proficiency)
+    VALUES (%s, %s, %s)
+    """, (user.user_name, user.password, user.proficiency))
+
+    user.user_id = cursor.lastrowid
+
+    for question, answer in user.questions_wrong.items():
+        cursor.execute("""
+        INSERT INTO questions_wrong (user_id, question, answer)
+        VALUES (%s, %s, %s)
+        """, (user.user_id, question, answer))
+
+    for question, answer in user.questions_correct.items():
+        cursor.execute("""
+        INSERT INTO questions_correct (user_id, question, answer)
+        VALUES (%s, %s, %s)
+        """, (user.user_id, question, answer))
+
+    for word in user.word_library:
+        cursor.execute("""
+        INSERT INTO word_library (user_id, word)
+        VALUES (%s, %s)
+        """, (user.user_id, word))
+
+    for achievement, unlocked in user.achievements.achievements.items():
+        cursor.execute("""
+        INSERT INTO achievements (user_id, achievement_name, unlocked)
+        VALUES (%s, %s, %s)
+        """, (user.user_id, achievement, unlocked))
+
+    db.commit()
+    cursor.close()
+    db.close()
+
+def update_user(user):
+    db = connect_to_db()
+    cursor = db.cursor()
+
+    cursor.execute("""
+    UPDATE users
+    SET user_name = %s, password = %s, proficiency = %s
+    WHERE user_id = %s
+    """, (user.user_name, user.password, user.proficiency, user.user_id))
+
+    cursor.execute("DELETE FROM questions_wrong WHERE user_id = %s", (user.user_id,))
+    for question, answer in user.questions_wrong.items():
+        cursor.execute("""
+        INSERT INTO questions_wrong (user_id, question, answer)
+        VALUES (%s, %s, %s)
+        """, (user.user_id, question, answer))
+
+    cursor.execute("DELETE FROM questions_correct WHERE user_id = %s", (user.user_id,))
+    for question, answer in user.questions_correct.items():
+        cursor.execute("""
+        INSERT INTO questions_correct (user_id, question, answer)
+        VALUES (%s, %s, %s)
+        """, (user.user_id, question, answer))
+
+    cursor.execute("DELETE FROM word_library WHERE user_id = %s", (user.user_id,))
+    for word in user.word_library:
+        cursor.execute("""
+        INSERT INTO word_library (user_id, word)
+        VALUES (%s, %s)
+        """, (user.user_id, word))
+
+    cursor.execute("DELETE FROM achievements WHERE user_id = %s", (user.user_id,))
+    for achievement, unlocked in user.achievements.achievements.items():
+        cursor.execute("""
+        INSERT INTO achievements (user_id, achievement_name, unlocked)
+        VALUES (%s, %s, %s)
+        """, (user.user_id, achievement, unlocked))
+
+    db.commit()
+    cursor.close()
+    db.close()
+
 class User:
-    def __init__(self, user_id, first_time=True):
+    def __init__(self, user_id=None):
         self.user_id = user_id
-        self.first_time = first_time
+        self.user_name = None
         self.proficiency = 0
+        self.password = None
         self.word_library = []
         self.questions_wrong = {}
         self.questions_correct = {}
@@ -10,10 +115,32 @@ class User:
 
     def signup(self):
         print("Signing up new user...")
-        self.first_time = False
+        self.user_name = input("Enter your username: ")
+        self.password = input("Enter your password: ")
+        insert_user(self)
+        print("User signed up successfully.")
+        LearningApp(self).start()
 
     def login(self):
-        print("Logging in existing user...")
+        while True:
+            self.user_name = input("Enter your username: ")
+            self.password = input("Enter your password: ")
+            db = connect_to_db()
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM users WHERE user_name = %s AND password = %s", (self.user_name, self.password))
+            user_data = cursor.fetchone()
+            if user_data:
+                self.user_id = user_data['user_id']
+                self.proficiency = user_data['proficiency']
+                print("Logging in existing user...")
+                cursor.close()
+                db.close()
+                LearningApp(self).main_menu()
+                break
+            else:
+                print("Invalid username or password. Please try again.")
+                cursor.close()
+                db.close()
 
     def analyze_proficiency(self, total_questions):
         return (self.proficiency / total_questions) * 100
@@ -25,6 +152,9 @@ class User:
             self.word_library.append(answer)
         else:
             self.questions_wrong[question] = answer
+
+    def save(self):
+        update_user(self)
 
 
 class Achievements:
@@ -128,15 +258,16 @@ class Module:
                         if user.analyze_proficiency(len(self.chapter_test.questions_answers)) >= self.chapter_test.pass_threshold:
                             self.chapter_test.completed = True
                             print("Chapter Test completed!")
-                            user.achievements.unlock_achievement("All Chapter Tests Passed")
                             if all(level.completed for level in self.levels) and self.chapter_test.completed:
                                 self.completed = True
                                 print("Module complete!")
                                 user.achievements.unlock_achievement("First Module Completed")
-                                if all(module.completed for module in user.modules):
-                                    user.achievements.unlock_achievement("All Modules Completed")
-                                    if all(user.achievements.achievements.values()):
-                                        user.achievements.unlock_achievement("All Achievements Unlocked")
+                                if all(chapter_test.completed for chapter_test in LearningApp().modules):
+                                    user.achievements.unlock_achievement("All Chapter Tests Passed")
+                                    if all(module.completed for module in LearningApp().modules):
+                                        user.achievements.unlock_achievement("All Modules Completed")
+                                        if all(user.achievements.achievements.values()):
+                                            user.achievements.unlock_achievement("All Achievements Unlocked")
                                 return
                         else:
                             print("Chapter Test not passed. Review required.")
@@ -196,9 +327,42 @@ class Module:
 
 
 class LearningApp:
-    def __init__(self):
-        self.user = User(user_id=1)
+    def __init__(self, user=None):
+        self.db = connect_to_db()
+        self.user = user if user else self.load_user()
         self.modules = self.create_modules()
+
+    def load_user(self):
+        cursor = self.db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users LIMIT 1")
+        user_data = cursor.fetchone()
+
+        if user_data:
+            user = User(user_data['user_id'])
+            user.user_name = user_data['user_name']
+            user.proficiency = user_data['proficiency']
+
+            cursor.execute("SELECT * FROM questions_wrong WHERE user_id = %s", (user.user_id,))
+            for row in cursor.fetchall():
+                user.questions_wrong[row['question']] = row['answer']
+
+            cursor.execute("SELECT * FROM questions_correct WHERE user_id = %s", (user.user_id,))
+            for row in cursor.fetchall():
+                user.questions_correct[row['question']] = row['answer']
+
+            cursor.execute("SELECT * FROM word_library WHERE user_id = %s", (user.user_id,))
+            for row in cursor.fetchall():
+                user.word_library.append(row['word'])
+
+            cursor.execute("SELECT * FROM achievements WHERE user_id = %s", (user.user_id,))
+            for row in cursor.fetchall():
+                user.achievements.achievements[row['achievement_name']] = row['unlocked']
+
+            cursor.close()
+            return user
+        else:
+            cursor.close()
+            return None
 
     def create_modules(self):
         return [
@@ -207,15 +371,32 @@ class LearningApp:
         ]
 
     def start(self):
-        if self.user.first_time:
+        print("Welcome to ARAMI, the Waray Learning App!")
+        if self.user is None:
+            print("No user found. Please sign up.")
+            self.user = User()
             self.user.signup()
         else:
-            self.user.login()
-        self.main_menu()
+            print("(1) Login (2) Signup (0) Exit")
+            while True:
+                try:
+                    choice = input("Choose an option: ")
+                    if choice == "1":
+                        self.user.login()
+                    elif choice == "2":
+                        self.user.signup()
+                    elif choice == "0":
+                        print("Exiting...")
+                        break
+                    else:
+                        print("Invalid choice. Try again.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+                    continue
 
     def main_menu(self):
         while True:
-            choice = input("Choose: (1) Start (2) Profile (3) Achievements (4) About (5) Settings (0) Exit: ")
+            choice = input("Choose: (1) Start (2) Profile (3) Achievements (4) About (5) Acknowledgements (6) Settings (0) Logout: ")
             if choice == "1":
                 self.run_modules()
             elif choice == "2":
@@ -225,9 +406,13 @@ class LearningApp:
             elif choice == "4":
                 print("About Us: This is a Waray Learning App.")
             elif choice == "5":
+                print("Acknowledgements: Special thanks to...")
+            elif choice == "6":
                 print("Settings: Coming soon...")
             elif choice == "0":
-                print("Exiting...")
+                self.user.save()
+                print("Logging out...")
+                self.start()
                 break
             else:
                 print("Invalid choice. Try again.")
@@ -282,5 +467,6 @@ class LearningApp:
 
 
 if __name__ == "__main__":
+    test_db_connection()
     app = LearningApp()
     app.start()
