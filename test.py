@@ -383,7 +383,7 @@ class LearningApp: # Learning App class
             elif choice == "5":
                 print("Acknowledgements: Special thanks to...")
             elif choice == "6":
-                print("Settings: Coming soon...")
+                self.show_settings()
             elif choice == "0":
                 self.user.save()
                 print("Logging out...")
@@ -401,6 +401,76 @@ class LearningApp: # Learning App class
     def achievements(self): # Display achievements
         print("Achievements")
         self.user.achievements.display_achievements()
+
+    def show_settings(self): # Display settings
+        while True:
+            print("Settings:")
+            print("(1) Account Management")
+            print("(2) Display Settings")
+            print("(3) Sound Settings")
+
+            input = input("Choose an option: ")
+            if input == "1":
+                self.account_management()
+                break
+            elif input == "2":
+                self.display_settings()
+                break
+            elif input == "3":
+                self.sound_settings()
+                break
+            else:
+                print("Invalid input. Try again.")
+
+    def account_management(self): # Account management
+        while True:
+            print("Account Management:")
+            print("(1) Change Username")
+            print("(2) Change Password")
+            print("(3) Delete Account")
+            print("(0) Go Back")
+
+            input = input("Choose an option: ")
+            if input == "1":
+                self.change_username()
+                break
+            elif input == "2":
+                self.change_password()
+                break
+            elif input == "3":
+                self.delete_account()
+                break
+            elif input == "0":
+                break
+            else:
+                print("Invalid input. Try again.")
+
+    def change_username(self): # Change username
+        new_username = input("Enter new username: ")
+        self.user.user_name = new_username
+        self.user.save()
+        print("Username changed successfully.")
+
+    def change_password(self): # Change password
+        new_password = input("Enter new password: ")
+        self.user.password = new_password
+        self.user.save()
+        print("Password changed successfully.")
+
+    def delete_account(self): # Delete account
+        confirm = input("Are you sure you want to delete your account? (yes/no): ")
+        if confirm.lower() == "yes":
+            delete_user(self.user.user_id)
+            print("Account deleted successfully.")
+            self.start()
+        else:
+            print("Account deletion cancelled.")
+
+    def display_settings(self): # Display settings
+        print("Coming soon...")
+
+    def sound_settings(self): # Sound settings
+        print("Coming soon...")
 
     def run_modules(self): # Run modules
         print("Opening Modules...")
