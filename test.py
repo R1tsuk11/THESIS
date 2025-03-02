@@ -65,11 +65,19 @@ def delete_user(user_id):
 def get_next_user_id():
     arami = pymongo.MongoClient("mongodb://localhost:27017/")["arami"]
     aramidb = arami["counter"]
+    
+    # Ensure the initial value is set
+    aramidb.update_one(
+        {"_id": "user_id"},
+        {"$setOnInsert": {"seq": 0}},
+        upsert=True
+    )
+    
     ctr = aramidb.find_one_and_update(
         {"_id": "user_id"},
         {"$inc": {"seq": 1}},
         upsert=True,
-        return_document=True
+        return_document=pymongo.ReturnDocument.AFTER
     )
     return ctr["seq"]
 
@@ -409,14 +417,14 @@ class LearningApp: # Learning App class
             print("(2) Display Settings")
             print("(3) Sound Settings")
 
-            input = input("Choose an option: ")
-            if input == "1":
+            choice = input("Choose an option: ")
+            if choice == "1":
                 self.account_management()
                 break
-            elif input == "2":
+            elif choice == "2":
                 self.display_settings()
                 break
-            elif input == "3":
+            elif choice == "3":
                 self.sound_settings()
                 break
             else:
@@ -430,17 +438,17 @@ class LearningApp: # Learning App class
             print("(3) Delete Account")
             print("(0) Go Back")
 
-            input = input("Choose an option: ")
-            if input == "1":
+            choice = input("Choose an option: ")
+            if choice == "1":
                 self.change_username()
                 break
-            elif input == "2":
+            elif choice == "2":
                 self.change_password()
                 break
-            elif input == "3":
+            elif choice == "3":
                 self.delete_account()
                 break
-            elif input == "0":
+            elif choice == "0":
                 break
             else:
                 print("Invalid input. Try again.")
