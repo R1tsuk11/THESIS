@@ -1,8 +1,10 @@
 import pymongo
 import sys
 
+uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+
 def connect_to_mongoDB():
-    arami = pymongo.MongoClient("mongodb://localhost:27017/")
+    arami = pymongo.MongoClient(uri)
     aramidb = arami["arami"]
     usercol = aramidb["users"]
     return usercol
@@ -63,7 +65,7 @@ def delete_user(user_id):
     return
 
 def get_next_user_id():
-    arami = pymongo.MongoClient("mongodb://localhost:27017/")["arami"]
+    arami = pymongo.MongoClient(uri)["arami"]
     aramidb = arami["counter"]
     
     # Ensure the initial value is set
