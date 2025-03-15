@@ -1,5 +1,6 @@
 import pymongo
 import sys
+from qbank import question_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -189,10 +190,39 @@ class Achievements: # Achievements class
 
 
 class Level: # Level class
-    def __init__(self, questions_answers):
-        self.questions_answers = questions_answers
+    levelnum = 0
+    ques_ctr = 0
+    def __init__(self):
+        self.levelnum += 1
         self.completed = False
-        self.pass_threshold = 70
+        self.pass_threshold = 50
+
+    def reset_levelnum(self):
+        self.levelnum = 0
+
+    def create_questions(self):
+        """Processes the next 5 questions from question_bank and updates the counter."""
+        global question_bank  # Assuming question_bank is globally accessible
+        start = Level.ques_ctr  # Get the last processed index
+        end = min(start + 5, len(question_bank))  # Ensure we don’t exceed the list length
+
+        for i in range(start, end):
+            Question(question_bank[i])  # Process the question
+
+        Level.question_counter = end  # Update counter for the next batch
+
+        # Reset counter if all questions are processed (optional)
+        if Level.question_counter >= len(question_bank):
+            Level.question_counter = 0  # Resets when all questions are used
+
+class Question: # Question class
+    def __init__(self, qbank):
+        self.id = qbank["id"]
+        self.type = qbank["type"]
+        self.question = qbank["question"]
+        self.choices = qbank["choices"]
+        self.correct_answer = qbank["answer"]
+        self.vocabulary = qbank["vocabulary"]
 
 
 class ChapterTest: # Chapter Test class
