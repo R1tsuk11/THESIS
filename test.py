@@ -1,6 +1,6 @@
 import pymongo
 import sys
-from qbank import question_bank
+from qbank import module_1, module_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -142,16 +142,16 @@ class User: # User class
             else:
                 print("Invalid credentials. Try again.")
 
-    def analyze_proficiency(self, total_questions): # Analyze user proficiency
-        return (self.proficiency / total_questions) * 100
-
-    def record_answer(self, question, answer, correct): # Record user answer
+    def record_answer(self, question, answer, correct):  # Record user answer
         if correct:
             self.proficiency += 1
             self.questions_correct[question] = answer
             self.word_library.append(answer)
         else:
             self.questions_wrong[question] = answer
+
+    def analyze_proficiency(self, total_questions):  # Analyze user proficiency
+        return (self.proficiency / total_questions) * 100
 
     def save(self): # Save user data
         success = update_user(
@@ -189,31 +189,27 @@ class Achievements: # Achievements class
             print(f"{achievement}: {'Unlocked' if unlocked else 'Locked'}")
 
 
-class Level: # Level class
-    levelnum = 0
-    ques_ctr = 0
-    def __init__(self):
-        self.levelnum += 1
+class Level:  # Level class
+    def __init__(self, module_name, lesson_number):
+        self.module_name = module_name
+        self.lesson_name = f"Lesson {lesson_number}"
         self.completed = False
         self.pass_threshold = 50
-
-    def reset_levelnum(self):
-        self.levelnum = 0
+        self.questions_answers = self.create_questions()
 
     def create_questions(self):
-        """Processes the next 5 questions from question_bank and updates the counter."""
-        global question_bank  # Assuming question_bank is globally accessible
-        start = Level.ques_ctr  # Get the last processed index
-        end = min(start + 5, len(question_bank))  # Ensure we don’t exceed the list length
-
-        for i in range(start, end):
-            Question(question_bank[i])  # Process the question
-
-        Level.question_counter = end  # Update counter for the next batch
-
-        # Reset counter if all questions are processed (optional)
-        if Level.question_counter >= len(question_bank):
-            Level.question_counter = 0  # Resets when all questions are used
+        """Fetches questions from the specified module and lesson in question_bank."""
+        global module_bank  # Assuming question_bank is globally accessible
+        if self.module_name in module_bank:
+            module = module_bank[self.module_name]
+            if self.lesson_name in module:
+                return module[self.lesson_name]
+            else:
+                print(f"{self.lesson_name} not found in {self.module_name}.")
+                return []
+        else:
+            print(f"Module {self.module_name} not found in question bank.")
+            return []
 
 class Question: # Question class
     def __init__(self, qbank):
@@ -221,7 +217,7 @@ class Question: # Question class
         self.type = qbank["type"]
         self.question = qbank["question"]
         self.choices = qbank["choices"]
-        self.correct_answer = qbank["answer"]
+        self.correct_answer = qbank["correct_answer"]
         self.vocabulary = qbank["vocabulary"]
 
 
@@ -232,23 +228,25 @@ class ChapterTest: # Chapter Test class
         self.pass_threshold = 80
 
 
-class Module: # Module class
-    def __init__(self, name):
+class Module:  # Module class
+    def __init__(self, name, lesson_count):
         self.name = name
         self.completed = False
-        self.levels = self.create_levels()
+        self.levels = self.create_levels(lesson_count)
         self.chapter_test = self.create_chapter_test()
 
-    def create_levels(self): # Create levels
-        return [
-            Level({"Q1": "A1", "Q2": "A2"}),
-            Level({"Q3": "A3", "Q4": "A4"})
-        ]
-    
-    def create_chapter_test(self): # Create chapter test
-        return ChapterTest({"Q1": "A1", "Q2": "A2", "Q3": "A3", "Q4": "A4"})
+    def create_levels(self, lesson_count):  # Create levels
+        return [Level(self.name, lesson_number) for lesson_number in range(1, lesson_count + 1)]
 
-    def run_review(self, user): # Run review level
+    def create_chapter_test(self):  # Create chapter test
+        all_questions = {}
+        for level in self.levels:
+            for question in level.questions_answers:
+                if "correct_answer" in question:
+                    all_questions[question["question"]] = question["correct_answer"]
+        return ChapterTest(all_questions)
+
+    def run_review(self, user):  # Run review level
         print("Reviewing wrong answers...")
         while user.questions_wrong:
             for question, answer in list(user.questions_wrong.items()):
@@ -256,9 +254,10 @@ class Module: # Module class
                 print(f"Your answer: {answer}")
                 correct_answer = None
                 for level in self.levels:
-                    if question in level.questions_answers:
-                        correct_answer = level.questions_answers[question]
-                        break
+                    for q in level.questions_answers:
+                        if q["question"] == question and "correct_answer" in q:
+                            correct_answer = q["correct_answer"]
+                            break
                 if correct_answer is None and question in self.chapter_test.questions_answers:
                     correct_answer = self.chapter_test.questions_answers[question]
                 
@@ -270,25 +269,20 @@ class Module: # Module class
                         del user.questions_wrong[question]
                     else:
                         print("Incorrect. Please try again.")
+                else:
+                    input("Press enter to continue")
         print("Review completed.")
         if not user.questions_wrong:
             print("No wrong answers to review.")
 
-    def run_levels_list(self, user): # Run levels list
-        print("Opening levels...")
-        print("Levels List: ")
+    def run_levels_list(self, user):  # Run levels list
         while True:
-            for level in self.levels:
-                if level.completed:
-                    print(f"Level {self.levels.index(level) + 1} (Completed)")
-                    continue
-                num = self.levels.index(level) + 1
-                print(f"Level {num}")
-            if all(level.completed for level in self.levels):
-                print("Chapter Test")
-            else:
-                print("Chapter Test (Locked)")
-            choice = input(f"Choose a level number to start (Enter 0 to go back) (Enter {len(self.levels) + 1} to attempt Chapter Test): ")
+            print("Levels List:")
+            for i, level in enumerate(self.levels, start=1):
+                status = "Completed" if level.completed else "Not Completed"
+                print(f"Level {i}: {level.lesson_name} ({status})")
+            
+            choice = input("Choose a level number to start (Enter 0 to go back) (Enter {} to attempt Chapter Test): ".format(len(self.levels) + 1))
             try:
                 choice = int(choice)
                 if choice == 0:
@@ -330,15 +324,12 @@ class Module: # Module class
                 continue
 
             if level in self.levels and not level.completed:
-                self.run_level(level, user)
-                proficiency_percentage = user.analyze_proficiency(len(level.questions_answers))
+                proficiency_percentage = self.run_level(level, user)
                 if proficiency_percentage >= level.pass_threshold:
                     level.completed = True
-                    print(f"Level {choice} completed with {proficiency_percentage:.2f}% proficiency!")
-                    user.achievements.unlock_achievement("First Level Completed")
+                    print("Level completed!")
                     if all(level.completed for level in self.levels):
                         user.achievements.unlock_achievement("All Levels Completed")
-                    continue
                 else:
                     print(f"Review required before proceeding. Proficiency: {proficiency_percentage:.2f}%")
                     self.run_review(user)
@@ -350,21 +341,36 @@ class Module: # Module class
                 print("Invalid input. Try again.")
                 continue
 
-    def run_level(self, level, user): # Run level
+    def run_level(self, level, user):  # Run level
         user.proficiency = 0
-        for question, correct_answer in level.questions_answers.items():
-            print(f"Question: {question}")
-            answer = input()
-            user.record_answer(question, answer, answer == correct_answer)
-        return
+        total_questions = 0
+        for i, question in enumerate(level.questions_answers, start=1):
+            print(f"Question {i}: {question['question']}")
+            if "choices" in question:
+                for j, choice in enumerate(question["choices"], start=1):
+                    print(f"{j}. {choice}")
+            if "correct_answer" in question:
+                total_questions += 1
+                answer = input().strip().lower()
+                if answer == question['correct_answer'].strip().lower():
+                    print("Correct!")
+                    user.record_answer(question['question'], answer, True)
+                else:
+                    print(f"Wrong! The correct answer is: {question['correct_answer']}")
+                    user.record_answer(question['question'], answer, False)
+            else:
+                input("Press enter to continue")
+        proficiency_percentage = user.analyze_proficiency(total_questions)
+        print(f"Proficiency: {proficiency_percentage:.2f}%")
+        return proficiency_percentage
 
-    def run_chapter_test(self, user): # Run chapter test
+    def run_chapter_test(self, user):  # Run chapter test
         user.proficiency = 0
         print(f"Chapter Test for {self.name}")
-        for question, correct_answer in self.chapter_test.questions_answers.items():
-            print(f"Question: {question}")
-            answer = input()
-            user.record_answer(question, answer, answer == correct_answer)
+        for i, (question, correct_answer) in enumerate(self.chapter_test.questions_answers.items(), start=1):
+            print(f"Question {i}: {question}")
+            answer = input().strip().lower()
+            user.record_answer(question, answer, answer == correct_answer.strip().lower())
 
 
 class LearningApp: # Learning App class
@@ -378,10 +384,10 @@ class LearningApp: # Learning App class
         print(f"Found {user_count} users in database")
         return user_count > 0
 
-    def create_modules(self): # Create modules
+    def create_modules(self):  # Create modules
         return [
-            Module("Basics"),
-            Module("Greetings"),
+            Module("Module 1", len(module_1)),
+            # Add more modules as needed
         ]
 
     def start(self): # Start the learning app
