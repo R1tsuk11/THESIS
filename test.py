@@ -1,14 +1,21 @@
 import pymongo
 import sys
+from pymongo.errors import ConfigurationError
 from qbank import module_1, module_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
 def connect_to_mongoDB():
-    arami = pymongo.MongoClient(uri)
-    aramidb = arami["arami"]
-    usercol = aramidb["users"]
-    return usercol
+    try:
+        arami = pymongo.MongoClient(uri)
+        aramidb = arami["arami"]
+        usercol = aramidb["users"]
+        levelcol = aramidb["levels"]
+        modulecol = aramidb["modules"]
+        return usercol, levelcol, modulecol
+    except ConfigurationError as e:
+        print(f"Failed to connect to MongoDB: {e}")
+        sys.exit("Terminating the program due to MongoDB connection failure.")
 
 def test_mongoDB():
     usercol = connect_to_mongoDB()
@@ -19,8 +26,8 @@ def test_mongoDB():
         sys.exit("Terminating the program due to MongoDB connection failure.")
     
 
-def insert_user(user_id, user_name, proficiency, password, word_library, questions_wrong, questions_correct, achievements):
-    usercol = connect_to_mongoDB()
+def insert_user(user_id, user_name, proficiency, password, word_library, questions_wrong, questions_correct, achievements, modules):
+    usercol, levelcol, modulecol = connect_to_mongoDB()
     user = {
         "user_id": user_id,
         "user_name": user_name,
@@ -29,17 +36,17 @@ def insert_user(user_id, user_name, proficiency, password, word_library, questio
         "word_library": word_library,
         "questions_wrong": questions_wrong,
         "questions_correct": questions_correct,
-        "achievements": achievements
+        "achievements": achievements,
+        "modules": modules
     }
     if usercol.insert_one(user):
         print("User inserted successfully.")
     else:
         print("Failed to insert user.")
-    
     return
 
-def update_user(user_id, user_name, proficiency, password, word_library, questions_wrong, questions_correct, achievements):
-    usercol = connect_to_mongoDB()
+def update_user(user_id, user_name, proficiency, password, word_library, questions_wrong, questions_correct, achievements, modules):
+    usercol, levelcol, modulecol = connect_to_mongoDB()
     user = {
         "user_id": user_id,
         "user_name": user_name,
@@ -48,13 +55,23 @@ def update_user(user_id, user_name, proficiency, password, word_library, questio
         "word_library": word_library,
         "questions_wrong": questions_wrong,
         "questions_correct": questions_correct,
-        "achievements": achievements
+        "achievements": achievements,
+        "modules": modules
     }
+    print(f"Updating user: {user_id}")
+    print(f"Data to update: {user}")
     result = usercol.update_one(
         {"user_id": user_id}, 
         {"$set": user}
     )
-    return result.modified_count > 0
+    print(f"Update result: {result.raw_result}")
+    if result.modified_count > 0:
+        return True
+    else:
+        print(f"Failed to update user: {user_id}")
+        print(f"Matched Count: {result.matched_count}")
+        print(f"Modified Count: {result.modified_count}")
+        return False
 
 def delete_user(user_id):
     usercol = connect_to_mongoDB()
@@ -89,7 +106,7 @@ def find_user(user_name, password):
     Find a user by username and password
     Returns the user document or None if not found
     """
-    usercol = connect_to_mongoDB()
+    usercol, levelcol, modulecol = connect_to_mongoDB()  # Unpack the collections
     user = usercol.find_one({"user_name": user_name, "password": password})
     if user:
         print("Successful login.")
@@ -106,13 +123,14 @@ class User: # User class
         self.questions_wrong = {}
         self.questions_correct = {}
         self.achievements = Achievements()
+        self.modules = []
 
     def signup(self): # Sign up a new user
         self.user_id = get_next_user_id()
         print("Signing up new user...")
         self.user_name = input("Enter your username: ")
         self.password = input("Enter your password: ")
-        insert_user(self.user_id, self.user_name, self.proficiency, self.password, self.word_library, self.questions_wrong, self.questions_correct, self.achievements.achievements)
+        insert_user(self.user_id, self.user_name, self.proficiency, self.password, self.word_library, self.questions_wrong, self.questions_correct, self.achievements.achievements, self.modules)
         print("User signed up successfully.")
         LearningApp().start()
 
@@ -134,6 +152,7 @@ class User: # User class
                 self.questions_wrong = user["questions_wrong"]
                 self.questions_correct = user["questions_correct"]
                 self.achievements.achievements = user["achievements"]
+                self.modules = user.get("modules", [])  # Use .get() to handle missing 'modules' key
                 
                 # Use the existing app instance
                 if app:
@@ -153,7 +172,7 @@ class User: # User class
     def analyze_proficiency(self, total_questions):  # Analyze user proficiency
         return (self.proficiency / total_questions) * 100
 
-    def save(self): # Save user data
+    def save(self):  # Save user data
         success = update_user(
             self.user_id,
             self.user_name,
@@ -162,12 +181,22 @@ class User: # User class
             self.word_library,
             self.questions_wrong,
             self.questions_correct,
-            self.achievements.achievements
+            self.achievements.achievements,
+            self.modules
         )
         if success:
             print("User data saved successfully.")
         else:
             print("Failed to save user data.")
+            print(f"User ID: {self.user_id}")
+            print(f"User Name: {self.user_name}")
+            print(f"Proficiency: {self.proficiency}")
+            print(f"Password: {self.password}")
+            print(f"Word Library: {self.word_library}")
+            print(f"Questions Wrong: {self.questions_wrong}")
+            print(f"Questions Correct: {self.questions_correct}")
+            print(f"Achievements: {self.achievements.achievements}")
+            print(f"Modules: {self.modules}")
 
 class Achievements: # Achievements class
     def __init__(self): # Initialize achievements
@@ -225,12 +254,13 @@ class ChapterTest: # Chapter Test class
     def __init__(self, questions_answers):
         self.questions_answers = questions_answers
         self.completed = False
-        self.pass_threshold = 80
+        self.pass_threshold = 70
 
 
 class Module:  # Module class
-    def __init__(self, name, lesson_count):
+    def __init__(self, name, user_id, lesson_count):
         self.name = name
+        self.user_id = user_id
         self.completed = False
         self.levels = self.create_levels(lesson_count)
         self.chapter_test = self.create_chapter_test()
@@ -245,6 +275,29 @@ class Module:  # Module class
                 if "correct_answer" in question:
                     all_questions[question["question"]] = question["correct_answer"]
         return ChapterTest(all_questions)
+
+    def save(self):
+        modulecol = connect_to_mongoDB()[2]
+        module = {
+            "name": self.name,
+            "user_id": self.user_id,
+            "completed": self.completed,
+            "levels": [level.__dict__ for level in self.levels],
+            "chapter_test": self.chapter_test.__dict__
+        }
+        modulecol.update_one(
+            {"name": self.name, "user_id": self.user_id},
+            {"$set": module},
+            upsert=True
+        )
+
+    def load(self):
+        modulecol = connect_to_mongoDB()[2]
+        module = modulecol.find_one({"name": self.name, "user_id": self.user_id})
+        if module:
+            self.completed = module["completed"]
+            self.levels = [Level(level["module_name"], level["lesson_name"]) for level in module["levels"]]
+            self.chapter_test = ChapterTest(module["chapter_test"]["questions_answers"])
 
     def run_review(self, user):  # Run review level
         print("Reviewing wrong answers...")
@@ -275,7 +328,7 @@ class Module:  # Module class
         if not user.questions_wrong:
             print("No wrong answers to review.")
 
-    def run_levels_list(self, user):  # Run levels list
+    def run_levels_list(self, user):
         while True:
             print("Levels List:")
             for i, level in enumerate(self.levels, start=1):
@@ -303,6 +356,8 @@ class Module:  # Module class
                                         user.achievements.unlock_achievement("All Modules Completed")
                                         if all(user.achievements.achievements.values()):
                                             user.achievements.unlock_achievement("All Achievements Unlocked")
+                                self.save()  # Save module progress
+                                user.save()  # Save user progress
                                 return
                         else:
                             print("Chapter Test not passed. Review required.")
@@ -330,6 +385,8 @@ class Module:  # Module class
                     print("Level completed!")
                     if all(level.completed for level in self.levels):
                         user.achievements.unlock_achievement("All Levels Completed")
+                    self.save()  # Save module progress
+                    user.save()  # Save user progress
                 else:
                     print(f"Review required before proceeding. Proficiency: {proficiency_percentage:.2f}%")
                     self.run_review(user)
@@ -341,7 +398,7 @@ class Module:  # Module class
                 print("Invalid input. Try again.")
                 continue
 
-    def run_level(self, level, user):  # Run level
+    def run_level(self, level, user):
         user.proficiency = 0
         total_questions = 0
         for i, question in enumerate(level.questions_answers, start=1):
@@ -379,14 +436,14 @@ class LearningApp: # Learning App class
         self.modules = self.create_modules()
 
     def check_users(self): # Check if users exist
-        usercol = connect_to_mongoDB()
+        usercol, levelcol, modulecol = connect_to_mongoDB()
         user_count = usercol.count_documents({})
         print(f"Found {user_count} users in database")
         return user_count > 0
 
     def create_modules(self):  # Create modules
         return [
-            Module("Module 1", len(module_1)),
+            Module("Module 1", self.user.user_id, len(module_1)),
             # Add more modules as needed
         ]
 
@@ -402,6 +459,7 @@ class LearningApp: # Learning App class
                     choice = input("Choose an option: ")
                     if choice == "1":
                         self.user.login(app=self)  # Pass the current app instance
+                        self.create_modules()
                         break
                     elif choice == "2":
                         self.user.signup()
