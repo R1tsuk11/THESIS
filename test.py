@@ -175,7 +175,10 @@ class User:  # User class
         if correct:
             self.proficiency += 1
             self.questions_correct[question] = answer
-            self.word_library.append(answer)
+            # Extract vocabulary from the question
+            vocabulary = question.get("vocabulary")
+            if vocabulary and vocabulary not in self.word_library:
+                self.word_library.append(vocabulary)
         else:
             self.questions_wrong[question] = answer
 
@@ -484,11 +487,19 @@ class Module:  # Module class
 
     def run_chapter_test(self, user):  # Run chapter test
         user.proficiency = 0
+        total_questions = len(self.chapter_test.questions_answers)
         print(f"Chapter Test for {self.name}")
         for i, (question, correct_answer) in enumerate(self.chapter_test.questions_answers.items(), start=1):
             print(f"Question {i}: {question}")
+            # Assuming choices are stored in the question dictionary
+            if "choices" in question:
+                for j, choice in enumerate(question["choices"], start=1):
+                    print(f"{j}. {choice}")
             answer = input().strip().lower()
             user.record_answer(question, answer, answer == correct_answer.strip().lower())
+        proficiency_percentage = user.analyze_proficiency(total_questions)
+        print(f"Proficiency: {proficiency_percentage:.2f}%")
+        return proficiency_percentage
 
 class LearningApp:  # Learning App class
     def __init__(self):  # Initialize the learning app
