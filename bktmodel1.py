@@ -5,12 +5,12 @@ from pymongo import MongoClient
 
 def main():
     # Connect to MongoDB
-    client = MongoClient('mongodb://localhost:27017/')
+    client = MongoClient('mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/?tls=true&tlsInsecure=true')
     db = client['arami']
     collection = db['users']
 
     # Fetch user data from MongoDB
-    user_data_cursor = collection.find({'user_id': 7})  # Fetch data for user_id 7 for debugging
+    user_data_cursor = collection.find({'user_id': 8})  # Fetch data for user_id 8 for debugging
     userData = pd.DataFrame(list(user_data_cursor))
 
     # Print the columns of the userData DataFrame
@@ -21,21 +21,42 @@ def main():
     print(userData.head())
 
     # Ensure the required fields are present
-    if 'questions_correct' not in userData.columns:
-        raise ValueError("The MongoDB data does not contain the required 'questions_correct' field.")
+    if 'questions_correct' not in userData.columns or 'questions_wrong' not in userData.columns:
+        raise ValueError("The MongoDB data does not contain the required 'questions_correct' or 'questions_wrong' field.")
 
-    # Extract questions_answers data from questions_correct
+    # Extract vocabulary words and group questions by vocabulary
     bkt_data = []
     for user_id, user_row in userData.iterrows():
-        if 'questions_correct' in user_row and isinstance(user_row['questions_correct'], dict):
+        vocab_correct = {}
+        vocab_wrong = {}
+
+        # Process questions_correct
+        if isinstance(user_row['questions_correct'], dict):
             for question, answer in user_row['questions_correct'].items():
-                skill_name = question  # Use question as skill name
-                correct = True  # Since it's questions_correct, we assume the answer is correct
-                bkt_data.append({
-                    'user_id': user_row['user_id'],
-                    'skill_name': skill_name,
-                    'correct': correct
-                })
+                vocab_word = extract_vocab_word(question)  # Function to extract vocabulary word from question
+                if vocab_word not in vocab_correct:
+                    vocab_correct[vocab_word] = 0
+                vocab_correct[vocab_word] += 1
+
+        # Process questions_wrong
+        if isinstance(user_row['questions_wrong'], dict):
+            for question, answer in user_row['questions_wrong'].items():
+                vocab_word = extract_vocab_word(question)  # Function to extract vocabulary word from question
+                if vocab_word not in vocab_wrong:
+                    vocab_wrong[vocab_word] = 0
+                vocab_wrong[vocab_word] += 1
+
+        # Prepare BKT data for each vocabulary word
+        for vocab_word in set(vocab_correct.keys()).union(vocab_wrong.keys()):
+            correct = vocab_correct.get(vocab_word, 0)
+            wrong = vocab_wrong.get(vocab_word, 0)
+            total = correct + wrong
+            proficiency = correct / total if total > 0 else 0
+            bkt_data.append({
+                'user_id': user_row['user_id'],
+                'skill_name': vocab_word,
+                'correct': proficiency
+            })
 
     bkt_data = pd.DataFrame(bkt_data)
 
@@ -59,6 +80,14 @@ def main():
 
     print("Predictions:")
     print(predictions)
+
+def extract_vocab_word(question):
+    # Function to extract vocabulary word from question
+    # Assuming question is a string and vocabulary is part of the question text
+    # Modify this function based on your actual question format
+    if isinstance(question, dict):
+        return question.get('vocabulary', '')
+    return question
 
 if __name__ == '__main__':
     main()

@@ -43,7 +43,7 @@ module_1 = {
             "id": 6,
             "type": "Pronounce",
             "question": "How do you pronounce 'gihapon'?",
-            "answer": "Listen and repeat 'gihapon' (too).",
+            "correct_answer": "gi-ha-pon",
             "vocabulary": "gihapon"
         },
         {

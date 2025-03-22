@@ -174,13 +174,13 @@ class User:  # User class
     def record_answer(self, question, answer, correct):  # Record user answer
         if correct:
             self.proficiency += 1
-            self.questions_correct[question] = answer
+            self.questions_correct[question['question']] = answer
             # Extract vocabulary from the question
             vocabulary = question.get("vocabulary")
             if vocabulary and vocabulary not in self.word_library:
                 self.word_library.append(vocabulary)
         else:
-            self.questions_wrong[question] = answer
+            self.questions_wrong[question['question']] = answer
 
     def analyze_proficiency(self, total_questions):  # Analyze user proficiency
         return (self.proficiency / total_questions) * 100
@@ -472,31 +472,17 @@ class Module:  # Module class
                 answer = input().strip().lower()
                 if answer == question['correct_answer'].strip().lower():
                     print("Correct!")
-                    user.record_answer(question['question'], answer, True)
+                    user.record_answer(question, answer, True)
                 else:
                     print(f"Wrong! The correct answer is: {question['correct_answer']}")
-                    user.record_answer(question['question'], answer, False)
+                    user.record_answer(question, answer, False)
             else:
                 input("Press enter to continue")
+                # Record the vocabulary even if there's no correct answer
+                user.record_answer(question, None, False)
         if total_questions == 0:
             print("No questions available for this level.")
             return 0
-        proficiency_percentage = user.analyze_proficiency(total_questions)
-        print(f"Proficiency: {proficiency_percentage:.2f}%")
-        return proficiency_percentage
-
-    def run_chapter_test(self, user):  # Run chapter test
-        user.proficiency = 0
-        total_questions = len(self.chapter_test.questions_answers)
-        print(f"Chapter Test for {self.name}")
-        for i, (question, correct_answer) in enumerate(self.chapter_test.questions_answers.items(), start=1):
-            print(f"Question {i}: {question}")
-            # Assuming choices are stored in the question dictionary
-            if "choices" in question:
-                for j, choice in enumerate(question["choices"], start=1):
-                    print(f"{j}. {choice}")
-            answer = input().strip().lower()
-            user.record_answer(question, answer, answer == correct_answer.strip().lower())
         proficiency_percentage = user.analyze_proficiency(total_questions)
         print(f"Proficiency: {proficiency_percentage:.2f}%")
         return proficiency_percentage
