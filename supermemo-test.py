@@ -41,12 +41,11 @@ def simulate_supermemo(flashcards, days):
 
 if __name__ == "__main__":
     sample_data = [
-        ("Hello", "Hola"),
-        ("Goodbye", "Adiós"),
-        ("Please", "Por favor"),
-        ("Thank you", "Gracias"),
-        ("Yes", "Sí"),
-        ("No", "No")
+        ("Maupay", "Good"),
+        ("Aga", "Morning"),
+        ("Gihapon", "Also"),
+        ("Gab-i", "Night"),
+        ("Kulop", "Thunder")
     ]
 
     flashcards = [Flashcard(question, answer) for question, answer in sample_data]
