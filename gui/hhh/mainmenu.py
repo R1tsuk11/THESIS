@@ -7,23 +7,11 @@ def main_menu_page(page: ft.Page):
         """Navigates to levels page"""
         page.go("/levels")
 
-    # Header
+    # Header - empty blue container with no text
     header = ft.Container(
-        content=ft.Row(
-            [
-                ft.Text(
-                    "arami",
-                    size=24,
-                    color="#4169E1",
-                    weight=ft.FontWeight.BOLD,
-                    italic=True
-                )
-            ],
-            alignment=ft.MainAxisAlignment.CENTER
-        ),
-        bgcolor="#2B0B5F",
+        content=ft.Row([], alignment=ft.MainAxisAlignment.CENTER),  # Empty row
+        bgcolor="#0066FF",  # Blue color matching the image
         height=60,
-        border_radius=ft.border_radius.only(bottom_left=20, bottom_right=20),
         padding=10
     )
 
@@ -32,11 +20,11 @@ def main_menu_page(page: ft.Page):
         content=ft.Text(
             "Modules",
             size=18,
-            color="#000000",
+            color="#FFFFFF",  # White text
             weight=ft.FontWeight.BOLD,
             text_align=ft.TextAlign.CENTER,
         ),
-        bgcolor="#A17BFB",
+        bgcolor="#4285F4",  # Blue button color from image
         width=300,
         height=50,
         border_radius=25,
@@ -45,7 +33,7 @@ def main_menu_page(page: ft.Page):
     )
 
     # Function to create a module card
-    def create_module_card(main_button_text, sub_button_text, main_color="#FFD580", sub_color="#DDDDDD"):
+    def create_module_card(main_button_text, sub_button_text, main_color, sub_color, bg_color="#2A2A2A"):
         return ft.Container(
             content=ft.Column(
                 [
@@ -57,39 +45,41 @@ def main_menu_page(page: ft.Page):
                                     color="#000000",
                                     weight=ft.FontWeight.BOLD,
                                     size=16,
+                                    text_align=ft.TextAlign.CENTER,  # Center text
                                 ),
                                 bgcolor=main_color,
                                 border_radius=15,
                                 padding=10,
                                 width=180,
-                                alignment=ft.alignment.center,
+                                alignment=ft.alignment.center,  # Center content
                             ),
                             ft.Icon(
                                 ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
-                                color="#000000",
+                                color="#FFFFFF",  # White arrow
                                 size=20,
                             ),
                         ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,  # Keep arrow at right
                     ),
                     ft.Container(
                         content=ft.Text(
                             sub_button_text,
-                            color="#000000",
+                            color="#FFFFFF",  # White text
                             size=14,
-                            text_align=ft.TextAlign.CENTER,
+                            text_align=ft.TextAlign.CENTER,  # Center text
                         ),
                         bgcolor=sub_color,
                         border_radius=15,
                         padding=10,
                         width=200,
-                        alignment=ft.alignment.center,
-                        margin=ft.margin.only(top=10, left=10),
+                        alignment=ft.alignment.center,  # Center content
+                        margin=ft.margin.only(top=10),  # Remove left margin to center it
                     ),
                 ],
                 spacing=5,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,  # Center column contents
             ),
-            bgcolor="#E6B9B9",
+            bgcolor=bg_color,  # Dark card background
             border_radius=15,
             padding=15,
             margin=ft.margin.only(bottom=15),
@@ -97,10 +87,10 @@ def main_menu_page(page: ft.Page):
             on_click=navigate_to_levels,  # Navigates to Levels when clicked
         )
 
-    # Create the module cards
-    kamustahay_card = create_module_card("Kamustahay!", "Greetings and Introductions", "#FFD580")
-    oras_card = create_module_card("Oras", "Time / Date", "#74CFCF", "#B5D8D8")
-    pagkain_card = create_module_card("Pagkain", "Ordering Food", "#74CFCF", "#B5D8D8")
+    # Create the module cards with updated colors
+    kamustahay_card = create_module_card("Kamustahay!", "Greetings and Introductions", "#FFD580", "#8B7E4F")
+    oras_card = create_module_card("Oras", "Time / Date", "#74CFCF", "#7A9E9E")
+    pagkain_card = create_module_card("Pangaan", "Ordering Food", "#74CFCF", "#7A9E9E")
 
     # Create the bottom navigation bar
     bottom_nav = ft.Container(
@@ -134,26 +124,38 @@ def main_menu_page(page: ft.Page):
             ],
             alignment=ft.MainAxisAlignment.SPACE_AROUND,
         ),
-        bgcolor="#2B0B5F",
+        bgcolor="#280082",  # Dark purple color
         height=60,
-        border_radius=ft.border_radius.only(top_left=20, top_right=20),
         padding=10
     )
 
-    # Main content
+    # Main content with centered items
     content = ft.Column(
         [
             header,
-            modules_title,
-            kamustahay_card,
-            oras_card,
-            pagkain_card,
-            ft.Container(expand=True),
+            ft.Container(
+                content=ft.Column(
+                    [
+                        modules_title,
+                        kamustahay_card,
+                        oras_card,
+                        pagkain_card,
+                    ],
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                alignment=ft.alignment.center,
+                expand=True
+            ),
             bottom_nav,
         ],
         spacing=0,
         expand=True,
     )
 
-    page.views.append(ft.View("/main-menu", controls=[content], bgcolor="#000000"))
+    # Configure page settings
+    page.padding = 0
+    page.bgcolor = "#FFFFFF"  # Set page background to white
+    
+    # Add view with updated styling
+    page.views.append(ft.View("/main-menu", controls=[content], padding=0, bgcolor="#FFFFFF"))  # White background
     page.update()
