@@ -10,18 +10,15 @@ MIN_QUESTIONS = 1
 def extract_vocab_word(question_text, user_data):
     """Finds the correct vocabulary word by matching the question with the module's question data."""
     
-    # If the question is stored as a dictionary (it should be a string), attempt retrieval
     if isinstance(question_text, dict):
         return question_text.get('vocabulary', 'unknown')
 
-    # Search for the correct vocabulary in the user's stored modules
     for module in user_data.get('modules', []):
         for level in module.get('levels', []):
             for question_data in level.get('questions_answers', []):
                 if question_data.get('question') == question_text:
-                    return question_data.get('vocabulary', 'unknown')  # Retrieve correct vocabulary
+                    return question_data.get('vocabulary', 'unknown')  
 
-    # Fallback: Extract last word using regex if no match is found
     words = re.findall(r'\b[a-zA-Z]+\b', question_text)
     return words[-1] if words else 'unknown'
 
@@ -39,7 +36,6 @@ def main():
     print("Columns in userData:", userData.columns)
     print("First few rows of userData:\n", userData.head())
 
-    # Ensure required fields exist
     if 'questions_correct' not in userData.columns or 'questions_wrong' not in userData.columns:
         raise ValueError("The MongoDB data does not contain 'questions_correct' or 'questions_wrong' fields.")
 
@@ -57,6 +53,11 @@ def main():
                 print(f"Extracted vocabulary (correct): {vocab_word}")
                 if vocab_word and vocab_word != 'unknown':  
                     vocab_correct[vocab_word] = vocab_correct.get(vocab_word, 0) + 1
+                    bkt_data.append({
+                        'user_id': user_row['user_id'],
+                        'skill_name': vocab_word,
+                        'correct': 1
+                    })
 
         # Process questions_wrong
         if isinstance(user_row['questions_wrong'], dict):
@@ -66,75 +67,73 @@ def main():
                 print(f"Extracted vocabulary (wrong): {vocab_word}")
                 if vocab_word and vocab_word != 'unknown':  
                     vocab_wrong[vocab_word] = vocab_wrong.get(vocab_word, 0) + 1
-
-        # Print vocab counts before filtering
-        print("Vocab correct counts:", vocab_correct)
-        print("Vocab wrong counts:", vocab_wrong)
-
-        # Prepare BKT data per vocabulary word
-        for vocab_word in set(vocab_correct.keys()).union(vocab_wrong.keys()):
-            correct = vocab_correct.get(vocab_word, 0)
-            wrong = vocab_wrong.get(vocab_word, 0)
-            total = correct + wrong
-
-            # Reduce minimum attempts for testing
-            if total >= MIN_QUESTIONS:
-                proficiency = correct / total  
-                for _ in range(total):  
                     bkt_data.append({
                         'user_id': user_row['user_id'],
                         'skill_name': vocab_word,
-                        'correct': 1 if correct > wrong else 0,
-                        'guess': 0.25,  # Default guess parameter
-                        'slip': 0.1    # Default slip parameter
+                        'correct': 0
                     })
 
     # Convert to DataFrame
     bkt_data = pd.DataFrame(bkt_data)
 
-    # Handle empty dataset case
     if bkt_data.empty:
         raise ValueError("The prepared BKT data is empty. Please check the data preparation steps.")
 
-    print("BKT Data:\n", bkt_data)
+    print("Initial BKT Data:\n", bkt_data)
 
-    # Ensure required columns exist
-    required_columns = {'user_id', 'skill_name', 'correct', 'guess', 'slip'}
-    if not required_columns.issubset(bkt_data.columns):
-        raise ValueError("The BKT data is missing required columns. Expected: {}".format(required_columns))
-
-    # Fit BKT Model normally
+    # Initialize BKT Model
     model = Model()
-    model.fit(data=bkt_data)  # NO multigs=True
+    updated_params = {}
 
-    # Set different guess/slip values per skill
-    skill_params = {
-        "Kamusta ka?": {"p_guess": 0.2, "p_slip": 0.1},
-        "gihapon": {"p_guess": 0.25, "p_slip": 0.1},
-        "Maupay nga aga": {"p_guess": 0.15, "p_slip": 0.05},
-        "Pakadto": {"p_guess": 0.3, "p_slip": 0.1},
-    }
+    # Process each vocabulary one by one
+    for vocab_word in set(bkt_data['skill_name']):
+        subset = bkt_data[bkt_data['skill_name'] == vocab_word]
 
-    # Update skill parameters after fitting
-    for skill, params in skill_params.items():
-        if skill in model.params():
-            model.params()[skill]['p_guess'] = params['p_guess']
-            model.params()[skill]['p_slip'] = params['p_slip']
+        # Train BKT only on first instance
+        model.fit(data=subset.iloc[[0]])  
 
-    # Predict user proficiency
+        # Process each question individually and update parameters
+        for index, row in subset.iterrows():
+            # Predict per question based on prior knowledge
+            prediction = model.predict(data=pd.DataFrame([row]))  
+
+            # Get updated guess/slip parameters for the skill
+            learned_params = model.params().get(vocab_word, {})
+            updated_guess = learned_params.get('p_guess', 0.25)
+            updated_slip = learned_params.get('p_slip', 0.1)
+
+            # Store the updated parameters
+            updated_params[vocab_word] = (updated_guess, updated_slip)
+
+            # Apply the updated guess/slip dynamically
+            subset.loc[index, 'guess'] = updated_guess
+            subset.loc[index, 'slip'] = updated_slip
+
+            # Retrain the model using the latest knowledge for the next question
+            model.fit(data=subset.iloc[:index+1])
+
+        # Merge updated subset back into main dataset
+        bkt_data.loc[bkt_data['skill_name'] == vocab_word] = subset
+
+    # Predict user proficiency after all updates
     predictions = model.predict(data=bkt_data)
 
     print("Predictions:")
     print(predictions)
+
     print("Available columns in predictions:", predictions.columns)
 
-    # Ensure the 'guess' and 'slip' columns exist before using them
-    if 'guess' in predictions.columns and 'slip' in predictions.columns:
-        predictions['confidence'] = 1 - predictions['guess'] - predictions['slip']
-        print("Predictions with Confidence Scores:")
-        print(predictions[['user_id', 'skill_name', 'correct_predictions', 'state_predictions', 'confidence']])
-    else:
-        print("Warning: 'guess' and 'slip' columns are missing from the predictions output.")
+    # Apply updated guess/slip values dynamically
+    for skill in updated_params.keys():
+        if skill in predictions['skill_name'].values:
+            predictions.loc[predictions['skill_name'] == skill, 'guess'] = updated_params[skill][0]
+            predictions.loc[predictions['skill_name'] == skill, 'slip'] = updated_params[skill][1]
+
+    # Compute confidence dynamically
+    predictions['confidence'] = 1 - predictions['guess'] - predictions['slip']
+
+    print("Predictions with Confidence Scores:")
+    print(predictions[['user_id', 'skill_name', 'correct_predictions', 'state_predictions', 'confidence']])
 
 if __name__ == '__main__':
     main()
