@@ -20,12 +20,15 @@ def check_user(username, password):
     usercol = connect_to_mongoDB()
     user = usercol.find_one({"user_name": username, "password": password})
     if user:
-        return user
+        return user, user["user_id"]  # Return user data and user ID
     else:
         return None
 
-def goto_main_menu(page):
-    page.go("/main-menu")
+def goto_main_menu(page, user_id):
+    """Navigates to the main menu with the logged in user."""
+    page.session.set("user_id", user_id)  # Store user ID in session
+    route = "/main-menu"
+    page.go(route)
     page.update()
 
 def goto_register(page):
@@ -59,7 +62,7 @@ def login_page(page: ft.Page):
             page.open(ft.SnackBar(ft.Text(f"Welcome {username}!"), bgcolor="#4CAF50", duration=2000))
             page.update()
             await asyncio.sleep(3)
-            goto_main_menu(page)
+            goto_main_menu(page, user_exists[1])  # Pass user ID to the main menu
             page.update()
         else:
             page.open(ft.SnackBar(ft.Text(f"Invalid Credentials!"), bgcolor="#4CAF50"))

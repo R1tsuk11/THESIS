@@ -205,3 +205,34 @@ module_1 = {
 module_bank = {
     "Module 1": module_1,
 }
+
+achievement_bank = {
+    "achv_1": {
+        "id": 1,
+        "name": "First Level Completed",
+        "description": "Complete the first level.",
+        "icon": "assets/achievements/level_completed.png",
+        "completed": False
+    },
+    "achv_2": {
+        "id": 2,
+        "name": "First Module Completed",
+        "description": "Complete the first module.",
+        "icon": "assets/achievements/module_completed.png",
+        "completed": False
+    },
+    "achv_3": {
+        "id": 3,
+        "name": "All Modules Completed",
+        "description": "Complete all modules.",
+        "icon": "assets/achievements/all_modules_completed.png",
+        "completed": False
+    },
+    "achv_4": {
+        "id": 4,
+        "name": "All Achievements Completed",
+        "description": "Complete all levels.",
+        "icon": "assets/achievements/all_levels_completed.png",
+        "completed": False
+    }
+}

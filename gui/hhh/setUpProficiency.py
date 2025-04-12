@@ -25,7 +25,7 @@ def add_proficiency_to_db(user_id, proficiency):
 def goto_time(page, user_id):
     """Navigates to the time setup page and passes the user_id data via session."""
     page.session.set("user_id", user_id)  # Store id in session
-    route = f"/setup-time"
+    route = "/setup-time"
     page.go(route)
     page.update()
 

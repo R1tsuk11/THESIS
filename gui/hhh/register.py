@@ -2,7 +2,7 @@ import flet as ft
 import pymongo
 from pymongo.errors import ConfigurationError
 import sys
-from qbank import module_bank
+from qbank import module_bank, achievement_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -44,8 +44,8 @@ def check_user(username):
     
 def goto_proficiency(page, user_id):
     """Navigates to the proficiency setup page with username as a route parameter."""
-    page.session.set("user_id", user_id)  # Store username in session
-    route = f"/setup-proficiency"
+    page.session.set("user_id", user_id)  # Store user ID in session
+    route = "/setup-proficiency"
     page.go(route)
     page.update()
     
@@ -74,24 +74,12 @@ class Level:  # Level class
             return []
 
 class Achievements: # Achievements class
-    def __init__(self): # Initialize achievements
-        self.achievements = {
-            "First Level Completed": False,
-            "First Module Completed": False,
-            "All Modules Completed": False,
-            "All Levels Completed": False,
-            "All Chapter Tests Passed": False,
-            "All Achievements Unlocked": False
-        }
-
-class Question: # Question class
-    def __init__(self, qbank):
-        self.id = qbank["id"]
-        self.type = qbank["type"]
-        self.question = qbank["question"]
-        self.choices = qbank["choices"]
-        self.correct_answer = qbank["correct_answer"]
-        self.vocabulary = qbank["vocabulary"]
+    def __init__(self, achievement): # Initialize achievements
+        self.id = achievement["id"]
+        self.name = achievement["name"]
+        self.description = achievement["description"]
+        self.icon = achievement["icon"]
+        self.completed = achievement["completed"]
 
 class ChapterTest: # Chapter Test class
     def __init__(self, questions_answers):
@@ -155,7 +143,7 @@ def register_user(user_id, username, email, password):
         "password": password,
         "modules": [],
         "library": [],
-        "achievements": Achievements().__dict__,
+        "achievements": {},
         "questions_correct": [],
         "questions_incorrect": []
     }
@@ -165,6 +153,13 @@ def register_user(user_id, username, email, password):
     for module_name in module_bank:
         module = Module(name=module_name, user_id=user_id, lesson_count=len(module_bank[module_name]))
         module.insert_levels(module.levels)
+
+    for _, achievement in achievement_bank.items():
+        achievements = Achievements(achievement)
+        usercol.update_one(
+        {"user_id": user_id},
+        {"$set": {f"achievements.{achievement['id']}": achievements.__dict__}}
+        )
 
     print(f"User {username} registered successfully!")
 
