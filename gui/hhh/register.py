@@ -73,6 +73,17 @@ class Level:  # Level class
             # Suppress the "not found" message since we're loading from DB
             return []
 
+class Achievements: # Achievements class
+    def __init__(self): # Initialize achievements
+        self.achievements = {
+            "First Level Completed": False,
+            "First Module Completed": False,
+            "All Modules Completed": False,
+            "All Levels Completed": False,
+            "All Chapter Tests Passed": False,
+            "All Achievements Unlocked": False
+        }
+
 class Question: # Question class
     def __init__(self, qbank):
         self.id = qbank["id"]
@@ -143,6 +154,8 @@ def register_user(user_id, username, email, password):
         "email": email,
         "password": password,
         "modules": [],
+        "library": [],
+        "achievements": Achievements().__dict__,
         "questions_correct": [],
         "questions_incorrect": []
     }
