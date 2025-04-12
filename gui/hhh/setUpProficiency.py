@@ -16,15 +16,15 @@ def connect_to_mongoDB():
         print(f"Failed to connect to MongoDB: {e}")
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
-def add_proficiency_to_db(username, proficiency):
+def add_proficiency_to_db(user_id, proficiency):
     """Adds the selected proficiency to the database."""
     usercol = connect_to_mongoDB()
-    usercol.update_one({"user_name": username}, {"$set": {"proficiency": proficiency}})
-    print(f"User {username} proficiency updated to {proficiency}")
+    usercol.update_one({"user_id": user_id}, {"$set": {"proficiency": proficiency}})
+    print(f"User {user_id} proficiency updated to {proficiency}")
 
-def goto_time(page, username):
-    """Navigates to the time setup page and passes the username data via session."""
-    page.session.set("username", username)  # Store username in session
+def goto_time(page, user_id):
+    """Navigates to the time setup page and passes the user_id data via session."""
+    page.session.set("user_id", user_id)  # Store id in session
     route = f"/setup-time"
     page.go(route)
     page.update()
@@ -32,13 +32,13 @@ def goto_time(page, username):
 def set_up_proficiency_page(page: ft.Page):
     """Defines the Setup Proficiency Page with Routing"""
 
-    def get_user(page):
-        """Retrieves username from previous page session."""
-        page.session.get("username")  # Get username from session
-        if page.session.get("username") is None:
-            print("No username found in session.")
+    def get_user_id(page):
+        """Retrieves user_id from previous page session."""
+        page.session.get("user_id")  # Get user ID from session
+        if page.session.get("user_id") is None:
+            print("No user ID found in session.")
             return None
-        return page.session.get("username")
+        return page.session.get("user_id")
 
     selected_card = None  # Store the currently selected card
 
@@ -59,7 +59,7 @@ def set_up_proficiency_page(page: ft.Page):
 
     def on_next_click(e):
         """Navigates to setTime.py and prints the selected card."""
-        username = get_user(page)  # Get username from route
+        user_id = get_user_id(page)  # Get user ID from session
         proficiency = None  # Default proficiency value
         if selected_card:
             selected_text = selected_card.content.controls[0].value  # Get card title
@@ -68,8 +68,8 @@ def set_up_proficiency_page(page: ft.Page):
             elif selected_text == "BEGINNER":
                 proficiency = 0.5
             print(f"Selected: {selected_text}")  # Show in output
-            add_proficiency_to_db(username, proficiency)  # Add to DB
-            goto_time(page, username)  # Navigate to time setup page
+            add_proficiency_to_db(user_id, proficiency)  # Add to DB
+            goto_time(page, user_id)  # Navigate to time setup page
         else:
             page.open(ft.SnackBar(ft.Text("Please select a proficiency level."), bgcolor="#FF5722", duration=2000))
 

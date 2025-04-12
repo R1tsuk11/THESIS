@@ -2,6 +2,7 @@ import flet as ft
 import pymongo
 from pymongo.errors import ConfigurationError
 import sys
+from qbank import module_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -41,18 +42,117 @@ def check_user(username):
     else:
         return True
     
-def goto_proficiency(page, username):
+def goto_proficiency(page, user_id):
     """Navigates to the proficiency setup page with username as a route parameter."""
-    page.session.set("username", username)  # Store username in session
+    page.session.set("user_id", user_id)  # Store username in session
     route = f"/setup-proficiency"
     page.go(route)
     page.update()
     
-def register_user(username, email, password):
-    """Register a new user in the database."""
+class Level:  # Level class
+    def __init__(self, module_name, lesson_number):
+        self.module_name = module_name
+        self.lesson_name = str(lesson_number)
+        self.completed = False
+        self.pass_threshold = 50
+        self.questions_answers = self.create_questions()
+
+    def create_questions(self):
+        """Fetches questions from the specified module and lesson in module_bank."""
+        global module_bank
+        if self.module_name in module_bank:
+            module = module_bank[self.module_name]
+            # Add "Lesson" here when looking up in module_bank
+            lesson_key = f"Lesson {self.lesson_name}"
+            if lesson_key in module:
+                return module[lesson_key]
+            else:
+                # Suppress the "not found" message since we're loading from DB
+                return []
+        else:
+            # Suppress the "not found" message since we're loading from DB
+            return []
+
+class Question: # Question class
+    def __init__(self, qbank):
+        self.id = qbank["id"]
+        self.type = qbank["type"]
+        self.question = qbank["question"]
+        self.choices = qbank["choices"]
+        self.correct_answer = qbank["correct_answer"]
+        self.vocabulary = qbank["vocabulary"]
+
+class ChapterTest: # Chapter Test class
+    def __init__(self, questions_answers):
+        self.questions_answers = questions_answers
+        self.completed = False
+        self.pass_threshold = 70
+
+class Module:  # Module class
+    def __init__(self, name, user_id, lesson_count):
+        self.name = name
+        self.user_id = user_id
+        self.completed = False
+        self.levels = self.create_levels(lesson_count)
+        self.chapter_test = self.create_chapter_test()
+
+    def create_levels(self, lesson_count):  # Create levels
+        levels = [Level(self.name, lesson_number) for lesson_number in range(1, lesson_count + 1)]
+        return levels
+
+    def insert_levels(self, levels):
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": self.user_id})
+        if user:
+            user["modules"] = user.get("modules", [])
+            for level in levels:
+                level_data = {
+                    "lesson_name": level.lesson_name,
+                    "module_name": level.module_name,
+                    "completed": level.completed,
+                    "pass_threshold": level.pass_threshold,
+                    "questions_answers": level.questions_answers
+                }
+                for module in user["modules"]:
+                    if module["name"] == self.name:
+                        module["levels"].append(level_data)
+                        break
+                else:
+                    user["modules"].append({
+                        "name": self.name,
+                        "user_id": self.user_id,  # Ensure user_id is included
+                        "completed": self.completed,
+                        "levels": [level_data],
+                        "chapter_test": self.chapter_test.__dict__
+                    })
+            usercol.update_one({"user_id": self.user_id}, {"$set": {"modules": user["modules"]}})
+
+    def create_chapter_test(self):  # Create chapter test
+        all_questions = {}
+        for level in self.levels:
+            for question in level.questions_answers:
+                if "correct_answer" in question:
+                    all_questions[question["question"]] = question["correct_answer"]
+        return ChapterTest(all_questions)
+
+def register_user(user_id, username, email, password):
     usercol = connect_to_mongoDB()
-    user_id = get_next_user_id()  # Get the next user ID
-    usercol.insert_one({"user_id": user_id, "user_name": username, "email": email, "password": password})
+    new_user = {
+        "user_id": user_id,
+        "user_name": username,
+        "email": email,
+        "password": password,
+        "modules": [],
+        "questions_correct": [],
+        "questions_incorrect": []
+    }
+    usercol.insert_one(new_user)
+
+    # Now insert all modules into the new user's profile
+    for module_name in module_bank:
+        module = Module(name=module_name, user_id=user_id, lesson_count=len(module_bank[module_name]))
+        module.insert_levels(module.levels)
+
     print(f"User {username} registered successfully!")
 
 def register_page(page: ft.Page):
@@ -102,28 +202,25 @@ def register_page(page: ft.Page):
         retype_password = retype_password_field.value
 
         user_exists = check_user(username)  # Check if the username already exists
-        if user_exists:
-            register_user(username, email, password)  # Function to register the user in the database
-            page.update()
-            goto_proficiency(page, username)
-            page.update()
-        else:
-            if not username or not email or not password or not retype_password:
+        if not username or not email or not password or not retype_password:
                 page.open(ft.SnackBar(ft.Text(f"Please fill in all fields!"), bgcolor="#4CAF50"))
                 page.update()
                 return
-            elif password != retype_password:
-                page.open(ft.SnackBar(ft.Text(f"Passwords do not match!"), bgcolor="#4CAF50"))
-                page.update()
-                return
-            elif not user_exists:
-                page.open(ft.SnackBar(ft.Text(f"Username already exists!"), bgcolor="#4CAF50"))
-                page.update()
-                return
-            else:
-                page.open(ft.SnackBar(ft.Text(f"Error!"), bgcolor="#4CAF50"))
-                page.update()
-                return
+        elif password != retype_password:
+            page.open(ft.SnackBar(ft.Text(f"Passwords do not match!"), bgcolor="#4CAF50"))
+            page.update()
+            return
+        elif not user_exists:
+            page.open(ft.SnackBar(ft.Text(f"Username already exists!"), bgcolor="#4CAF50"))
+            page.update()
+            return
+        else:
+            user_id = get_next_user_id()  # Get the next user ID
+            register_user(user_id, username, email, password)  # Function to register the user in the database
+            page.update()
+            goto_proficiency(page, user_id)  # Navigate to proficiency setup page
+            page.update()
+            
     
     page.views.append(
         ft.View(

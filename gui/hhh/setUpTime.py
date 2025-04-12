@@ -16,11 +16,11 @@ def connect_to_mongoDB():
         print(f"Failed to connect to MongoDB: {e}")
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
-def add_time_to_db(username, time):
+def add_time_to_db(user_id, time):
     """Adds the selected time to the database."""
     usercol = connect_to_mongoDB()
-    usercol.update_one({"user_name": username}, {"$set": {"time": time}})
-    print(f"User {username} time updated to {time}")
+    usercol.update_one({"user_id": user_id}, {"$set": {"time": time}})
+    print(f"User {user_id} time updated to {time}")
 
 def goto_login(page):
     """Navigates to the login page."""
@@ -32,12 +32,12 @@ def set_up_time_page(page: ft.Page):
     """Defines the Setup Time Selection Page with Routing"""
     
     def get_user(page):
-        """Retrieves username from previous page session."""
-        page.session.get("username")  # Get username from session
-        if page.session.get("username") is None:
-            print("No username found in session.")
+        """Retrieves user_id from previous page session."""
+        page.session.get("user_id")  # Get user ID from session
+        if page.session.get("user_id") is None:
+            print("No user_id found in session.")
             return None
-        return page.session.get("username")
+        return page.session.get("user_id")
 
     selected_card = None  # Store the selected time preference
 
@@ -58,7 +58,7 @@ def set_up_time_page(page: ft.Page):
 
     def on_next_click(e):
         """Handles 'NEXT' button click, ensuring a selection is made before proceeding."""
-        username = get_user(page)  # Get username from route
+        user_id = get_user(page)  # Get user ID from session
         time = None  # Default time value
         if selected_card:
             selected_text = selected_card.content.controls[0].content.value  # Get card level
@@ -71,11 +71,11 @@ def set_up_time_page(page: ft.Page):
             elif selected_text == "A4":
                 time = 0.333  # 20 minutes in hours
             print(f"Selected: {selected_text}")  # Show in output
-            add_time_to_db(username, time)  # Add to DB
+            add_time_to_db(user_id, time)  # Add to DB
             goto_login(page)  # Navigate to time setup page
             page.open(ft.SnackBar(ft.Text(f"User successfully registered!"), bgcolor="#4CAF50", duration=2000))
         else:
-            page.open(ft.SnackBar(ft.Text("Please select a proficiency level."), bgcolor="#FF5722", duration=2000))
+            page.open(ft.SnackBar(ft.Text("Please select a target time."), bgcolor="#FF5722", duration=2000))
 
     page.views.append(
         ft.View(
