@@ -2,7 +2,7 @@ import flet as ft
 import pymongo
 from pymongo.errors import ConfigurationError
 import sys
-from qbank import module_bank, achievement_bank
+from qbank import module_bank, achievement_bank, eng_name_bank, waray_name_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -50,8 +50,8 @@ def goto_proficiency(page, user_id):
     page.update()
     
 class Level:  # Level class
-    def __init__(self, module_name, lesson_number):
-        self.module_name = module_name
+    def __init__(self, module_id, lesson_number):
+        self.module_id = module_id
         self.lesson_name = str(lesson_number)
         self.completed = False
         self.pass_threshold = 50
@@ -60,8 +60,8 @@ class Level:  # Level class
     def create_questions(self):
         """Fetches questions from the specified module and lesson in module_bank."""
         global module_bank
-        if self.module_name in module_bank:
-            module = module_bank[self.module_name]
+        if self.module_id in module_bank:
+            module = module_bank[self.module_id]
             # Add "Lesson" here when looking up in module_bank
             lesson_key = f"Lesson {self.lesson_name}"
             if lesson_key in module:
@@ -88,15 +88,23 @@ class ChapterTest: # Chapter Test class
         self.pass_threshold = 70
 
 class Module:  # Module class
-    def __init__(self, name, user_id, lesson_count):
-        self.name = name
+    def __init__(self, id, user_id, lesson_count):
+        self.id = id
+        self.eng_name = self.get_eng_name(id)
+        self.waray_name = self.get_waray_name(id)
         self.user_id = user_id
         self.completed = False
         self.levels = self.create_levels(lesson_count)
         self.chapter_test = self.create_chapter_test()
 
+    def get_eng_name(self, id):
+        return eng_name_bank.get(id)
+
+    def get_waray_name(self, id):
+        return waray_name_bank.get(id)
+
     def create_levels(self, lesson_count):  # Create levels
-        levels = [Level(self.name, lesson_number) for lesson_number in range(1, lesson_count + 1)]
+        levels = [Level(self.id, lesson_number) for lesson_number in range(1, lesson_count + 1)]
         return levels
 
     def insert_levels(self, levels):
@@ -107,18 +115,20 @@ class Module:  # Module class
             for level in levels:
                 level_data = {
                     "lesson_name": level.lesson_name,
-                    "module_name": level.module_name,
+                    "module_name": level.module_id,
                     "completed": level.completed,
                     "pass_threshold": level.pass_threshold,
                     "questions_answers": level.questions_answers
                 }
                 for module in user["modules"]:
-                    if module["name"] == self.name:
+                    if module["id"] == self.id:
                         module["levels"].append(level_data)
                         break
                 else:
                     user["modules"].append({
-                        "name": self.name,
+                        "id": self.id,
+                        "eng_name": self.eng_name,
+                        "waray_name": self.waray_name,
                         "user_id": self.user_id,  # Ensure user_id is included
                         "completed": self.completed,
                         "levels": [level_data],
@@ -150,8 +160,8 @@ def register_user(user_id, username, email, password):
     usercol.insert_one(new_user)
 
     # Now insert all modules into the new user's profile
-    for module_name in module_bank:
-        module = Module(name=module_name, user_id=user_id, lesson_count=len(module_bank[module_name]))
+    for module_id in module_bank:
+        module = Module(id=module_id, user_id=user_id, lesson_count=len(module_bank[module_id]))
         module.insert_levels(module.levels)
 
     for _, achievement in achievement_bank.items():

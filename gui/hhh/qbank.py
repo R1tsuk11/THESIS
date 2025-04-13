@@ -203,7 +203,7 @@ module_1 = {
 }
 
 module_bank = {
-    "Module 1": module_1,
+    1: module_1,
 }
 
 achievement_bank = {
@@ -235,4 +235,12 @@ achievement_bank = {
         "icon": "assets/achievements/all_levels_completed.png",
         "completed": False
     }
+}
+
+eng_name_bank = {
+    1: "Greetings and Introductions",
+}
+
+waray_name_bank = {
+    1: "Kamustahay!",
 }

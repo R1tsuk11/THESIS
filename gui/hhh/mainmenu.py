@@ -51,7 +51,9 @@ class ChapterTest: # Chapter Test class
 
 class Module:  # Module class
     def __init__(self, module):
-        self.name = module["name"]
+        self.id = module["id"]
+        self.waray_name = module["waray_name"]
+        self.eng_name = module["eng_name"]
         self.user_id = module["user_id"]
         self.completed = module["completed"]
         self.levels = self.load_levels(module["levels"])
@@ -94,23 +96,41 @@ class User:  # User class
             print("User not found in database.")
             return None
         
+    def load_achievements(self, achievement_data):
+        """Converts raw achievement data from the database into class instances."""
+        loaded_achievements = {}
+
+        for key, value in achievement_data.items():
+            # Check if value is a dictionary and has necessary fields
+            if isinstance(value, dict) and all(field in value for field in ["id", "name", "description", "icon", "completed"]):
+                achievement_instance = Achievements(value)
+                loaded_achievements[key] = achievement_instance
+            else:
+                print(f"Skipping invalid achievement format for {key}: {value}")
+
+        self.achievements = loaded_achievements
+
     def load_data(self, user_id, page):
         """Loads user data from the database."""
         self.get_user(user_id)
+
         if self.modules:
-            for module in self.modules:
-                Module(module)
-            page.open(ft.SnackBar(ft.Text(f"Successfully loaded data!"), bgcolor="#4CAF50"))
+            # Convert each module dictionary to a Module instance
+            self.modules = [Module(module_data) for module_data in self.modules]
         else:
             print("No modules found for this user.")
             return None
-        
+
         if self.achievements:
-            for _, achievement in self.achievements.items():
-                Achievements(achievement)
-            page.open(ft.SnackBar(ft.Text(f"Successfully loaded achievements!"), bgcolor="#4CAF50"))
+            self.load_achievements(self.achievements)
+
+
         else:
             print("No achievements found for this user.")
+            return None
+
+        page.open(ft.SnackBar(ft.Text(f"Successfully loaded data!"), bgcolor="#4CAF50"))
+        return self
 
     def save_user(self):
         """Saves user data to the database."""
@@ -142,9 +162,7 @@ def main_menu_page(page: ft.Page):
     def on_profile_click(e):
         """Handles profile icon click event."""
         print("Profile icon clicked")
-        user_id = get_user_id(page)  # Get user ID from session
-        User().load_data(user_id, page)  # Load user data with user_id 1 for demonstration
-
+        
     def navigate_to_levels(e):
         """Navigates to levels page"""
         page.go("/levels")
@@ -230,9 +248,12 @@ def main_menu_page(page: ft.Page):
         )
 
     # Create the module cards with updated colors
-    kamustahay_card = create_module_card("Kamustahay!", "Greetings and Introductions", "#FFD580", "#8B7E4F")
-    oras_card = create_module_card("Oras", "Time / Date", "#74CFCF", "#7A9E9E")
-    pagkain_card = create_module_card("Pangaan", "Ordering Food", "#74CFCF", "#7A9E9E")
+    cards = []
+    user_id = get_user_id(page)  # Get user ID from session
+    user = User().load_data(user_id, page)  # Load user data
+    for module in user.modules:
+        card = create_module_card(module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
+        cards.append(card)
 
     # Create the bottom navigation bar
     bottom_nav = ft.Container(
@@ -280,9 +301,7 @@ def main_menu_page(page: ft.Page):
                 content=ft.Column(
                     [
                         modules_title,
-                        kamustahay_card,
-                        oras_card,
-                        pagkain_card,
+                        *cards  # Iterate and insert all module cards
                     ],
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 ),

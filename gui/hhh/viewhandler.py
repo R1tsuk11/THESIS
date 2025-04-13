@@ -2,7 +2,6 @@ import flet as ft
 from login import login_page
 from register import register_page
 from setUpProficiency import set_up_proficiency_page
-from setUpPreference import set_up_preference_page
 from setUpTime import set_up_time_page
 from mainmenu import main_menu_page
 from levels import levels_page
