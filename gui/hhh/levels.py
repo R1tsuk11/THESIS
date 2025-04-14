@@ -1,20 +1,78 @@
 import flet as ft
 
+def get_module_data(page):
+    modules = page.session.get("modules")
+    module_id = page.session.get("module_id")
+
+    if not modules:
+        print("Modules not found in session.")
+        return None
+
+    if not module_id:
+        print("Module ID not found in session.")
+        return None
+
+    # Make sure module_id type matches (e.g., string vs int)
+    for module in modules:
+        if str(module.id) == str(module_id):  # safe type comparison
+            return module.levels, module.desc, module.waray_name
+
+    print(f"No matching module with ID {module_id} found.")
+    return None
+
 def levels_page(page: ft.Page):
     """Levels selection page"""
-    page.title = "Arami - Kamustahay Levels"
+    selected_module_levels, selected_module_desc, selected_module_name = get_module_data(page)
+    page.title = f"Arami - \"{selected_module_name}\" Levels"
     page.bgcolor = "#FFFFFF"
     page.padding = 0
+    level_rows = []
+    row = []
 
     def go_back(e):
         """Navigate back to the main menu"""
         page.go("/main-menu")
 
-    def level_select(e):
+    def level_select(e, level_num):
         """Handles level selection and navigates to the lesson page."""
-        level_num = e.control.data
+        level_data = selected_module_levels[int(level_num) - 1]
+        page.session.set("level_data", level_data)  # Store selected level data in session
         print(f"Selected level {level_num}")
         page.go("/lesson")
+
+    def create_level_button(level_number, color="#4285F4"):
+        return ft.Container(
+            content=ft.Text(
+                str(level_number),
+                color="#FFFFFF",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER,
+            ),
+            bgcolor=color,
+            width=60,
+            height=60,
+            border_radius=10,
+            alignment=ft.alignment.center,
+            data=level_number,
+            on_click=lambda e: level_select(page, level_number)
+        )
+
+    for index, level in enumerate(selected_module_levels, start=1):
+        level_button = create_level_button(index)
+
+        row.append(level_button)
+
+        # When we have 3 buttons, or it's the last button, add the row
+        if len(row) == 3 or index == len(selected_module_levels):
+            level_rows.append(
+                ft.Row(
+                    row,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=10
+                )
+            )
+            row = []  # reset for the next row
 
     # Header with gradient background and title
     header = ft.Container(
@@ -48,7 +106,7 @@ def levels_page(page: ft.Page):
 
     explanation = ft.Container(
         content=ft.Text(
-            "This part is a brief explanation about the module.",
+            selected_module_desc,
             color="#000000",
             size=14,
             text_align=ft.TextAlign.CENTER,
@@ -57,37 +115,11 @@ def levels_page(page: ft.Page):
         alignment=ft.alignment.center,
     )
 
-    def create_level_button(level_number, color="#4285F4"):
-        return ft.Container(
-            content=ft.Text(
-                str(level_number),
-                color="#FFFFFF",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER,
-            ),
-            bgcolor=color,
-            width=60,
-            height=60,
-            border_radius=10,
-            alignment=ft.alignment.center,
-            data=level_number,
-            on_click=level_select
-        )
-
     level_grid = ft.Container(
-        content=ft.Column([
-            ft.Row(
-                [create_level_button(1, "#0066FF"), create_level_button(2), create_level_button(3), create_level_button(4)],
-                alignment=ft.MainAxisAlignment.CENTER,
-                spacing=10
-            ),
-            ft.Row(
-                [create_level_button(5), create_level_button(6)],
-                alignment=ft.MainAxisAlignment.CENTER,
-                spacing=10
-            ),
-        ], spacing=10, alignment=ft.MainAxisAlignment.CENTER),
+        content=ft.Column(
+            level_rows,
+            spacing=10, 
+        alignment=ft.MainAxisAlignment.CENTER),
         margin=ft.margin.only(top=10),
     )
 

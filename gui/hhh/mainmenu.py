@@ -54,6 +54,7 @@ class Module:  # Module class
         self.id = module["id"]
         self.waray_name = module["waray_name"]
         self.eng_name = module["eng_name"]
+        self.desc = module["desc"]
         self.user_id = module["user_id"]
         self.completed = module["completed"]
         self.levels = self.load_levels(module["levels"])
@@ -159,14 +160,6 @@ def get_user_id(page):
 def main_menu_page(page: ft.Page):
     """Main menu page with module cards"""
 
-    def on_profile_click(e):
-        """Handles profile icon click event."""
-        print("Profile icon clicked")
-        
-    def navigate_to_levels(e):
-        """Navigates to levels page"""
-        page.go("/levels")
-
     # Header - empty blue container with no text
     header = ft.Container(
         content=ft.Row([], alignment=ft.MainAxisAlignment.CENTER),  # Empty row
@@ -192,8 +185,18 @@ def main_menu_page(page: ft.Page):
         margin=ft.margin.symmetric(vertical=10)
     )
 
+    def on_profile_click(e):
+        """Handles profile icon click event."""
+        print("Profile icon clicked")
+        
+    def navigate_to_levels(e, user, module_id):
+        """Navigates to levels page"""
+        page.session.set("modules", user.modules)
+        page.session.set("module_id", module_id)
+        page.go("/levels")
+
     # Function to create a module card
-    def create_module_card(main_button_text, sub_button_text, main_color, sub_color, bg_color="#2A2A2A"):
+    def create_module_card(module_id, main_button_text, sub_button_text, main_color, sub_color, bg_color="#2A2A2A"):
         return ft.Container(
             content=ft.Column(
                 [
@@ -244,7 +247,7 @@ def main_menu_page(page: ft.Page):
             padding=15,
             margin=ft.margin.only(bottom=15),
             width=300,
-            on_click=navigate_to_levels,  # Navigates to Levels when clicked
+            on_click=lambda e: navigate_to_levels(e, user, module_id),  # Navigates to Levels when clicked
         )
 
     # Create the module cards with updated colors
@@ -252,7 +255,7 @@ def main_menu_page(page: ft.Page):
     user_id = get_user_id(page)  # Get user ID from session
     user = User().load_data(user_id, page)  # Load user data
     for module in user.modules:
-        card = create_module_card(module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
+        card = create_module_card(module.id, module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
         cards.append(card)
 
     # Create the bottom navigation bar

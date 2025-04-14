@@ -1,5 +1,19 @@
 import flet as ft
 
+def get_questions(page):
+    """Retrieves questions for the current lesson."""
+    lesson_data = page.session.get("lesson_data")
+    if not lesson_data:
+        print("Lesson data not found in session.")
+        return None
+
+    questions = lesson_data.get("questions_answers")
+    if not questions:
+        print("No questions found in lesson data.")
+        return None
+
+    return questions
+
 def lesson_page(page: ft.Page):
     """Lesson page for displaying language learning content"""
     page.title = "Arami - Lesson"

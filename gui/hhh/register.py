@@ -2,7 +2,7 @@ import flet as ft
 import pymongo
 from pymongo.errors import ConfigurationError
 import sys
-from qbank import module_bank, achievement_bank, eng_name_bank, waray_name_bank
+from qbank import module_bank, achievement_bank, eng_name_bank, waray_name_bank, desc_bank
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -92,6 +92,7 @@ class Module:  # Module class
         self.id = id
         self.eng_name = self.get_eng_name(id)
         self.waray_name = self.get_waray_name(id)
+        self.desc = self.get_desc(id)
         self.user_id = user_id
         self.completed = False
         self.levels = self.create_levels(lesson_count)
@@ -102,6 +103,9 @@ class Module:  # Module class
 
     def get_waray_name(self, id):
         return waray_name_bank.get(id)
+    
+    def get_desc(self, id):
+        return desc_bank.get(id)
 
     def create_levels(self, lesson_count):  # Create levels
         levels = [Level(self.id, lesson_number) for lesson_number in range(1, lesson_count + 1)]
@@ -129,6 +133,7 @@ class Module:  # Module class
                         "id": self.id,
                         "eng_name": self.eng_name,
                         "waray_name": self.waray_name,
+                        "desc": self.desc,
                         "user_id": self.user_id,  # Ensure user_id is included
                         "completed": self.completed,
                         "levels": [level_data],

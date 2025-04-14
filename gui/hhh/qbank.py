@@ -244,3 +244,7 @@ eng_name_bank = {
 waray_name_bank = {
     1: "Kamustahay!",
 }
+
+desc_bank = {
+    1: "Learn basic greetings and introductions in Waray.",
+}
