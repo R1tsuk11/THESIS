@@ -5,7 +5,9 @@ module_1 = {
             "type": "Lesson",
             "question": "The phrase 'Maupay nga aga' means 'Good morning'.",
             "answer": None,
-            "vocabulary": "Maupay nga aga"
+            "vocabulary": "Maupay nga aga",
+            "difficulty": None,
+            "response_time": None
         },
         {
             "id": 2,
@@ -13,7 +15,9 @@ module_1 = {
             "question": "Which image represents 'aga' (morning)?",
             "choices": ["Morning sun image", "Night sky image", "Afternoon sunset image"],
             "correct_answer": "Morning sun image",
-            "vocabulary": "Maupay nga aga"
+            "vocabulary": "Maupay nga aga",
+            "difficulty": 1,
+            "response_time": 0
         },
         {
             "id": 3,
@@ -21,21 +25,27 @@ module_1 = {
             "question": "Translate: 'Good morning, Alyssa!'",
             "choices": ["Maupay nga gab-i, Alyssa!", "Maupay nga aga, Alyssa!", "Maupay nga kulop, Alyssa!"],
             "correct_answer": "Maupay nga aga, Alyssa!",
-            "vocabulary": "Maupay nga aga"
+            "vocabulary": "Maupay nga aga",
+            "difficulty": 2,
+            "response_time": 0
         },
         {
             "id": 4,
             "type": "Cultural Trivia",
             "question": "Did you know? Waray is similar to Bisaya …",
             "answer": None,
-            "vocabulary": None
+            "vocabulary": None,
+            "difficulty": None,
+            "response_time": None
         },
         {
             "id": 5,
             "type": "Lesson",
             "question": "The phrase 'Maupay nga aga gihapon' means 'Good morning too'.",
             "answer": None,
-            "vocabulary": "gihapon"
+            "vocabulary": "gihapon",
+            "difficulty": None,
+            "response_time": None
         }
     ],
     "Lesson 2": [
@@ -44,7 +54,9 @@ module_1 = {
             "type": "Pronounce",
             "question": "How do you pronounce 'gihapon'?",
             "correct_answer": "gi-ha-pon",
-            "vocabulary": "gihapon"
+            "vocabulary": "gihapon",
+            "difficulty": 1,
+            "response_time": 0
         },
         {
             "id": 7,
@@ -52,7 +64,9 @@ module_1 = {
             "question": "'Gihapon' means 'also'.",
             "choices": ["True", "False"],
             "correct_answer": "True",
-            "vocabulary": "gihapon"
+            "vocabulary": "gihapon",
+            "difficulty": 2,
+            "response_time": 0
         },
         {
             "id": 8,
@@ -60,14 +74,18 @@ module_1 = {
             "question": "What does 'gihapon' mean?",
             "choices": ["Again", "Also", "Only"],
             "correct_answer": "Also",
-            "vocabulary": "gihapon"
+            "vocabulary": "gihapon",
+            "difficulty": 1,
+            "response_time": 0
         },
         {
             "id": 9,
             "type": "Lesson",
             "question": "The phrase 'Kamusta ka?' means 'How are you?'.",
             "answer": None,
-            "vocabulary": "Kamusta ka?"
+            "vocabulary": "Kamusta ka?",
+            "difficulty": None,
+            "response_time": None
         },
         {
             "id": 10,
@@ -75,7 +93,9 @@ module_1 = {
             "question": "'Kamusta ka' is used to greet someone.",
             "choices": ["True", "False"],
             "correct_answer": "True",
-            "vocabulary": "Kamusta ka?"
+            "vocabulary": "Kamusta ka?",
+            "difficulty": 2,
+            "response_time": 0
         }
     ],
     "Lesson 3": [
@@ -89,14 +109,18 @@ module_1 = {
                 "Maupay nga kulop. Kamusta ka, Raya?"
             ],
             "correct_answer": "Maupay nga aga. Kamusta ka, Raya?",
-            "vocabulary": "Kamusta ka?"
+            "vocabulary": "Kamusta ka?",
+            "difficulty": 3,
+            "response_time": 0
         },
         {
             "id": 12,
             "type": "Lesson",
             "question": "The phrase 'Pakadto kita ha (place)!' means 'Let's go to (place)!'.",
             "answer": None,
-            "vocabulary": "Pakadto"
+            "vocabulary": "Pakadto",
+            "difficulty": None,
+            "response_time": None
         },
         {
             "id": 13,
@@ -108,7 +132,9 @@ module_1 = {
                 "Pakadto ako ha McArthur Park!"
             ],
             "correct_answer": "Pakadto kita ha McArthur Park!",
-            "vocabulary": "Pakadto"
+            "vocabulary": "Pakadto",
+            "difficulty": 3,
+            "response_time": 0
         },
         {
             "id": 14,
@@ -116,14 +142,18 @@ module_1 = {
             "question": "'Pakadto' means 'pumunta'?",
             "choices": ["True", "False"],
             "correct_answer": "True",
-            "vocabulary": "Pakadto"
+            "vocabulary": "Pakadto",
+            "difficulty": 2,
+            "response_time": 0
         },
         {
             "id": 15,
             "type": "Lesson",
             "question": "The word 'Para' means 'Stop'.",
             "answer": None,
-            "vocabulary": "Para"
+            "vocabulary": "Para",
+            "difficulty": None,
+            "response_time": None,
         }
     ],
     "Lesson 4": [
@@ -133,7 +163,9 @@ module_1 = {
             "question": "Which image represents 'para' (to stop)?",
             "choices": ["Stop sign image", "Green light image", "Running person image"],
             "correct_answer": "Stop sign image",
-            "vocabulary": "Para"
+            "vocabulary": "Para",
+            "difficulty": 1,
+            "response_time": 0
         },
         {
             "id": 17,
@@ -141,7 +173,9 @@ module_1 = {
             "question": "What do you say to stop a jeepney?",
             "choices": ["Para!", "Diri!", "Lakat!"],
             "correct_answer": "Para!",
-            "vocabulary": "Para"
+            "vocabulary": "Para",
+            "difficulty": 2,
+            "response_time": 0
         },
         {
             "id": 18,
@@ -149,14 +183,18 @@ module_1 = {
             "question": "'Para' is used to start a vehicle.",
             "choices": ["True", "False"],
             "correct_answer": "False",
-            "vocabulary": "Para"
+            "vocabulary": "Para",
+            "difficulty": 2,
+            "response_time": 0
         },
         {
             "id": 19,
             "type": "Lesson",
             "question": "The phrase 'Tag-pira it pamasahe pa-(place)?' means 'How much is the fare to (place)?'.",
             "answer": None,
-            "vocabulary": "Tag-pira"
+            "vocabulary": "Tag-pira",
+            "difficulty": None,
+            "response_time": None
         },
         {
             "id": 20,
@@ -164,7 +202,9 @@ module_1 = {
             "question": "What is 'how much' in Waray?",
             "choices": ["Tag-pira", "Tag-pulo", "Tag-ano"],
             "correct_answer": "Tag-pira",
-            "vocabulary": "Tag-pira"
+            "vocabulary": "Tag-pira",
+            "difficulty": 2,
+            "response_time": 0
         }
     ],
     "Lesson 5": [
@@ -173,7 +213,9 @@ module_1 = {
             "type": "Lesson",
             "question": "The word 'Harayo' means 'Far'.",
             "answer": None,
-            "vocabulary": "Harayo"
+            "vocabulary": "Harayo",
+            "difficulty": None,
+            "response_time": None
         },
         {
             "id": 22,
@@ -181,7 +223,9 @@ module_1 = {
             "question": "Which image represents 'harayo' (far)?",
             "choices": ["Distant mountain image", "Person standing close image", "Small object nearby image"],
             "correct_answer": "Distant mountain image",
-            "vocabulary": "Harayo"
+            "vocabulary": "Harayo",
+            "difficulty": 1,
+            "response_time": 0
         },
         {
             "id": 23,
@@ -189,7 +233,9 @@ module_1 = {
             "question": "How do you say 'far' in Waray?",
             "choices": ["Harani", "Harayo", "Tag-pira"],
             "correct_answer": "Harayo",
-            "vocabulary": "Harayo"
+            "vocabulary": "Harayo",
+            "difficulty": 2,
+            "response_time": 0
         },
         {
             "id": 24,
@@ -197,7 +243,9 @@ module_1 = {
             "question": "'Harayo' means 'near'.",
             "choices": ["True", "False"],
             "correct_answer": "False",
-            "vocabulary": "Harayo"
+            "vocabulary": "Harayo",
+            "difficulty": 2,
+            "response_time": 0
         }
     ]
 }

@@ -52,7 +52,9 @@ def goto_proficiency(page, user_id):
 class Level:  # Level class
     def __init__(self, module_id, lesson_number):
         self.module_id = module_id
-        self.lesson_name = str(lesson_number)
+        self.lesson_name = lesson_number
+        self.grade_percentage = 0
+        self.completion_time = None
         self.completed = False
         self.pass_threshold = 50
         self.questions_answers = self.create_questions()
