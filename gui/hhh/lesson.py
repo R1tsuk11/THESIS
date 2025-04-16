@@ -2,6 +2,9 @@ import flet as ft
 import re
 import os
 
+correct_answers = {}
+incorrect_answers = {}
+
 def get_questions(page):
     """Retrieves questions for the current lesson."""
     level_data = page.session.get("level_data")
@@ -16,7 +19,7 @@ def get_questions(page):
 
     return questions
 
-def build_lesson_question(question_data, on_next, on_back):
+def build_lesson_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
     header = "Lesson"
     waray_phrase = None
@@ -102,7 +105,7 @@ def build_lesson_question(question_data, on_next, on_back):
     )
 
     progress = ft.Container(
-        ft.ProgressBar(value=0.3, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
         margin=ft.margin.only(bottom=20)
     )
 
@@ -150,7 +153,7 @@ def build_lesson_question(question_data, on_next, on_back):
         expand=True
     )
 
-def build_imgpicker_question(question_data, on_next, on_back):
+def build_imgpicker_question(question_data, progress_value, on_next, on_back):
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     ASSETS_PATH = os.path.join(BASE_DIR, "assets")
@@ -258,7 +261,7 @@ def build_imgpicker_question(question_data, on_next, on_back):
 
             # Progress bar
             ft.Container(
-                content=ft.ProgressBar(value=0.5, bgcolor="#e0e0e0", color="#0078D7", width=300),
+                content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
                 margin=ft.margin.only(bottom=20, top=10)
             ),
 
@@ -306,7 +309,7 @@ def build_imgpicker_question(question_data, on_next, on_back):
         expand=True
     )
 
-def build_wordselect_question(question_data, on_next, on_back):
+def build_wordselect_question(question_data, progress_value, on_next, on_back):
     options = question_data.choices
     word_to_translate = question_data.question
     selected_option = {"value": None}
@@ -396,7 +399,7 @@ def build_wordselect_question(question_data, on_next, on_back):
 
                         # Progress bar
                         ft.Container(
-                            content=ft.ProgressBar(value=0.6, bgcolor="#e0e0e0", color="#0078D7", width=300),
+                            content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
                             margin=ft.margin.only(bottom=20),
                         ),
 
@@ -443,7 +446,7 @@ def build_wordselect_question(question_data, on_next, on_back):
         expand=True
     )
 
-def build_tf_question(question_data, on_next, on_back):
+def build_tf_question(question_data, progress_value, on_next, on_back):
     selected_option = {"value": None}
 
     def on_option_click(e, option_index):
@@ -508,7 +511,7 @@ def build_tf_question(question_data, on_next, on_back):
         padding=ft.padding.only(top=20)
     )
 
-    progress = ft.ProgressBar(value=0.8, bgcolor="#e0e0e0", color="#0078D7", width=300)
+    progress = ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300)
 
     return ft.Column(
         [
@@ -537,7 +540,7 @@ def build_tf_question(question_data, on_next, on_back):
         spacing=0
     )
 
-def build_trivia_question(question_data, on_next, on_back):
+def build_trivia_question(question_data, progress_value, on_next, on_back):
     # Extract data
     trivia_text = question_data.question
 
@@ -601,7 +604,7 @@ def build_trivia_question(question_data, on_next, on_back):
 
     # Progress bar
     progress = ft.Container(
-        content=ft.ProgressBar(value=0.9, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
         margin=ft.margin.only(bottom=20)
     )
 
@@ -652,7 +655,7 @@ def build_trivia_question(question_data, on_next, on_back):
         expand=True
     )
 
-def build_pronounce_question(question_data, on_next, on_back):
+def build_pronounce_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a pronunciation type question."""
 
     instruction_text = question_data.question
@@ -719,7 +722,7 @@ def build_pronounce_question(question_data, on_next, on_back):
     )
 
     progress = ft.Container(
-        ft.ProgressBar(value=0.33, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
         margin=ft.margin.only(bottom=20)
     )
 
@@ -764,22 +767,22 @@ def build_pronounce_question(question_data, on_next, on_back):
     )
 
 
-def render_question_layout(question_data, on_next, on_back):
+def render_question_layout(question_data, progress_value, on_next, on_back):
     question_type = question_data.type
     
     if question_type == "Lesson":
-        return build_lesson_question(question_data, on_next, on_back)
+        return build_lesson_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Image Picker":
-        return build_imgpicker_question(question_data, on_next, on_back)
+        return build_imgpicker_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Word Select / Translate":
-        return build_wordselect_question(question_data, on_next, on_back)
+        return build_wordselect_question(question_data, progress_value, on_next, on_back)
     elif question_type == "True or False":
-        return build_tf_question(question_data, on_next, on_back)
+        return build_tf_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Cultural Trivia":
-        return build_trivia_question(question_data, on_next, on_back)
+        return build_trivia_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Pronounce":
         print("Pronounce question type not implemented yet. Using Word Select Layout")
-        return build_wordselect_question(question_data, on_next, on_back)
+        return build_wordselect_question(question_data, progress_value, on_next, on_back)
     else:
         return ft.Text("Unknown question type.")
 
@@ -803,17 +806,20 @@ def lesson_page(page: ft.Page):
     
     # Load questions
     questions = get_questions(page)
+    total_questions = len(questions) if questions else 0
+    current_question_index = {"value": 0}
+    progress_value = (current_question_index["value"] + 1) / total_questions
     if not questions:
         page.views.append(ft.View("/lesson", [ft.Text("No questions available.")]))
         return
 
-    current_question_index = {"value": 0}
-    def render_current_question():
+    def render_current_question(progress_value):
         page.views.clear()  # Optional: clear previous view
 
         question = questions[current_question_index["value"]]
         content = render_question_layout(
             question_data=question,
+            progress_value=progress_value,
             on_next=next_question,
             on_back=go_back
         )
@@ -829,10 +835,10 @@ def lesson_page(page: ft.Page):
     
     def next_question(e=None):
         current_question_index["value"] += 1
+        progress_value = (current_question_index["value"] + 1) / total_questions
         if current_question_index["value"] < len(questions):
-            render_current_question()
+            render_current_question(progress_value)
         else:
             page.go("/levels")  # or show results, etc.
 
-    render_current_question()
-
+    render_current_question(progress_value)

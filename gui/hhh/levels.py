@@ -31,14 +31,20 @@ def levels_page(page: ft.Page):
 
     def go_back(e):
         """Navigate back to the main menu"""
+        page.session.set("module_levels", selected_module_levels)
         page.go("/main-menu")
 
     def level_select(e, level_num):
         """Handles level selection and navigates to the lesson page."""
         level_data = selected_module_levels[int(level_num) - 1]
-        page.session.set("level_data", level_data)  # Store selected level data in session
-        print(f"Selected level {level_num}")
-        page.go("/lesson")
+        if level_data.completed == True:
+            page.open(ft.SnackBar(ft.Text("Level already completed!"), bgcolor="#FF0000"))
+            page.update()
+            return
+        else:
+            page.session.set("level_data", level_data)  # Store selected level data in session
+            print(f"Selected level {level_num}")
+            page.go("/lesson")
 
     def create_level_button(level_number, color="#4285F4"):
         return ft.Container(
