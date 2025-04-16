@@ -87,7 +87,7 @@ def levels_page(page: ft.Page):
             ),
             ft.Container(
                 content=ft.Text(
-                    "Kamustahay",
+                    selected_module_name,
                     size=20,
                     color="#FFFFFF",
                     weight=ft.FontWeight.BOLD,

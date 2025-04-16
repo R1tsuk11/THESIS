@@ -52,7 +52,7 @@ def goto_proficiency(page, user_id):
 class Level:  # Level class
     def __init__(self, module_id, lesson_number):
         self.module_id = module_id
-        self.lesson_name = lesson_number
+        self.lesson_id = lesson_number
         self.grade_percentage = 0
         self.completion_time = None
         self.completed = False
@@ -65,7 +65,7 @@ class Level:  # Level class
         if self.module_id in module_bank:
             module = module_bank[self.module_id]
             # Add "Lesson" here when looking up in module_bank
-            lesson_key = f"Lesson {self.lesson_name}"
+            lesson_key = f"Lesson {self.lesson_id}"
             if lesson_key in module:
                 return module[lesson_key]
             else:
@@ -120,11 +120,13 @@ class Module:  # Module class
             user["modules"] = user.get("modules", [])
             for level in levels:
                 level_data = {
-                    "lesson_name": level.lesson_name,
+                    "lesson_id": level.lesson_id,
                     "module_name": level.module_id,
                     "completed": level.completed,
                     "pass_threshold": level.pass_threshold,
-                    "questions_answers": level.questions_answers
+                    "questions_answers": level.questions_answers,
+                    "grade_percentage": level.grade_percentage,
+                    "completion_time": level.completion_time,
                 }
                 for module in user["modules"]:
                     if module["id"] == self.id:

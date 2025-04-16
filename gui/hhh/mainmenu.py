@@ -22,18 +22,24 @@ class Question:
         self.type = question_data.get("type")
         self.choices = question_data.get("choices")
         self.correct_answer = question_data.get("correct_answer")
+        self.difficulty = question_data.get("difficulty")
+        self.response_time = question_data.get("response_time")
 
 class Level:  # Level class
     def __init__(self, level):
         self.module_name = level["module_name"]
-        self.lesson_name = level["lesson_name"]
+        self.lesson_id = level["lesson_id"]
         self.completed = level["completed"]
+        self.grade_percentage = level["grade_percentage"]
+        self.completion_time = level["completion_time"]
         self.pass_threshold = level["pass_threshold"]
         self.questions_answers = self.load_questions(level)
 
     def load_questions(self, level):
+        questions = []
         for question_data in level["questions_answers"]:
-            Question(question_data)
+            questions.append(Question(question_data))
+        return questions
 
 class Achievements: # Achievements class
     def __init__(self, achievement): # Initialize achievements

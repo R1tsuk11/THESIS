@@ -12,9 +12,9 @@ module_1 = {
         {
             "id": 2,
             "type": "Image Picker",
-            "question": "Which image represents 'aga' (morning)?",
-            "choices": ["Morning sun image", "Night sky image", "Afternoon sunset image"],
-            "correct_answer": "Morning sun image",
+            "question": "Which image represents 'aga'?",
+            "choices": ["assets/morning.jpg", "assets/night.jpg"],
+            "correct_answer": "assets/morning.jpg",
             "vocabulary": "Maupay nga aga",
             "difficulty": 1,
             "response_time": 0
@@ -53,6 +53,7 @@ module_1 = {
             "id": 6,
             "type": "Pronounce",
             "question": "How do you pronounce 'gihapon'?",
+            "choices": ["giha-pon", "gi-hapon", "gi-ha-pon"],
             "correct_answer": "gi-ha-pon",
             "vocabulary": "gihapon",
             "difficulty": 1,

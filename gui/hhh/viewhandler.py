@@ -6,9 +6,6 @@ from setUpTime import set_up_time_page
 from mainmenu import main_menu_page
 from levels import levels_page
 from lesson import lesson_page
-from lessonTranslate import lesson_translate_page
-from lessonTranslateSentence import lesson_translate_sentence_page
-from lessonPronounce import lesson_pronounce_page
 
 def main(page: ft.Page):
     page.title = "User Authentication"
@@ -30,14 +27,8 @@ def main(page: ft.Page):
             levels_page(page)
         elif page.route == "/lesson":
             lesson_page(page)
-        elif page.route == "/lesson-translate":
-            lesson_translate_page(page)
-        elif page.route == "/lesson-translate-sentence":
-            lesson_translate_sentence_page(page)
-        elif page.route == "/lesson-pronounce":
-            lesson_pronounce_page(page)
         else:
-            login_page(page)
+            login_page(page)  # Default to login page
 
         page.update()
 
