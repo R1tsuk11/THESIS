@@ -1,9 +1,14 @@
 import flet as ft
 import re
 import os
+import time
+from lessonScore import lesson_score
 
 correct_answers = {}
 incorrect_answers = {}
+grade_percentage = 0.0
+total_response_time = 0.0
+formatted_time = ""
 
 def get_questions(page):
     """Retrieves questions for the current lesson."""
@@ -21,11 +26,21 @@ def get_questions(page):
 
 def build_lesson_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
+    start_time = time.time()
     header = "Lesson"
     waray_phrase = None
     english_translation = None
     full_definition = question_data.question
     question = full_definition
+
+    def add_time (e):
+        global total_response_time
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        total_response_time += response_time
+
+        if on_next:
+            on_next(e)
 
     # Find all substrings in single quotes
     matches = re.findall(r"'(.*?)'", question)
@@ -133,7 +148,7 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
                         ),
                         width=200,
                         height=50,
-                        on_click=on_next
+                        on_click=add_time
                     )
                 )
             ],
@@ -154,6 +169,7 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
     )
 
 def build_imgpicker_question(question_data, progress_value, on_next, on_back):
+    start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     ASSETS_PATH = os.path.join(BASE_DIR, "assets")
@@ -177,12 +193,28 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
         e.page.update()
 
     def handle_next(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
         if selected_option["value"] == 0:
             print("User selected Choice 1")
         elif selected_option["value"] == 1:
             print("User selected Choice 2")
         else:
             print("User did not select any image")
+
+        if selected_option["value"] is None:
+            print("No option selected")
+            return
+
+        if question_data.choices[selected_option["value"]] == correct_answer:
+            print("Correct answer!")
+            correct_answers[question_data.question] = question_data
+        else:
+            print("Incorrect answer.")
+            incorrect_answers[question_data.question] = question_data
+
         if on_next:
             on_next(e)
 
@@ -310,9 +342,11 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
     )
 
 def build_wordselect_question(question_data, progress_value, on_next, on_back):
+    start_time = time.time()
     options = question_data.choices
     word_to_translate = question_data.question
     selected_option = {"value": None}
+    correct_answer = question_data.correct_answer
 
     def on_option_click(e, option_index, option_containers):
         selected_option["value"] = option_index
@@ -321,6 +355,10 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
         e.page.update()
 
     def handle_next(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
         if selected_option["value"] == 0:
             print("User selected Choice 1")
         elif selected_option["value"] == 1:
@@ -329,6 +367,14 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
             print("User selected Choice 3")
         else:
             print("User did not select any image")
+
+        if question_data.choices[selected_option["value"]] == correct_answer:
+            print("Correct answer!")
+            correct_answers[question_data.question] = question_data
+        else:
+            print("Incorrect answer.")
+            incorrect_answers[question_data.question] = question_data
+
         if on_next:
             on_next(e)
 
@@ -447,7 +493,9 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
     )
 
 def build_tf_question(question_data, progress_value, on_next, on_back):
+    start_time = time.time()
     selected_option = {"value": None}
+    correct_answer = question_data.correct_answer
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
@@ -456,12 +504,24 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
         e.page.update()
 
     def handle_next(e):
-        if selected_option["value"] is None:
-            print("No option was selected")
-        elif selected_option["value"] == 0:
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
+        if selected_option["value"] == 0:
             print("Selected option: True")
         elif selected_option["value"] == 1:
             print("Selected option: False")
+        else:
+            print("No option selected")
+
+        if question_data.choices[selected_option["value"]] == correct_answer:
+            print("Correct answer!")
+            correct_answers[question_data.question] = question_data
+        else:
+            print("Incorrect answer.")
+            incorrect_answers[question_data.question] = question_data    
+
         if on_next:
             on_next(e)
 
@@ -543,6 +603,16 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
 def build_trivia_question(question_data, progress_value, on_next, on_back):
     # Extract data
     trivia_text = question_data.question
+    start_time = time.time()
+
+    def add_time(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
+
+        if on_next:
+            on_next(e)
 
     # Close button header
     header = ft.Container(
@@ -633,7 +703,7 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
                         ),
                         width=200,
                         height=50,
-                        on_click=on_next
+                        on_click=add_time
                     )
                 )
             ],
@@ -658,6 +728,7 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a pronunciation type question."""
 
+    start_time = time.time()
     instruction_text = question_data.question
     word_text = question_data.get("waray_text", "Aga")
     translation_text = question_data.get("english_text", "Morning")
@@ -806,7 +877,8 @@ def lesson_page(page: ft.Page):
     
     # Load questions
     questions = get_questions(page)
-    total_questions = len(questions) if questions else 0
+    total_questions = len(questions)
+    weighted_questions = [q for q in questions if getattr(q, 'correct_answer', None) is not None]
     current_question_index = {"value": 0}
     progress_value = (current_question_index["value"] + 1) / total_questions
     if not questions:
@@ -839,6 +911,20 @@ def lesson_page(page: ft.Page):
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:
-            page.go("/levels")  # or show results, etc.
+            print(len(weighted_questions))
+            print(len(correct_answers))
+            grade_percentage = (len(correct_answers) / len(weighted_questions)) * 100
+            formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
+            lesson_score(page, grade_percentage, len(correct_answers), len(incorrect_answers), formatted_time)
+            reset_var()
+
+    def reset_var():
+        current_question_index["value"] = 0
+        global correct_answers, incorrect_answers, total_response_time, formatted_time, grade_percentage
+        total_response_time = 0
+        formatted_time = "0:00"
+        grade_percentage = 0 
+        correct_answers.clear()
+        incorrect_answers.clear()
 
     render_current_question(progress_value)

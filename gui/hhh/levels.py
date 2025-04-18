@@ -36,15 +36,28 @@ def levels_page(page: ft.Page):
 
     def level_select(e, level_num):
         """Handles level selection and navigates to the lesson page."""
-        level_data = selected_module_levels[int(level_num) - 1]
-        if level_data.completed == True:
+        level_index = int(level_num) - 1
+        level_data = selected_module_levels[level_index]
+
+        # Check all previous levels (prerequisites)
+        prerequisite_levels = selected_module_levels[:level_index]
+        all_prerequisites_completed = all(level.completed for level in prerequisite_levels)
+
+        if not all_prerequisites_completed:
+            page.open(ft.SnackBar(ft.Text("You must complete previous levels first."), bgcolor="#FF0000"))
+            page.update()
+            return
+
+        # Optional: prevent re-entering a finished level
+        if level_data.completed:
             page.open(ft.SnackBar(ft.Text("Level already completed!"), bgcolor="#FF0000"))
             page.update()
             return
-        else:
-            page.session.set("level_data", level_data)  # Store selected level data in session
-            print(f"Selected level {level_num}")
-            page.go("/lesson")
+
+        # Proceed to the lesson
+        page.session.set("level_data", level_data)
+        print(f"Selected level {level_num}")
+        page.go("/lesson")
 
     def create_level_button(level_number, color="#4285F4"):
         return ft.Container(
