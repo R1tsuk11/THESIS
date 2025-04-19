@@ -1,24 +1,47 @@
 import flet as ft
+import json
+import os
 
 def get_module_data(page):
     modules = page.session.get("modules")
     module_id = page.session.get("module_id")
 
     if not modules:
-        print("Modules not found in session.")
-        return None
+        try:
+            with open("temp_modules.json", "r") as f:
+                modules = json.load(f)
+        except FileNotFoundError:
+            print("Temp module cache not found.")
+            return None
 
     if not module_id:
         print("Module ID not found in session.")
         return None
 
-    # Make sure module_id type matches (e.g., string vs int)
     for module in modules:
-        if str(module.id) == str(module_id):  # safe type comparison
+        if str(module.id) == str(module_id):
             return module.levels, module.desc, module.waray_name
 
     print(f"No matching module with ID {module_id} found.")
     return None
+
+def get_updated_data(page):
+    updated_data = page.session.get("updated_data")
+    if not updated_data:
+        return None
+
+    grade_percentage, formatted_time, correct_answers, incorrect_answers, updated_questions = updated_data
+    return {
+        "grade": grade_percentage,
+        "time": formatted_time,
+        "correct": correct_answers,
+        "incorrect": incorrect_answers,
+        "questions": updated_questions
+    }
+
+def clear_temp_module_cache():
+    if os.path.exists("temp_modules.json"):
+        os.remove("temp_modules.json")
 
 def levels_page(page: ft.Page):
     """Levels selection page"""
@@ -29,9 +52,45 @@ def levels_page(page: ft.Page):
     level_rows = []
     row = []
 
+    updated = get_updated_data(page)
+    incorrect_answers = updated["incorrect_answers"]
+    correct_answers = updated["correct_answers"]
+    if updated and updated["questions"]:
+        # Get any question to extract identifying info (safe if list isn't empty)
+        first_question = updated["questions"][0]
+
+        for level in selected_module_levels:
+            if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
+                level.questions_answers = updated["questions"]
+                level.completed = updated["grade"] >= 50
+                break
+
     def go_back(e):
         """Navigate back to the main menu"""
-        page.session.set("module_levels", selected_module_levels)
+        selected_module_levels = page.session.get("module_levels")
+        modules = page.session.get("modules")
+        module_id = page.session.get("module_id")
+
+        if modules and selected_module_levels and module_id:
+            for module in modules:
+                if str(module.id) == str(module_id):
+                    # Update levels in the matched module
+                    updated_levels = []
+                    for lvl in selected_module_levels:
+                        if getattr(lvl, "type", "") != "chaptertest":  # skip chaptertest
+                            updated_levels.append(lvl)
+                    module.levels = updated_levels
+                    break
+
+            # Save updated modules back to the user
+            user = page.session.get("user")
+            if user:
+                user.modules = modules
+                page.session.set("user", user)
+                page.session.set("incorrect_answers", incorrect_answers)
+                page.session.set("correct_answers", correct_answers)
+
+        clear_temp_module_cache()
         page.go("/main-menu")
 
     def level_select(e, level_num):
@@ -142,6 +201,19 @@ def levels_page(page: ft.Page):
         margin=ft.margin.only(top=10),
     )
 
+    back_button = ft.Container(
+        content=ft.ElevatedButton(
+            text="Back",
+            on_click=go_back,
+            bgcolor="#4285F4",
+            color="#FFFFFF",
+            width=100,
+            height=40,
+        ),
+        alignment=ft.alignment.center,
+        margin=ft.margin.only(bottom=10),
+    )
+
     bottom_nav = ft.Container(
         content=ft.Row(
             [
@@ -161,6 +233,7 @@ def levels_page(page: ft.Page):
     content = ft.Column(
         [
             header,
+            back_button,
             explanation,
             level_grid,
             ft.Container(expand=True),

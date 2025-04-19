@@ -2,8 +2,41 @@ import flet as ft
 import pymongo
 from pymongo.errors import ConfigurationError
 import sys
+import json
+import pprint
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+
+def cache_modules_to_temp(modules):
+    def module_to_dict(module):
+        return {
+            "user_id": module.user_id,
+            "id": module.id,
+            "desc": module.desc,
+            "eng_name": module.eng_name,
+            "waray_name": module.waray_name,
+            "completed": getattr(module, "completed", False),
+            "levels": [
+                {
+                    "id": level.lesson_id,
+                    "module_id": level.module_name,
+                    "questions_answers": [q.__dict__ for q in level.questions_answers],
+                    "completed": getattr(level, "completed", False),
+                    "grade_percentage": getattr(level, "grade_percentage", 0),
+                    "pass_threshold": getattr(level, "pass_threshold", 0),
+                    "completion_time": getattr(level, "completion_time", 0),
+                }
+                for level in module.levels
+            ],
+            "chapter_test": {
+                "questions_answers": module.chapter_test.questions_answers,
+                "completed": module.chapter_test.completed,
+                "pass_threshold": module.chapter_test.pass_threshold
+            }
+        }
+
+    with open("temp_modules.json", "w") as f:
+        json.dump([module_to_dict(m) for m in modules], f)
 
 def connect_to_mongoDB():
     try:
@@ -25,6 +58,18 @@ class Question:
         self.difficulty = question_data.get("difficulty")
         self.response_time = question_data.get("response_time")
 
+    def to_dict(self):
+        return {
+            "question": self.question,
+            "answer": self.answer,
+            "vocabulary": self.vocabulary,
+            "type": self.type,
+            "choices": self.choices,
+            "correct_answer": self.correct_answer,
+            "difficulty": self.difficulty,
+            "response_time": self.response_time
+        }
+
 class Level:  # Level class
     def __init__(self, level):
         self.module_name = level["module_name"]
@@ -34,6 +79,22 @@ class Level:  # Level class
         self.completion_time = level["completion_time"]
         self.pass_threshold = level["pass_threshold"]
         self.questions_answers = self.load_questions(level)
+
+    def to_dict(self):
+        return {
+            "lesson_id": self.lesson_id,
+            "module_name": self.module_name,
+            "questions_answers": [
+                q.to_dict() if hasattr(q, 'to_dict') else {
+                    "question": str(q)  # or however you want to serialize the question
+                }
+                for q in self.questions_answers
+            ],
+            "completed": self.completed,
+            "grade_percentage": self.grade_percentage,
+            "completion_time": self.completion_time,
+            "pass_threshold": self.pass_threshold
+        }
 
     def load_questions(self, level):
         questions = []
@@ -48,6 +109,15 @@ class Achievements: # Achievements class
         self.description = achievement["description"]
         self.icon = achievement["icon"]
         self.completed = achievement["completed"]
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "icon": self.icon,
+            "completed": self.completed
+        }
 
 class ChapterTest: # Chapter Test class
     def __init__(self, chapter_test):
@@ -65,6 +135,22 @@ class Module:  # Module class
         self.completed = module["completed"]
         self.levels = self.load_levels(module["levels"])
         self.chapter_test = ChapterTest(module["chapter_test"])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "waray_name": self.waray_name,
+            "eng_name": self.eng_name,
+            "desc": self.desc,
+            "user_id": self.user_id,
+            "completed": self.completed,
+            "chapter_test": {
+                "questions_answers": self.chapter_test.questions_answers,
+                "completed": self.chapter_test.completed,
+                "pass_threshold": self.chapter_test.pass_threshold
+            },
+            "levels": [level.to_dict() for level in self.levels]
+        }
 
     def load_levels(self, levels):
         lessons = []
@@ -84,6 +170,26 @@ class User:  # User class
         self.questions_correct = {}
         self.achievements = {}
         self.modules = {}
+        self.time = 0
+        self.email = None
+
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "email": self.email,
+            "password": self.password,
+            "proficiency": self.proficiency,
+            "library": self.library,
+            "questions_correct": self.questions_correct,
+            "questions_incorrect": self.questions_incorrect,
+            "achievements": {
+                key: val if isinstance(val, dict) else val.to_dict()
+                for key, val in self.achievements.items()
+            },
+            "modules": [m.to_dict() for m in self.modules],
+            "time": self.time
+        }
 
     def get_user(self, user_id):
         """Retrieves user data from the database."""
@@ -92,6 +198,7 @@ class User:  # User class
         if user:
             self.user_id = user["user_id"]
             self.user_name = user["user_name"]
+            self.email = user["email"]
             self.proficiency = user["proficiency"]
             self.password = user["password"]
             self.library = user["library"]
@@ -99,6 +206,7 @@ class User:  # User class
             self.questions_correct = user["questions_correct"]
             self.achievements = user["achievements"]
             self.modules = user["modules"]
+            self.time = user["time"]
         else:
             print("User not found in database.")
             return None
@@ -118,42 +226,50 @@ class User:  # User class
         self.achievements = loaded_achievements
 
     def load_data(self, user_id, page):
-        """Loads user data from the database."""
+        """Loads user data from the session or database."""
+        updated_user = page.session.get("user")
+
+        if updated_user and updated_user.user_id == user_id:
+            print("Loaded updated user from session.")
+            self.__dict__.update(updated_user.__dict__)
+            return self
+
+        # Fallback to DB
         self.get_user(user_id)
 
-        if self.modules:
-            # Convert each module dictionary to a Module instance
-            self.modules = [Module(module_data) for module_data in self.modules]
-        else:
-            print("No modules found for this user.")
-            return None
+        # Make sure modules and achievements are properly restored
+        self.modules = [Module(m) if isinstance(m, dict) else m for m in self.modules]
+        self.achievements = {k: Achievements(v) if isinstance(v, dict) else v for k, v in self.achievements.items()}
 
-        if self.achievements:
-            self.load_achievements(self.achievements)
-
-
-        else:
-            print("No achievements found for this user.")
-            return None
-
-        page.open(ft.SnackBar(ft.Text(f"Successfully loaded data!"), bgcolor="#4CAF50"))
+        page.session.set("user", self)  # Cache it for later updates
+        page.open(ft.SnackBar(ft.Text("Successfully loaded data!"), bgcolor="#4CAF50"))
         return self
 
-    def save_user(self):
+
+    def save_user(self, page):
         """Saves user data to the database."""
         usercol = connect_to_mongoDB()
-        user_data = {
-            "user_id": self.user_id,
-            "user_name": self.user_name,
-            "proficiency": self.proficiency,
-            "password": self.password,
-            "word_library": self.word_library,
-            "questions_wrong": self.questions_wrong,
-            "questions_correct": self.questions_correct,
-            "achievements": self.achievements,
-            "modules": self.modules
-        }
-        usercol.update_one({"user_id": self.user_id}, {"$set": user_data}, upsert=True)
+
+        # This line is actually redundant since self.to_dict() covers all of this:
+        # But keeping it for clarity.
+        user_data = self.to_dict()
+
+        # Make sure you're using the correct variable for the collection
+        result = usercol.update_one(
+            {"user_id": self.user_id},
+            {"$set": user_data},
+            upsert=True
+        )
+
+        print("Matched:", result.matched_count,
+            "Modified:", result.modified_count,
+            "Upserted ID:", result.upserted_id)
+
+        page.open(ft.SnackBar(ft.Text("User data saved successfully!"), bgcolor="#4CAF50"))
+        page.update()
+        page.session.clear()
+        page.go("/login")
+
 
 def get_user_id(page):
         """Retrieves user_id from previous page session."""
@@ -197,6 +313,7 @@ def main_menu_page(page: ft.Page):
         
     def navigate_to_levels(e, user, module_id):
         """Navigates to levels page"""
+        cache_modules_to_temp(user.modules)  # Cache modules to temp file
         page.session.set("modules", user.modules)
         page.session.set("module_id", module_id)
         page.go("/levels")
@@ -260,10 +377,19 @@ def main_menu_page(page: ft.Page):
     cards = []
     user_id = get_user_id(page)  # Get user ID from session
     user = User().load_data(user_id, page)  # Load user data
+    pprint.pprint(user.to_dict())
     for module in user.modules:
         card = create_module_card(module.id, module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
         cards.append(card)
 
+    # Logout button
+    logout_button = ft.IconButton(
+        icon=ft.Icons.LOGOUT,
+        icon_color="#FFFFFF",
+        icon_size=24,
+        tooltip="Logout",
+        on_click=lambda e: user.save_user(page)  # Navigate to login page on logout
+    )
     # Create the bottom navigation bar
     bottom_nav = ft.Container(
         content=ft.Row(
@@ -306,6 +432,7 @@ def main_menu_page(page: ft.Page):
     content = ft.Column(
         [
             header,
+            logout_button,
             ft.Container(
                 content=ft.Column(
                     [

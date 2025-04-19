@@ -18,9 +18,14 @@ def get_questions(page):
         return None
 
     questions = level_data.questions_answers
+
     if not questions:
-        print("No questions found in level data.")
+        print("No questions found.")
         return None
+
+    for q in questions:
+        q.lesson_id = level_data.lesson_id
+        q.module_name = level_data.module_name
 
     return questions
 
@@ -887,7 +892,6 @@ def lesson_page(page: ft.Page):
 
     def render_current_question(progress_value):
         page.views.clear()  # Optional: clear previous view
-
         question = questions[current_question_index["value"]]
         content = render_question_layout(
             question_data=question,
@@ -915,7 +919,8 @@ def lesson_page(page: ft.Page):
             print(len(correct_answers))
             grade_percentage = (len(correct_answers) / len(weighted_questions)) * 100
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
-            lesson_score(page, grade_percentage, len(correct_answers), len(incorrect_answers), formatted_time)
+            page.session.set("updated_data", [grade_percentage, formatted_time, correct_answers, incorrect_answers, questions])
+            lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)
             reset_var()
 
     def reset_var():

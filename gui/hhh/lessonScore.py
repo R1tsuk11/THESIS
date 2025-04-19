@@ -13,13 +13,15 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     """
     page.title = "Arami - Lesson Score"
     page.padding = 0
+    correct = len(noOfCorrect)
+    incorrect = len(noOfIncorrect)
     
-    def go_back(e):
+    def go_back(e): # To be voided
         """Navigate back to the previous page"""
         page.go("/levels")
     
-    def next_screen(e):
-        """Navigate to the next lesson"""
+    def return_to_levels(e):
+        """Navigate back to the levels page"""
         page.go("/levels")
     
     # Create top header with close button
@@ -122,7 +124,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
                             content=ft.Column(
                                 [
                                     ft.Text(
-                                        noOfCorrect,
+                                        correct,
                                         color="#3A5D30",  # Darker green text
                                         size=36,
                                         weight=ft.FontWeight.BOLD
@@ -152,7 +154,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
                             content=ft.Column(
                                 [
                                     ft.Text(
-                                        noOfIncorrect,
+                                        incorrect,
                                         color="#95353A",  # Darker red text
                                         size=36,
                                         weight=ft.FontWeight.BOLD
@@ -271,7 +273,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
                         ),
                         width=200,
                         height=50,
-                        on_click=next_screen
+                        on_click=return_to_levels  # Navigate back to levels page
                     )
                 )
             ],
