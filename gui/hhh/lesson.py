@@ -2,6 +2,7 @@ import flet as ft
 import re
 import os
 import time
+import json
 from lessonScore import lesson_score
 
 correct_answers = {}
@@ -9,6 +10,7 @@ incorrect_answers = {}
 grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
+user_library = []
 
 def get_questions(page):
     """Retrieves questions for the current lesson."""
@@ -29,6 +31,23 @@ def get_questions(page):
 
     return questions
 
+def get_user_library():
+    try:
+        with open("temp_library.json", "r") as f:
+            user_library = json.load(f)
+            return user_library
+    except FileNotFoundError:
+        print("Temp library cache not found.")
+        return None
+    
+def update_user_library():
+    global user_library
+    try:
+        with open("temp_library.json", "w") as f:
+            json.dump(user_library, f)
+    except Exception as e:
+        print(f"Error updating library: {e}")
+
 def build_lesson_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
     start_time = time.time()
@@ -37,8 +56,11 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
     english_translation = None
     full_definition = question_data.question
     question = full_definition
+    global user_library
 
-    def add_time (e):
+    user_library.append(question_data.vocabulary)
+
+    def add_time(e):
         global total_response_time
         response_time = time.time() - start_time
         question_data.response_time = response_time
@@ -182,6 +204,7 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
     img2 = os.path.join(ASSETS_PATH, os.path.basename(question_data.choices[1]))
     question = question_data.question
     correct_answer = question_data.correct_answer
+    global user_library
 
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
@@ -216,6 +239,8 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correct_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data
@@ -352,6 +377,7 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
     word_to_translate = question_data.question
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
+    global user_library
 
     def on_option_click(e, option_index, option_containers):
         selected_option["value"] = option_index
@@ -376,6 +402,8 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correct_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data
@@ -501,6 +529,7 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
+    global user_library
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
@@ -523,6 +552,8 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correct_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data    
@@ -882,6 +913,8 @@ def lesson_page(page: ft.Page):
     
     # Load questions
     questions = get_questions(page)
+    global user_library
+    user_library = get_user_library()
     total_questions = len(questions)
     weighted_questions = [q for q in questions if getattr(q, 'correct_answer', None) is not None]
     current_question_index = {"value": 0}
@@ -920,6 +953,7 @@ def lesson_page(page: ft.Page):
             grade_percentage = (len(correct_answers) / len(weighted_questions)) * 100
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
             page.session.set("updated_data", [grade_percentage, formatted_time, correct_answers, incorrect_answers, questions])
+            update_user_library()
             lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)
             reset_var()
 

@@ -48,7 +48,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     ASSETS_PATH = os.path.join(BASE_DIR, "assets")
     img1 = os.path.join(ASSETS_PATH, os.path.basename("assets/goodjob.png"))
     img2 = os.path.join(ASSETS_PATH, os.path.basename("assets/tryagain.png"))
-    celebration_image = img1 if accuracyPercentage >= 70 else img2
+    celebration_image = img1 if accuracyPercentage >= 50 else img2
     
     # Card content
     card_content = ft.Container(

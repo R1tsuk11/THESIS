@@ -53,8 +53,9 @@ def levels_page(page: ft.Page):
     row = []
 
     updated = get_updated_data(page)
-    incorrect_answers = updated["incorrect_answers"]
-    correct_answers = updated["correct_answers"]
+    if updated:
+        incorrect_answers = updated["incorrect"]
+        correct_answers = updated["correct"]
     if updated and updated["questions"]:
         # Get any question to extract identifying info (safe if list isn't empty)
         first_question = updated["questions"][0]

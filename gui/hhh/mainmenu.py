@@ -4,6 +4,7 @@ from pymongo.errors import ConfigurationError
 import sys
 import json
 import pprint
+import os
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -37,6 +38,14 @@ def cache_modules_to_temp(modules):
 
     with open("temp_modules.json", "w") as f:
         json.dump([module_to_dict(m) for m in modules], f)
+
+def cache_library_to_temp(library):
+    with open("temp_library.json", "w") as f:
+        json.dump(library, f)
+
+def clear_temp_library_cache():
+    if os.path.exists("temp_library.json"):
+        os.remove("temp_library.json")
 
 def connect_to_mongoDB():
     try:
@@ -245,16 +254,20 @@ class User:  # User class
         page.open(ft.SnackBar(ft.Text("Successfully loaded data!"), bgcolor="#4CAF50"))
         return self
 
+    def save_library(self):
+        if os.path.exists("temp_library.json"):
+            with open("temp_library.json", "r") as f:
+                self.library = json.load(f)
+        else:
+            print("No temp library cache found.")
 
     def save_user(self, page):
         """Saves user data to the database."""
+        self.save_library()
+        
         usercol = connect_to_mongoDB()
-
-        # This line is actually redundant since self.to_dict() covers all of this:
-        # But keeping it for clarity.
         user_data = self.to_dict()
 
-        # Make sure you're using the correct variable for the collection
         result = usercol.update_one(
             {"user_id": self.user_id},
             {"$set": user_data},
@@ -264,6 +277,11 @@ class User:  # User class
         print("Matched:", result.matched_count,
             "Modified:", result.modified_count,
             "Upserted ID:", result.upserted_id)
+
+        try:
+            clear_temp_library_cache()
+        except FileNotFoundError:
+            print("No temp file to clear.")
 
         page.open(ft.SnackBar(ft.Text("User data saved successfully!"), bgcolor="#4CAF50"))
         page.update()
@@ -314,6 +332,7 @@ def main_menu_page(page: ft.Page):
     def navigate_to_levels(e, user, module_id):
         """Navigates to levels page"""
         cache_modules_to_temp(user.modules)  # Cache modules to temp file
+        cache_library_to_temp(user.library)  # Cache library to temp file
         page.session.set("modules", user.modules)
         page.session.set("module_id", module_id)
         page.go("/levels")
