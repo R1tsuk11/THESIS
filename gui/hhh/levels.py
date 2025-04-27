@@ -25,18 +25,42 @@ def get_module_data(page):
     print(f"No matching module with ID {module_id} found.")
     return None
 
+def get_chapter_test(page):
+    modules = page.session.get("modules")
+    module_id = page.session.get("module_id")
+
+    if not modules:
+        try:
+            with open("temp_modules.json", "r") as f:
+                modules = json.load(f)
+        except FileNotFoundError:
+            print("Temp module cache not found.")
+            return None
+
+    if not module_id:
+        print("Module ID not found in session.")
+        return None
+
+    for module in modules:
+        if str(module.id) == str(module_id):
+            return module.chapter_test  # <-- now it's safe!
+
+    print(f"No matching module with ID {module_id} found.")
+    return None
+
 def get_updated_data(page):
     updated_data = page.session.get("updated_data")
     if not updated_data:
         return None
 
-    grade_percentage, formatted_time, correct_answers, incorrect_answers, updated_questions = updated_data
+    grade_percentage, formatted_time, total_response_time, correct_answers, incorrect_answers, updated_questions = updated_data
     return {
         "grade": grade_percentage,
         "time": formatted_time,
         "correct": correct_answers,
         "incorrect": incorrect_answers,
-        "questions": updated_questions
+        "questions": updated_questions,
+        "total_response_time": total_response_time,
     }
 
 def clear_temp_module_cache():
@@ -56,6 +80,17 @@ def levels_page(page: ft.Page):
     if updated:
         incorrect_answers = updated["incorrect"]
         correct_answers = updated["correct"]
+        completion_time = updated["total_response_time"]
+        grade_percentage = updated["grade"]
+
+        print("DEBUG (levels.py) correct_answers:", correct_answers)
+        print("DEBUG (levels.py) incorrect_answers:", incorrect_answers)
+        print("DEBUG (levels.py) correct_answers keys:", list(correct_answers.keys()))
+        print("DEBUG (levels.py) incorrect_answers keys:", list(incorrect_answers.keys()))
+        print("DEBUG (levels.py) correct_answers values:", list(correct_answers.values()))
+        print("DEBUG (levels.py) incorrect_answers values:", list(incorrect_answers.values()))
+        page.session.set("correct_answers", correct_answers)
+        page.session.set("incorrect_answers", incorrect_answers)
     if updated and updated["questions"]:
         # Get any question to extract identifying info (safe if list isn't empty)
         first_question = updated["questions"][0]
@@ -63,7 +98,9 @@ def levels_page(page: ft.Page):
         for level in selected_module_levels:
             if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
                 level.questions_answers = updated["questions"]
-                level.completed = updated["grade"] >= 50
+                level.completed = updated["grade"] >= level.pass_threshold
+                level.completion_time = completion_time
+                level.grade_percentage = grade_percentage
                 break
 
     def go_back(e):
@@ -88,8 +125,8 @@ def levels_page(page: ft.Page):
             if user:
                 user.modules = modules
                 page.session.set("user", user)
-                page.session.set("incorrect_answers", incorrect_answers)
-                page.session.set("correct_answers", correct_answers)
+            else:
+                print("User not found in session. Cannot save updated modules.")
 
         clear_temp_module_cache()
         page.go("/main-menu")
@@ -118,6 +155,24 @@ def levels_page(page: ft.Page):
         page.session.set("level_data", level_data)
         print(f"Selected level {level_num}")
         page.go("/lesson")
+
+    def chapter_test_select(page):
+        all_levels_completed = all(level.completed for level in selected_module_levels)
+        ct_level = get_chapter_test(page)
+
+        """if not all_levels_completed:
+            page.open(ft.SnackBar(ft.Text("You must complete all levels first."), bgcolor="#FF0000"))
+            page.update()
+            return
+        
+        if ct_level.completed:
+            page.open(ft.SnackBar(ft.Text("Chapter Test already completed!"), bgcolor="#FF0000"))
+            page.update()
+            return"""
+        
+        # Proceed to the chapter test
+        page.session.set("ct_data", ct_level)
+        page.go("/chaptertest")
 
     def create_level_button(level_number, color="#4285F4"):
         return ft.Container(
@@ -215,6 +270,23 @@ def levels_page(page: ft.Page):
         margin=ft.margin.only(bottom=10),
     )
 
+    chapter_test = ft.Container(
+            content=ft.Text(
+                "CT",
+                color="#FFFFFF",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER,
+            ),
+            bgcolor="#4285F4",
+            width=60,
+            height=60,
+            border_radius=10,
+            alignment=ft.alignment.center,
+            data="chaptertest",
+            on_click=lambda e: chapter_test_select(page)
+        )
+
     bottom_nav = ft.Container(
         content=ft.Row(
             [
@@ -237,6 +309,7 @@ def levels_page(page: ft.Page):
             back_button,
             explanation,
             level_grid,
+            chapter_test,
             ft.Container(expand=True),
             bottom_nav,
         ],

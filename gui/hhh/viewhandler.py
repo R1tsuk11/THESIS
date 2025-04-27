@@ -6,6 +6,7 @@ from setUpTime import set_up_time_page
 from mainmenu import main_menu_page
 from levels import levels_page
 from lesson import lesson_page
+from chapterTest import chapter_test_page
 
 def main(page: ft.Page):
     page.title = "User Authentication"
@@ -27,6 +28,8 @@ def main(page: ft.Page):
             levels_page(page)
         elif page.route == "/lesson":
             lesson_page(page)
+        elif page.route == "/chaptertest":
+            chapter_test_page(page)
         else:
             login_page(page)  # Default to login page
 

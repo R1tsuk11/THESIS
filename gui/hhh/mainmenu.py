@@ -30,6 +30,7 @@ def cache_modules_to_temp(modules):
                 for level in module.levels
             ],
             "chapter_test": {
+                "module_id": module.chapter_test.module_id,
                 "questions_answers": module.chapter_test.questions_answers,
                 "completed": module.chapter_test.completed,
                 "pass_threshold": module.chapter_test.pass_threshold
@@ -130,6 +131,7 @@ class Achievements: # Achievements class
 
 class ChapterTest: # Chapter Test class
     def __init__(self, chapter_test):
+        self.module_id = chapter_test["module_id"]
         self.questions_answers = chapter_test["questions_answers"]
         self.completed = chapter_test["completed"]
         self.pass_threshold = chapter_test["pass_threshold"]
@@ -177,6 +179,7 @@ class User:  # User class
         self.library = []
         self.questions_incorrect = {}
         self.questions_correct = {}
+        self.chapter_test_records = {}
         self.achievements = {}
         self.modules = {}
         self.time = 0
@@ -190,8 +193,29 @@ class User:  # User class
             "password": self.password,
             "proficiency": self.proficiency,
             "library": self.library,
-            "questions_correct": self.questions_correct,
-            "questions_incorrect": self.questions_incorrect,
+            "questions_correct": {
+                key: val.to_dict() if not isinstance(val, dict) else val
+                for key, val in self.questions_correct.items()
+            },
+            "questions_incorrect": {
+                key: val.to_dict() if not isinstance(val, dict) else val
+                for key, val in self.questions_incorrect.items()
+            },
+            "chapter_test_records": {
+                module_id: {
+                    "grade_percentage": data["grade_percentage"],
+                    "total_time_spent": data["total_time_spent"],
+                    "questions_correct": {
+                        q: qdata.to_dict() if hasattr(qdata, "to_dict") else qdata
+                        for q, qdata in data.get("questions_correct", {}).items()
+                    },
+                    "questions_incorrect": {
+                        q: qdata.to_dict() if hasattr(qdata, "to_dict") else qdata
+                        for q, qdata in data.get("questions_incorrect", {}).items()
+                    }
+                }
+                for module_id, data in self.chapter_test_records.items()
+            },
             "achievements": {
                 key: val if isinstance(val, dict) else val.to_dict()
                 for key, val in self.achievements.items()
@@ -213,6 +237,7 @@ class User:  # User class
             self.library = user["library"]
             self.questions_incorrect = user["questions_incorrect"]
             self.questions_correct = user["questions_correct"]
+            self.chapter_test_records = user["chapter_test_records"]
             self.achievements = user["achievements"]
             self.modules = user["modules"]
             self.time = user["time"]
@@ -238,21 +263,38 @@ class User:  # User class
         """Loads user data from the session or database."""
         updated_user = page.session.get("user")
 
+        if os.path.exists("temp_chaptertest_data.json"):
+            with open("temp_chaptertest.json", "r") as f:
+                chapter_test_data = json.load(f)
+
+            module_id = chapter_test_data["module_id"]
+
+            self.chapter_test_records[module_id] = chapter_test_data
+
         if updated_user and updated_user.user_id == user_id:
             print("Loaded updated user from session.")
             self.__dict__.update(updated_user.__dict__)
+
+            correct_answers = page.session.get("correct_answers")
+            incorrect_answers = page.session.get("incorrect_answers")
+            if correct_answers and incorrect_answers:
+                questions_correct = {k: Question(v) if isinstance(v, dict) else v for k, v in correct_answers.items()}
+                questions_incorrect = {k: Question(v) if isinstance(v, dict) else v for k, v in incorrect_answers.items()}
+                self.questions_correct = questions_correct
+                self.questions_incorrect = questions_incorrect
+                
             return self
+        else:
+            # Fallback to DB
+            self.get_user(user_id)
 
-        # Fallback to DB
-        self.get_user(user_id)
+            # Make sure modules and achievements are properly restored
+            self.modules = [Module(m) if isinstance(m, dict) else m for m in self.modules]
+            self.achievements = {k: Achievements(v) if isinstance(v, dict) else v for k, v in self.achievements.items()}
 
-        # Make sure modules and achievements are properly restored
-        self.modules = [Module(m) if isinstance(m, dict) else m for m in self.modules]
-        self.achievements = {k: Achievements(v) if isinstance(v, dict) else v for k, v in self.achievements.items()}
-
-        page.session.set("user", self)  # Cache it for later updates
-        page.open(ft.SnackBar(ft.Text("Successfully loaded data!"), bgcolor="#4CAF50"))
-        return self
+            page.session.set("user", self)  # Cache it for later updates
+            page.open(ft.SnackBar(ft.Text("Successfully loaded data!"), bgcolor="#4CAF50"))
+            return self
 
     def save_library(self):
         if os.path.exists("temp_library.json"):

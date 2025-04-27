@@ -1,5 +1,4 @@
 import flet as ft
-import re
 import os
 import time
 import json
@@ -10,191 +9,19 @@ incorrect_answers = {}
 grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
-user_library = []
 
-def get_questions(page):
-    """Retrieves questions for the current lesson."""
-    level_data = page.session.get("level_data")
-    if not level_data:
-        print("Level data not found in session.")
-        return None
-
-    questions = level_data.questions_answers
-
-    if not questions:
-        print("No questions found.")
-        return None
-
-    for q in questions:
-        q.lesson_id = level_data.lesson_id
-        q.module_name = level_data.module_name
-
-    return questions
-
-def get_user_library():
-    try:
-        with open("temp_library.json", "r") as f:
-            user_library = json.load(f)
-            return user_library
-    except FileNotFoundError:
-        print("Temp library cache not found.")
+def get_test_data(page):
+    ct_data = page.session.get("ct_data")
+    if not ct_data:
+        print("Chapter Test data not found.")
         return None
     
-def update_user_library():
-    global user_library
-    try:
-        with open("temp_library.json", "w") as f:
-            json.dump(user_library, f)
-    except Exception as e:
-        print(f"Error updating library: {e}")
+    ct_questions = ct_data.questions_answers
 
-def build_lesson_question(question_data, progress_value, on_next, on_back):
-    """Builds the layout for a 'Lesson' type question."""
-    start_time = time.time()
-    header = "Lesson"
-    waray_phrase = None
-    english_translation = None
-    full_definition = question_data.question
-    question = full_definition
-    global user_library
-
-    if question_data.vocabulary not in user_library:
-        user_library.append(question_data.vocabulary)
-
-    def add_time(e):
-        global total_response_time
-        response_time = time.time() - start_time
-        question_data.response_time = response_time
-        total_response_time += response_time
-
-        if on_next:
-            on_next(e)
-
-    # Find all substrings in single quotes
-    matches = re.findall(r"'(.*?)'", question)
-
-    if len(matches) >= 2:
-        waray_phrase = matches[0]
-        english_translation = matches[1]
-    else:
-        print("Not enough matches found in the question string.")
-
-    card_content = ft.Container(
-        content=ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
-                        ft.Container(
-                            ft.Text(header, color="grey", size=14, weight=ft.FontWeight.W_500),
-                            padding=ft.padding.symmetric(horizontal=10)
-                        ),
-                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER
-                ),
-                ft.Row(
-                    [
-                        ft.IconButton(
-                            icon=ft.icons.VOLUME_UP,
-                            icon_color="#0078D7",
-                            icon_size=24,
-                            # Optionally play audio here
-                        ),
-                        ft.Text(
-                            waray_phrase,
-                            color="#0078D7",
-                            size=24,
-                            weight=ft.FontWeight.BOLD
-                        )
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=5
-                ),
-                ft.Container(
-                    ft.Text(english_translation, color="grey", size=16),
-                    margin=ft.margin.only(bottom=20)
-                ),
-                ft.Container(
-                    ft.Image(
-                        src="assets/L1.png",
-                        width=250,
-                        height=150,
-                        fit=ft.ImageFit.CONTAIN
-                    ),
-                    alignment=ft.alignment.center,
-                    margin=ft.margin.only(bottom=20)
-                ),
-                ft.Container(
-                    ft.Text(
-                        full_definition,
-                        text_align=ft.TextAlign.CENTER,
-                        size=16,
-                        weight=ft.FontWeight.W_500,
-                        color="black"
-                    ),
-                    margin=ft.margin.only(bottom=20)
-                )
-            ],
-            alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=10
-        ),
-        width=312,
-        bgcolor="white",
-        border_radius=10,
-        padding=20,
-        margin=ft.margin.only(top=20, bottom=20)
-    )
-
-    progress = ft.Container(
-        ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20)
-    )
-
-    bottom_nav = ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(
-                    content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
-                        icon_color="grey",
-                        on_click=on_back
-                    ),
-                    width=100,
-                    bgcolor="white",
-                    border_radius=ft.border_radius.all(30),
-                    padding=5
-                ),
-                ft.Container(width=10),
-                ft.Container(
-                    content=ft.ElevatedButton(
-                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                        style=ft.ButtonStyle(
-                            bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),
-                        ),
-                        width=200,
-                        height=50,
-                        on_click=add_time
-                    )
-                )
-            ],
-            alignment=ft.MainAxisAlignment.CENTER
-        ),
-        padding=ft.padding.only(bottom=20)
-    )
-
-    return ft.Column(
-        [
-            card_content,
-            progress,
-            bottom_nav
-        ],
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True
-    )
+    if not ct_questions:
+        print("Chapter Test has no questions stored.")
+        return None
+    return ct_questions
 
 def build_imgpicker_question(question_data, progress_value, on_next, on_back):
     start_time = time.time()
@@ -205,7 +32,6 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
     img2 = os.path.join(ASSETS_PATH, os.path.basename(question_data.choices[1]))
     question = question_data.question
     correct_answer = question_data.correct_answer
-    global user_library
 
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
@@ -240,8 +66,6 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correct_answers[question_data.question] = question_data
-            if question_data.vocabulary not in user_library:
-                user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data
@@ -378,7 +202,6 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
     word_to_translate = question_data.question
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
-    global user_library
 
     def on_option_click(e, option_index, option_containers):
         selected_option["value"] = option_index
@@ -403,8 +226,6 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correct_answers[question_data.question] = question_data
-            if question_data.vocabulary not in user_library:
-                user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data
@@ -530,7 +351,6 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
-    global user_library
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
@@ -553,8 +373,6 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correct_answers[question_data.question] = question_data
-            if question_data.vocabulary not in user_library:
-                user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data    
@@ -635,131 +453,6 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
         alignment=ft.MainAxisAlignment.START,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=0
-    )
-
-def build_trivia_question(question_data, progress_value, on_next, on_back):
-    # Extract data
-    trivia_text = question_data.question
-    start_time = time.time()
-
-    def add_time(e):
-        response_time = time.time() - start_time
-        question_data.response_time = response_time
-        global total_response_time
-        total_response_time += response_time
-
-        if on_next:
-            on_next(e)
-
-    # Close button header
-    header = ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(width=50),  # Spacer
-                ft.Container(
-                    width=50,
-                    content=ft.IconButton(
-                        icon=ft.icons.CLOSE,
-                        icon_color="black",
-                        on_click=on_back
-                    )
-                )
-            ],
-            alignment=ft.MainAxisAlignment.END
-        ),
-        padding=ft.padding.only(top=10, right=10)
-    )
-
-    # Card content
-    card_content = ft.Container(
-        content=ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Container(content=ft.Divider(color="grey", thickness=1), width=60),
-                        ft.Container(
-                            content=ft.Text(question_data.type, color="grey", size=14, weight=ft.FontWeight.W_500),
-                            padding=ft.padding.symmetric(horizontal=10)
-                        ),
-                        ft.Container(content=ft.Divider(color="grey", thickness=1), width=60),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER
-                ),
-                ft.Container(
-                    content=ft.Text(
-                        trivia_text,
-                        text_align=ft.TextAlign.CENTER,
-                        size=16,
-                        weight=ft.FontWeight.BOLD,  # Changed to BOLD
-                        color="#0078D7"
-                    ),
-                    margin=ft.margin.only(top=20, bottom=20),
-                    padding=ft.padding.symmetric(horizontal=10)
-                )
-            ],
-            alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=10
-        ),
-        width=312,
-        height=280,
-        bgcolor="white",
-        border_radius=10,
-        padding=20,
-        margin=ft.margin.only(top=20, bottom=20)
-    )
-
-    # Progress bar
-    progress = ft.Container(
-        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20)
-    )
-
-    # Navigation controls
-    bottom_nav = ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(
-                    content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
-                        icon_color="grey",
-                        on_click=on_back
-                    ),
-                    width=100,
-                    bgcolor="white",
-                    border_radius=ft.border_radius.all(30),
-                    padding=5
-                ),
-                ft.Container(width=10),
-                ft.Container(
-                    content=ft.ElevatedButton(
-                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                        style=ft.ButtonStyle(
-                            bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),
-                        ),
-                        width=200,
-                        height=50,
-                        on_click=add_time
-                    )
-                )
-            ],
-            alignment=ft.MainAxisAlignment.CENTER
-        ),
-        padding=ft.padding.only(bottom=20)
-    )
-
-    return ft.Column(
-        [
-            header,
-            ft.Container(content=card_content, alignment=ft.alignment.center),
-            progress,
-            bottom_nav
-        ],
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=0,
-        expand=True
     )
 
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
@@ -874,28 +567,8 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-
-def render_question_layout(question_data, progress_value, on_next, on_back):
-    question_type = question_data.type
-    
-    if question_type == "Lesson":
-        return build_lesson_question(question_data, progress_value, on_next, on_back)
-    elif question_type == "Image Picker":
-        return build_imgpicker_question(question_data, progress_value, on_next, on_back)
-    elif question_type == "Word Select / Translate":
-        return build_wordselect_question(question_data, progress_value, on_next, on_back)
-    elif question_type == "True or False":
-        return build_tf_question(question_data, progress_value, on_next, on_back)
-    elif question_type == "Cultural Trivia":
-        return build_trivia_question(question_data, progress_value, on_next, on_back)
-    elif question_type == "Pronounce":
-        print("Pronounce question type not implemented yet. Using Word Select Layout")
-        return build_wordselect_question(question_data, progress_value, on_next, on_back)
-    else:
-        return ft.Text("Unknown question type.")
-
-def lesson_page(page: ft.Page):
-    page.title = "Arami - Lesson"
+def chapter_test_page(page):
+    page.title = "Arami - Chapter Test"
     page.padding = 0
 
     def go_back(e):
@@ -911,60 +584,83 @@ def lesson_page(page: ft.Page):
         ),
         expand=True
     )
-    
-    # Load questions
-    questions = get_questions(page)
-    global user_library
-    user_library = get_user_library()
-    total_questions = len(questions)
-    weighted_questions = [q for q in questions if getattr(q, 'correct_answer', None) is not None]
-    current_question_index = {"value": 0}
-    progress_value = (current_question_index["value"] + 1) / total_questions
+
+    questions = get_test_data(page)
     if not questions:
         page.views.append(ft.View("/lesson", [ft.Text("No questions available.")]))
         return
+    total_questions = len(questions)
+    current_question_index = {"value": 0}
+    question_keys = list(questions.keys())
+    progress_value = (current_question_index["value"] + 1) / total_questions
+
+    def render_question_layout(question_data, progress_value, on_next, on_back):
+        question_type = question_data.type
+        
+        if question_type == "Image Picker":
+            return build_imgpicker_question(question_data, progress_value, on_next, on_back)
+        elif question_type == "Word Select / Translate":
+            return build_wordselect_question(question_data, progress_value, on_next, on_back)
+        elif question_type == "True or False":
+            return build_tf_question(question_data, progress_value, on_next, on_back)
+        elif question_type == "Pronounce":
+            print("Pronounce question type not implemented yet. Using Word Select Layout")
+            return build_wordselect_question(question_data, progress_value, on_next, on_back)
+        else:
+            return ft.Text("Unknown question type.")
 
     def render_current_question(progress_value):
-        page.views.clear()  # Optional: clear previous view
-        question = questions[current_question_index["value"]]
-        content = render_question_layout(
-            question_data=question,
-            progress_value=progress_value,
-            on_next=next_question,
-            on_back=go_back
-        )
-
-        page.views.append(
-            ft.View(
-                "/lesson",
-                [ft.Stack([background, content], expand=True)],
-                padding=0
+            page.views.clear()  # Optional: clear previous view
+            current_key = question_keys[current_question_index["value"]]
+            question = questions[current_key]
+            content = render_question_layout(
+                question_data=question,
+                progress_value=progress_value,
+                on_next=next_question,
+                on_back=go_back
             )
-        )
-        page.update()
-    
+
+            page.views.append(
+                ft.View(
+                    "/lesson",
+                    [ft.Stack([background, content], expand=True)],
+                    padding=0
+                )
+            )
+            page.update()
+
     def next_question(e=None):
         current_question_index["value"] += 1
         progress_value = (current_question_index["value"] + 1) / total_questions
+
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:
-            print("DEBUG correct_answers:", correct_answers)
-            print("DEBUG incorrect_answers:", incorrect_answers)
-            print("DEBUG correct_answers keys:", list(correct_answers.keys()))
-            print("DEBUG incorrect_answers keys:", list(incorrect_answers.keys()))
-            print("DEBUG correct_answers values:", list(correct_answers.values()))
-            print("DEBUG incorrect_answers values:", list(incorrect_answers.values()))
-            print(len(weighted_questions))
-            print(len(correct_answers))
-            grade_percentage = (len(correct_answers) / len(weighted_questions)) * 100
+            grade_percentage = (len(correct_answers) / total_questions) * 100
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
-            correct_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()}
-            incorrect_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()}
-            page.session.set("updated_data", [grade_percentage, formatted_time, total_response_time, correct_answers_serialized, incorrect_answers_serialized, questions])
-            update_user_library()
+
+            cache_chaptertest_data_to_temp(
+                module_id=questions.module_id,
+                grade_percentage=grade_percentage,
+                total_time_spent=total_response_time,
+                correct_answers=correct_answers,
+                incorrect_answers=incorrect_answers,
+            )
+
             lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)
             reset_var()
+
+    def cache_chaptertest_data_to_temp(module_id, grade_percentage, total_time_spent, correct_answers, incorrect_answers):
+        chapter_test_data = {
+            "module_id": module_id,
+            "grade_percentage": grade_percentage,
+            "total_time_spent": total_time_spent,
+            "questions_correct": {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()},
+            "questions_incorrect": {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()},
+        }
+
+        with open("temp_chaptertest_data.json", "w") as f:
+            json.dump(chapter_test_data, f)
 
     def reset_var():
         current_question_index["value"] = 0

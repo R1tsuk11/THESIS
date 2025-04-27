@@ -84,7 +84,8 @@ class Achievements: # Achievements class
         self.completed = achievement["completed"]
 
 class ChapterTest: # Chapter Test class
-    def __init__(self, questions_answers):
+    def __init__(self, questions_answers, module_id):
+        self.module_id = module_id
         self.questions_answers = questions_answers
         self.completed = False
         self.pass_threshold = 70
@@ -150,8 +151,8 @@ class Module:  # Module class
         for level in self.levels:
             for question in level.questions_answers:
                 if "correct_answer" in question:
-                    all_questions[question["question"]] = question["correct_answer"]
-        return ChapterTest(all_questions)
+                    all_questions[question["question"]] = question
+        return ChapterTest(all_questions, self.id)
 
 def register_user(user_id, username, email, password):
     usercol = connect_to_mongoDB()
@@ -163,8 +164,9 @@ def register_user(user_id, username, email, password):
         "modules": [],
         "library": [],
         "achievements": {},
-        "questions_correct": [],
-        "questions_incorrect": []
+        "questions_correct": {},
+        "questions_incorrect": {},
+        "chapter_test_records": {}
     }
     usercol.insert_one(new_user)
 
