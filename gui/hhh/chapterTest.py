@@ -9,19 +9,44 @@ incorrect_answers = {}
 grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
+id = 0
+
+class Question:
+    def __init__(self, data):
+        self.id = data.get("id")
+        self.type = data.get("type")
+        self.question = data.get("question")
+        self.choices = data.get("choices")
+        self.correct_answer = data.get("correct_answer")
+        self.vocabulary = data.get("vocabulary")
+        self.difficulty = data.get("difficulty")
+        self.response_time = data.get("response_time")
 
 def get_test_data(page):
     ct_data = page.session.get("ct_data")
     if not ct_data:
         print("Chapter Test data not found.")
         return None
-    
-    ct_questions = ct_data.questions_answers
 
-    if not ct_questions:
+    global id
+    id = ct_data.module_id
+    questions_raw = ct_data.questions_answers
+    if not questions_raw:
         print("Chapter Test has no questions stored.")
         return None
-    return ct_questions
+
+    # Convert each dict to a Question object
+    question_objects = [Question(qdata) for qtext, qdata in questions_raw.items()]
+    return question_objects
+
+def sanitize_keys(d):
+    import re
+    if isinstance(d, dict):
+        return {re.sub(r"[^\w\-]", "_", k): sanitize_keys(v) for k, v in d.items()}
+    elif isinstance(d, list):
+        return [sanitize_keys(i) for i in d]
+    else:
+        return d
 
 def build_imgpicker_question(question_data, progress_value, on_next, on_back):
     start_time = time.time()
@@ -591,7 +616,6 @@ def chapter_test_page(page):
         return
     total_questions = len(questions)
     current_question_index = {"value": 0}
-    question_keys = list(questions.keys())
     progress_value = (current_question_index["value"] + 1) / total_questions
 
     def render_question_layout(question_data, progress_value, on_next, on_back):
@@ -611,8 +635,7 @@ def chapter_test_page(page):
 
     def render_current_question(progress_value):
             page.views.clear()  # Optional: clear previous view
-            current_key = question_keys[current_question_index["value"]]
-            question = questions[current_key]
+            question = questions[current_question_index["value"]]
             content = render_question_layout(
                 question_data=question,
                 progress_value=progress_value,
@@ -640,7 +663,7 @@ def chapter_test_page(page):
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
 
             cache_chaptertest_data_to_temp(
-                module_id=questions.module_id,
+                module_id=id,
                 grade_percentage=grade_percentage,
                 total_time_spent=total_response_time,
                 correct_answers=correct_answers,
@@ -651,16 +674,26 @@ def chapter_test_page(page):
             reset_var()
 
     def cache_chaptertest_data_to_temp(module_id, grade_percentage, total_time_spent, correct_answers, incorrect_answers):
-        chapter_test_data = {
-            "module_id": module_id,
-            "grade_percentage": grade_percentage,
-            "total_time_spent": total_time_spent,
-            "questions_correct": {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()},
-            "questions_incorrect": {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()},
-        }
+            questions_correct_sanitized = sanitize_keys({
+                k: v.__dict__ if hasattr(v, "__dict__") else v
+                for k, v in correct_answers.items()
+            })
+            
+            questions_incorrect_sanitized = sanitize_keys({
+                k: v.__dict__ if hasattr(v, "__dict__") else v
+                for k, v in incorrect_answers.items()
+            })
 
-        with open("temp_chaptertest_data.json", "w") as f:
-            json.dump(chapter_test_data, f)
+            chapter_test_data = {
+                "module_id": module_id,
+                "grade_percentage": grade_percentage,
+                "total_time_spent": total_time_spent,
+                "questions_correct": questions_correct_sanitized,
+                "questions_incorrect": questions_incorrect_sanitized,
+            }
+
+            with open("temp_chaptertest_data.json", "w", encoding="utf-8") as f:
+                json.dump(chapter_test_data, f, indent=4)
 
     def reset_var():
         current_question_index["value"] = 0

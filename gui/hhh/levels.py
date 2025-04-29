@@ -160,7 +160,7 @@ def levels_page(page: ft.Page):
         all_levels_completed = all(level.completed for level in selected_module_levels)
         ct_level = get_chapter_test(page)
 
-        """if not all_levels_completed:
+        if not all_levels_completed:
             page.open(ft.SnackBar(ft.Text("You must complete all levels first."), bgcolor="#FF0000"))
             page.update()
             return
@@ -168,7 +168,7 @@ def levels_page(page: ft.Page):
         if ct_level.completed:
             page.open(ft.SnackBar(ft.Text("Chapter Test already completed!"), bgcolor="#FF0000"))
             page.update()
-            return"""
+            return
         
         # Proceed to the chapter test
         page.session.set("ct_data", ct_level)

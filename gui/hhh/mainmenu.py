@@ -48,6 +48,10 @@ def clear_temp_library_cache():
     if os.path.exists("temp_library.json"):
         os.remove("temp_library.json")
 
+def clear_temp_chaptertest_cache():
+    if os.path.exists("temp_chaptertest_data.json"):
+        os.remove("temp_chaptertest_data.json")
+
 def connect_to_mongoDB():
     try:
         arami = pymongo.MongoClient(uri)["arami"]
@@ -156,6 +160,7 @@ class Module:  # Module class
             "user_id": self.user_id,
             "completed": self.completed,
             "chapter_test": {
+                "module_id": self.chapter_test.module_id,
                 "questions_answers": self.chapter_test.questions_answers,
                 "completed": self.chapter_test.completed,
                 "pass_threshold": self.chapter_test.pass_threshold
@@ -263,14 +268,6 @@ class User:  # User class
         """Loads user data from the session or database."""
         updated_user = page.session.get("user")
 
-        if os.path.exists("temp_chaptertest_data.json"):
-            with open("temp_chaptertest.json", "r") as f:
-                chapter_test_data = json.load(f)
-
-            module_id = chapter_test_data["module_id"]
-
-            self.chapter_test_records[module_id] = chapter_test_data
-
         if updated_user and updated_user.user_id == user_id:
             print("Loaded updated user from session.")
             self.__dict__.update(updated_user.__dict__)
@@ -282,6 +279,29 @@ class User:  # User class
                 questions_incorrect = {k: Question(v) if isinstance(v, dict) else v for k, v in incorrect_answers.items()}
                 self.questions_correct = questions_correct
                 self.questions_incorrect = questions_incorrect
+
+            if os.path.exists("temp_chaptertest_data.json"):
+                with open("temp_chaptertest_data.json", "r") as f:
+                    chapter_test_data = json.load(f)
+
+                    # Convert each question dict to Question object
+                    raw_questions = chapter_test_data.get("questions_answers", {})
+                    converted_questions = {
+                        qtext: Question(qdata) for qtext, qdata in raw_questions.items()
+                    }
+
+                    module_id = str(chapter_test_data["module_id"])
+
+                    # Replace the raw dict with object instances
+                    chapter_test_data["questions_answers"] = converted_questions
+
+                    # Debug: print a sample entry to verify conversion
+                    print("\n[DEBUG] Converted Questions for Module ID", module_id)
+                    for qtext, obj in converted_questions.items():
+                        print(f"- {qtext}: {type(obj)}")
+
+                    # Save it in user records
+                    self.chapter_test_records[module_id] = chapter_test_data
                 
             return self
         else:
@@ -322,6 +342,7 @@ class User:  # User class
 
         try:
             clear_temp_library_cache()
+            clear_temp_chaptertest_cache()
         except FileNotFoundError:
             print("No temp file to clear.")
 
