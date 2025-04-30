@@ -274,11 +274,16 @@ class User:  # User class
 
             correct_answers = page.session.get("correct_answers")
             incorrect_answers = page.session.get("incorrect_answers")
-            if correct_answers and incorrect_answers:
-                questions_correct = {k: Question(v) if isinstance(v, dict) else v for k, v in correct_answers.items()}
-                questions_incorrect = {k: Question(v) if isinstance(v, dict) else v for k, v in incorrect_answers.items()}
-                self.questions_correct = questions_correct
-                self.questions_incorrect = questions_incorrect
+            if correct_answers or incorrect_answers:
+                # Append new correct answers to the existing ones
+                for k, v in correct_answers.items():
+                    if k not in self.questions_correct:
+                        self.questions_correct[k] = Question(v) if isinstance(v, dict) else v
+
+                # Append new incorrect answers to the existing ones
+                for k, v in incorrect_answers.items():
+                    if k not in self.questions_incorrect:
+                        self.questions_incorrect[k] = Question(v) if isinstance(v, dict) else v
 
             if os.path.exists("temp_chaptertest_data.json"):
                 with open("temp_chaptertest_data.json", "r") as f:

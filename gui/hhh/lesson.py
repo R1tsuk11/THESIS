@@ -957,7 +957,7 @@ def lesson_page(page: ft.Page):
             print("DEBUG incorrect_answers values:", list(incorrect_answers.values()))
             print(len(weighted_questions))
             print(len(correct_answers))
-            grade_percentage = (len(correct_answers) / len(weighted_questions)) * 100
+            grade_percentage = round((len(correct_answers) / len(weighted_questions)) * 100, 2)
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
             correct_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()}
             incorrect_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()}

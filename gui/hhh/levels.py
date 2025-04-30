@@ -2,6 +2,15 @@ import flet as ft
 import json
 import os
 
+def merge_answer_data(existing, new):
+    """Merge dictionaries while preserving key structure and merging nested values."""
+    for k, v in new.items():
+        if k in existing and isinstance(existing[k], dict) and isinstance(v, dict):
+            existing[k].update(v)  # Shallow merge
+        else:
+            existing[k] = v  # Add or replace
+    return existing
+
 def get_module_data(page):
     modules = page.session.get("modules")
     module_id = page.session.get("module_id")
@@ -78,8 +87,21 @@ def levels_page(page: ft.Page):
 
     updated = get_updated_data(page)
     if updated:
-        incorrect_answers = updated["incorrect"]
-        correct_answers = updated["correct"]
+        # Load previous session data (initialize if none)
+        correct_answers = page.session.get("correct_answers")
+        incorrect_answers = page.session.get("incorrect_answers")
+        if correct_answers:
+            correct_answers = merge_answer_data(correct_answers, updated["correct"])
+        else:
+            correct_answers = updated["correct"]
+            page.session.set("correct_answers", correct_answers)   
+
+        if incorrect_answers:
+            incorrect_answers = merge_answer_data(incorrect_answers, updated["incorrect"])
+        else:
+            incorrect_answers = updated["incorrect"]
+            page.session.set("incorrect_answers", incorrect_answers)
+
         completion_time = updated["total_response_time"]
         grade_percentage = updated["grade"]
 
