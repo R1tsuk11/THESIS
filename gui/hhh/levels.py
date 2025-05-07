@@ -1,6 +1,7 @@
 import flet as ft
 import json
 import os
+from bkt_engine import threaded_update_bkt
 
 def merge_answer_data(existing, new):
     """Merge dictionaries while preserving key structure and merging nested values."""
@@ -29,7 +30,7 @@ def get_module_data(page):
 
     for module in modules:
         if str(module.id) == str(module_id):
-            return module.levels, module.desc, module.waray_name
+            return module.levels, module.desc, module.waray_name, module.user_id
 
     print(f"No matching module with ID {module_id} found.")
     return None
@@ -78,7 +79,7 @@ def clear_temp_module_cache():
 
 def levels_page(page: ft.Page):
     """Levels selection page"""
-    selected_module_levels, selected_module_desc, selected_module_name = get_module_data(page)
+    selected_module_levels, selected_module_desc, selected_module_name, user_id = get_module_data(page)
     page.title = f"Arami - \"{selected_module_name}\" Levels"
     page.bgcolor = "#FFFFFF"
     page.padding = 0
@@ -111,6 +112,9 @@ def levels_page(page: ft.Page):
         print("DEBUG (levels.py) incorrect_answers keys:", list(incorrect_answers.keys()))
         print("DEBUG (levels.py) correct_answers values:", list(correct_answers.values()))
         print("DEBUG (levels.py) incorrect_answers values:", list(incorrect_answers.values()))
+
+        threaded_update_bkt(user_id, correct_answers, incorrect_answers)
+
         page.session.set("correct_answers", correct_answers)
         page.session.set("incorrect_answers", incorrect_answers)
     if updated and updated["questions"]:

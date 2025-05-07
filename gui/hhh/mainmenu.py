@@ -189,6 +189,7 @@ class User:  # User class
         self.modules = {}
         self.time = 0
         self.email = None
+        self.bkt_data = {}
 
     def to_dict(self):
         return {
@@ -226,7 +227,8 @@ class User:  # User class
                 for key, val in self.achievements.items()
             },
             "modules": [m.to_dict() for m in self.modules],
-            "time": self.time
+            "time": self.time,
+            "bkt_data": self.bkt_data
         }
 
     def get_user(self, user_id):
@@ -246,6 +248,7 @@ class User:  # User class
             self.achievements = user["achievements"]
             self.modules = user["modules"]
             self.time = user["time"]
+            self.bkt_data = user["bkt_data"]
         else:
             print("User not found in database.")
             return None
@@ -328,9 +331,17 @@ class User:  # User class
         else:
             print("No temp library cache found.")
 
+    def save_bkt_data(self):
+        if os.path.exists("temp_bkt_data.json"):
+            with open("temp_bkt_data.json", "r") as f:
+                self.bkt_data = json.load(f)
+        else:
+            print("No temp library cache found.")
+
     def save_user(self, page):
         """Saves user data to the database."""
         self.save_library()
+        self.save_bkt_data()
         
         usercol = connect_to_mongoDB()
         user_data = self.to_dict()

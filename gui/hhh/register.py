@@ -166,7 +166,15 @@ def register_user(user_id, username, email, password):
         "achievements": {},
         "questions_correct": {},
         "questions_incorrect": {},
-        "chapter_test_records": {}
+        "chapter_test_records": {},
+        "bkt_data": {
+            "predictions": {},
+            "fitted": False,
+            "refit_counter": 0,
+            "p_mastery": 0.5,
+            "guess": 0.2,
+            "slip": 0.1
+        }
     }
     usercol.insert_one(new_user)
 

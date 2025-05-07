@@ -4,6 +4,7 @@ import os
 import time
 import json
 from lessonScore import lesson_score
+import asyncio
 
 correct_answers = {}
 incorrect_answers = {}
@@ -11,6 +12,20 @@ grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
 user_library = []
+
+correctDlg = ft.AlertDialog(
+    content=ft.Column(
+        [
+            ft.Container(content=ft.Icon(size=60), padding=ft.padding.only(top=15)),  # Placeholder for icon
+            ft.Container(content=ft.Text(""))        # Placeholder for text
+        ],
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=10
+    ),
+    alignment=ft.alignment.center,
+    bgcolor="#F5F5F5"
+)
 
 def get_questions(page):
     """Retrieves questions for the current lesson."""
@@ -196,7 +211,7 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def build_imgpicker_question(question_data, progress_value, on_next, on_back):
+def build_imgpicker_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -221,7 +236,7 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
                 option.border = ft.border.all(1, "#E0E0E0")  # Light gray border
         e.page.update()
 
-    def handle_next(e):
+    async def handle_next(e):
         response_time = time.time() - start_time
         question_data.response_time = response_time
         global total_response_time
@@ -232,19 +247,48 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
             print("User selected Choice 2")
         else:
             print("User did not select any image")
-
-        if selected_option["value"] is None:
-            print("No option selected")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
             return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             correct_answers[question_data.question] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             incorrect_answers[question_data.question] = question_data
+            
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
 
         if on_next:
             on_next(e)
@@ -372,7 +416,7 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def build_wordselect_question(question_data, progress_value, on_next, on_back):
+def build_wordselect_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     options = question_data.choices
     word_to_translate = question_data.question
@@ -386,7 +430,7 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
             option.border = ft.border.all(1, "black") if i == option_index else None
         e.page.update()
 
-    def handle_next(e):
+    async def handle_next(e):
         response_time = time.time() - start_time
         question_data.response_time = response_time
         global total_response_time
@@ -399,15 +443,50 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
             print("User selected Choice 3")
         else:
             print("User did not select any image")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
+            return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             correct_answers[question_data.question] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             incorrect_answers[question_data.question] = question_data
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
+
+        page.update()
 
         if on_next:
             on_next(e)
@@ -526,7 +605,7 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def build_tf_question(question_data, progress_value, on_next, on_back):
+def build_tf_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
@@ -538,7 +617,7 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
             option.border = ft.border.all(1, "black") if i == selected_option["value"] else None
         e.page.update()
 
-    def handle_next(e):
+    async def handle_next(e):
         response_time = time.time() - start_time
         question_data.response_time = response_time
         global total_response_time
@@ -549,15 +628,50 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
             print("Selected option: False")
         else:
             print("No option selected")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
+            return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             correct_answers[question_data.question] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
             print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             incorrect_answers[question_data.question] = question_data    
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
+
+        page.update()
 
         if on_next:
             on_next(e)
@@ -875,22 +989,22 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
     )
 
 
-def render_question_layout(question_data, progress_value, on_next, on_back):
+def render_question_layout(page, question_data, progress_value, on_next, on_back):
     question_type = question_data.type
     
     if question_type == "Lesson":
         return build_lesson_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Image Picker":
-        return build_imgpicker_question(question_data, progress_value, on_next, on_back)
+        return build_imgpicker_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "Word Select / Translate":
-        return build_wordselect_question(question_data, progress_value, on_next, on_back)
+        return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "True or False":
-        return build_tf_question(question_data, progress_value, on_next, on_back)
+        return build_tf_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "Cultural Trivia":
         return build_trivia_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Pronounce":
         print("Pronounce question type not implemented yet. Using Word Select Layout")
-        return build_wordselect_question(question_data, progress_value, on_next, on_back)
+        return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
     else:
         return ft.Text("Unknown question type.")
 
@@ -928,6 +1042,7 @@ def lesson_page(page: ft.Page):
         page.views.clear()  # Optional: clear previous view
         question = questions[current_question_index["value"]]
         content = render_question_layout(
+            page = page,
             question_data=question,
             progress_value=progress_value,
             on_next=next_question,
