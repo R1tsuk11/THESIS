@@ -7,6 +7,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import time
 import subprocess
+import pickle
 
 executor = ThreadPoolExecutor(max_workers=2)
 TEMP_FILE = "temp_bkt_data.json"
@@ -70,7 +71,6 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
     base_prior = state.get('p_mastery', 0.5)
     base_guess = state.get('guess', 0.2)
     base_slip = state.get('slip', 0.1)
-    previous_predictions = state.get('predictions', {})
 
     print("[update_bkt] Getting user library...")
     library = get_user_library()
@@ -166,8 +166,6 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
     df.to_csv("bkt_input.csv", index=False)
     print("[update_bkt] BKT input data saved to 'bkt_input.csv'.")
 
-    refit_threshold = 5  # Set your threshold here
-    refit_counter += 1  # Increment every time update_bkt is called
     fit_flag = "fit" if (not fitted or refit_counter >= refit_threshold) else "predict"
             
     try:

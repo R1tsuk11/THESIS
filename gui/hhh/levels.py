@@ -2,6 +2,9 @@ import flet as ft
 import json
 import os
 from bkt_engine import threaded_update_bkt
+import pymongo
+
+uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
 def merge_answer_data(existing, new):
     """Merge dictionaries while preserving key structure and merging nested values."""
@@ -87,6 +90,39 @@ def levels_page(page: ft.Page):
     row = []
 
     updated = get_updated_data(page)
+
+    if os.path.exists("temp_chaptertest_data.json"):
+        with open("temp_chaptertest_data.json", "r") as f:
+            chaptertest_data = json.load(f)
+        # Call BKT update just for chapter test data
+
+        correct_answers = page.session.get("correct_answers")
+        incorrect_answers = page.session.get("incorrect_answers")
+
+        if correct_answers and incorrect_answers:
+            # Merge with existing data
+            correct_answers = merge_answer_data(correct_answers, chaptertest_data.get("questions_correct", {}))
+            incorrect_answers = merge_answer_data(incorrect_answers, chaptertest_data.get("questions_incorrect", {}))
+        else:
+            # Connect to MongoDB
+            arami = pymongo.MongoClient(uri)["arami"]
+            usercol = arami["users"]
+            # Retrieve questions_correct and questions_incorrect from MongoDB
+            user_data = usercol.find_one({"user_id": user_id})
+            if not user_data:
+                print(f"User with ID {user_id} not found in MongoDB.")
+                return
+            questions_correct = user_data.get("questions_correct", {})
+            questions_incorrect = user_data.get("questions_incorrect", {})
+            # Merge with existing data
+            correct_answers = merge_answer_data(questions_correct, chaptertest_data.get("questions_correct", {}))
+            incorrect_answers = merge_answer_data(questions_incorrect, chaptertest_data.get("questions_incorrect", {}))
+        threaded_update_bkt(
+            user_id,
+            correct_answers,
+            incorrect_answers,
+        )
+
     if updated:
         # Load previous session data (initialize if none)
         correct_answers = page.session.get("correct_answers")

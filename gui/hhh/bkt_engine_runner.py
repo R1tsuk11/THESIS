@@ -20,6 +20,12 @@ def run_bkt_model(fit=True):
 
     # Fit model
     model = Model()
+
+    if not fit:
+        if not os.path.exists(MODEL_FILE):
+            print("[bkt_model_runner] No fitted model found. Forcing fit.")
+            fit = True
+            
     if fit:
         try:
             model.fit(data=df)
