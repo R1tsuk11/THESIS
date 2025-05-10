@@ -50,6 +50,20 @@ def load_temp_state():
         "slip": 0.1
     }
 
+def get_all_p_masteries():
+    """
+    Returns a list of p_mastery values (floats) for each vocabulary/skill
+    from the latest BKT predictions.
+    """
+    state = load_temp_state()
+    predictions = state.get("predictions", {})
+    p_masteries = []
+    for vocab, pred in predictions.items():
+        p = pred.get("p_mastery")
+        if p is not None:
+            p_masteries.append(float(p))
+    return p_masteries
+
 def save_temp_state(state):
     with open(TEMP_FILE, "w") as f:
         json.dump(state, f, indent=4)

@@ -1,7 +1,8 @@
 import flet as ft
 import json
 import os
-from bkt_engine import threaded_update_bkt
+from bkt_engine import threaded_update_bkt, get_all_p_masteries
+from lstm_engine import overall_proficiency
 import pymongo
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
@@ -150,6 +151,7 @@ def levels_page(page: ft.Page):
         print("DEBUG (levels.py) incorrect_answers values:", list(incorrect_answers.values()))
 
         threaded_update_bkt(user_id, correct_answers, incorrect_answers)
+        overall_proficiency(get_all_p_masteries)
 
         page.session.set("correct_answers", correct_answers)
         page.session.set("incorrect_answers", incorrect_answers)
