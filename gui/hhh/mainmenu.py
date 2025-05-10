@@ -190,6 +190,7 @@ class User:  # User class
         self.time = 0
         self.email = None
         self.bkt_data = {}
+        self.completion_percentage = 0
 
     def to_dict(self):
         return {
@@ -228,7 +229,8 @@ class User:  # User class
             },
             "modules": [m.to_dict() for m in self.modules],
             "time": self.time,
-            "bkt_data": self.bkt_data
+            "bkt_data": self.bkt_data,
+            "completion_percentage": self.completion_percentage
         }
 
     def get_user(self, user_id):
@@ -249,6 +251,7 @@ class User:  # User class
             self.modules = user["modules"]
             self.time = user["time"]
             self.bkt_data = user["bkt_data"]
+            self.completion_percentage = user["completion_percentage"]
         else:
             print("User not found in database.")
             return None

@@ -1,11 +1,67 @@
 import flet as ft
 import json
 import os
-from bkt_engine import threaded_update_bkt, get_all_p_masteries
+from bkt_engine import threaded_update_bkt, get_all_p_masteries, bkt_thread
 from lstm_engine import overall_proficiency
 import pymongo
+import threading
+import subprocess
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+
+def run_lstm_after_bkt(page, completion):
+    from bkt_engine import bkt_thread, get_all_p_masteries
+    if bkt_thread is not None and bkt_thread.is_alive():
+        print("[LSTM] Waiting for BKT thread to finish...")
+        bkt_thread.join()
+    print("[LSTM] BKT thread finished, running LSTM in subprocess...")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+    # Save p_masteries to a temp file
+    p_masteries = get_all_p_masteries()
+    with open("temp_lstm_input.json", "w") as f:
+        json.dump({"p_masteries": p_masteries}, f)
+
+    # Run the LSTM subprocess
+    result = subprocess.run(
+        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", str(completion)],
+        capture_output=True, text=True
+    )
+    if result.stdout:
+        try:
+            output = json.loads(result.stdout)
+            print("[LSTM subprocess] Output:", output)
+            proficiency = output.get("proficiency")
+            page.session.set("proficiency", proficiency)
+        except Exception as e:
+            print("[LSTM subprocess] Failed to parse output:", e)
+    if result.stderr:
+        print("[LSTM subprocess] Error:", result.stderr)
+
+def compute_completion(page):
+    modules = page.session.get("modules")
+
+    if not modules:
+        try:
+            with open("temp_modules.json", "r") as f:
+                modules = json.load(f)
+        except FileNotFoundError:
+            print("Temp module cache not found.")
+            return None
+
+    total = 0
+    completed = 0
+    for module in modules:
+        # Count levels
+        total += len(module.levels)
+        completed += sum(1 for lvl in module.levels if getattr(lvl, "completed", False))
+        # Count chapter test
+        if hasattr(module, "chapter_test"):
+            total += 1
+            if getattr(module.chapter_test, "completed", False):
+                completed += 1
+    if total == 0:
+        return 0
+    return round((completed / total) * 100, 2)
 
 def merge_answer_data(existing, new):
     """Merge dictionaries while preserving key structure and merging nested values."""
@@ -151,8 +207,16 @@ def levels_page(page: ft.Page):
         print("DEBUG (levels.py) incorrect_answers values:", list(incorrect_answers.values()))
 
         threaded_update_bkt(user_id, correct_answers, incorrect_answers)
-        overall_proficiency(get_all_p_masteries)
+        completion = compute_completion(page)
 
+        if completion:
+            print("DEBUG (levels.py) Completion:", completion)
+        else:
+            print("DEBUG (levels.py) Completion or Proficiency is None")
+
+        threading.Thread(target=run_lstm_after_bkt, args=(page, completion)).start()
+
+        page.session.set("completion", completion)
         page.session.set("correct_answers", correct_answers)
         page.session.set("incorrect_answers", incorrect_answers)
     if updated and updated["questions"]:

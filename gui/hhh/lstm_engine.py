@@ -28,24 +28,25 @@ def train_lstm_model(sequences, labels, epochs=10):
     return model
 
 def predict_proficiency(bkt_sequence):
-    """
-    bkt_sequence: list of floats (e.g., skill mastery probabilities or 0/1 correct/incorrect)
-    Returns: predicted proficiency (float 0-1)
-    """
+    print(f"[LSTM] Predicting proficiency for sequence: {bkt_sequence}")
     if not os.path.exists(MODEL_PATH):
+        print("[LSTM] Model file not found!")
         raise FileNotFoundError("LSTM model not trained yet.")
     model = load_model(MODEL_PATH)
     X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
     X = np.expand_dims(X, -1)
     pred = model.predict(X)
+    print(f"[LSTM] Prediction result: {pred}")
     return float(pred[0][0])
 
 def overall_proficiency(bkt_sequence, completion_percentage):
+    print(f"[LSTM] Calculating overall proficiency. Sequence length: {len(bkt_sequence)}, Completion: {completion_percentage}")
     if len(bkt_sequence) < MIN_SEQUENCE_LENGTH:
+        print("[LSTM] Not enough data to predict proficiency.")
         return None  # Not enough data to predict
     proficiency = predict_proficiency(bkt_sequence)
-    # Optionally adjust by completion
     adjusted_proficiency = proficiency * completion_percentage
+    print(f"[LSTM] Raw proficiency: {proficiency}, Adjusted: {adjusted_proficiency}")
     return adjusted_proficiency
 
 
