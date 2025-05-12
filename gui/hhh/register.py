@@ -175,7 +175,8 @@ def register_user(user_id, username, email, password):
             "guess": 0.2,
             "slip": 0.1
         },
-        "completion_percentage": 0
+        "completion_percentage": 0,
+        "proficiency_history": []
     }
     usercol.insert_one(new_user)
 

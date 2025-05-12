@@ -9,29 +9,52 @@ import subprocess
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
+def get_user_proficiency(user_id):
+    arami = pymongo.MongoClient(uri)["arami"]
+    usercol = arami["users"]
+    user_data = usercol.find_one({"user_id": user_id})
+    if user_data:
+        return user_data.get("proficiency", 0.0)
+    return 0.0
+
+def update_user_proficiency(user_id, new_proficiency, history):
+    arami = pymongo.MongoClient(uri)["arami"]
+    usercol = arami["users"]
+    usercol.update_one(
+        {"user_id": user_id},
+        {"$set": {"proficiency": new_proficiency}}
+    )
+
 def run_lstm_after_bkt(page, completion):
     from bkt_engine import bkt_thread, get_all_p_masteries
+    user_id = page.session.get("user_id")
     if bkt_thread is not None and bkt_thread.is_alive():
         print("[LSTM] Waiting for BKT thread to finish...")
         bkt_thread.join()
     print("[LSTM] BKT thread finished, running LSTM in subprocess...")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+
     # Save p_masteries to a temp file
     p_masteries = get_all_p_masteries()
     with open("temp_lstm_input.json", "w") as f:
         json.dump({"p_masteries": p_masteries}, f)
 
+    # Get current proficiency from DB (for first run/label)
+    history_file = "temp_prof_history.json"
+
     # Run the LSTM subprocess
     result = subprocess.run(
-        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", str(completion)],
+        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", str(completion), history_file],
         capture_output=True, text=True
     )
     if result.stdout:
+        print("[LSTM subprocess] Raw stdout:", repr(result.stdout))
         try:
             output = json.loads(result.stdout)
             print("[LSTM subprocess] Output:", output)
             proficiency = output.get("proficiency")
             page.session.set("proficiency", proficiency)
+            # Update proficiency in DB
+            update_user_proficiency(user_id, proficiency)
         except Exception as e:
             print("[LSTM subprocess] Failed to parse output:", e)
     if result.stderr:

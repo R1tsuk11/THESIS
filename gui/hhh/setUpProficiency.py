@@ -64,9 +64,9 @@ def set_up_proficiency_page(page: ft.Page):
         if selected_card:
             selected_text = selected_card.content.controls[0].value  # Get card title
             if selected_text == "STARTER":
-                proficiency = 0
+                proficiency = 0.0
             elif selected_text == "BEGINNER":
-                proficiency = 0.5
+                proficiency = 0.2
             print(f"Selected: {selected_text}")  # Show in output
             add_proficiency_to_db(user_id, proficiency)  # Add to DB
             goto_time(page, user_id)  # Navigate to time setup page

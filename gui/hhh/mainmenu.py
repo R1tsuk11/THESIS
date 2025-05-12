@@ -191,6 +191,7 @@ class User:  # User class
         self.email = None
         self.bkt_data = {}
         self.completion_percentage = 0
+        self.proficiency_history = []
 
     def to_dict(self):
         return {
@@ -230,7 +231,8 @@ class User:  # User class
             "modules": [m.to_dict() for m in self.modules],
             "time": self.time,
             "bkt_data": self.bkt_data,
-            "completion_percentage": self.completion_percentage
+            "completion_percentage": self.completion_percentage,
+            "proficiency_history": self.proficiency_history
         }
 
     def get_user(self, user_id):
@@ -252,6 +254,7 @@ class User:  # User class
             self.time = user["time"]
             self.bkt_data = user["bkt_data"]
             self.completion_percentage = user["completion_percentage"]
+            self.proficiency_history = user["proficiency_history"]
         else:
             print("User not found in database.")
             return None
@@ -341,10 +344,19 @@ class User:  # User class
         else:
             print("No temp library cache found.")
 
+    def save_prof_history(self):
+        if os.path.exists("temp_prof_history.json"):
+            with open("temp_prof_history.json", "r") as f:
+                self.proficiency_history = json.load(f)
+                self.proficiency = self.proficiency_history[-1] if self.proficiency_history else 0
+        else:
+            print("No temp library cache found.")
+
     def save_user(self, page):
         """Saves user data to the database."""
         self.save_library()
         self.save_bkt_data()
+        self.save_prof_history()
         
         usercol = connect_to_mongoDB()
         user_data = self.to_dict()
