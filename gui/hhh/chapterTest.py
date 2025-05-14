@@ -668,6 +668,8 @@ def chapter_test_page(page):
                 total_time_spent=total_response_time,
                 correct_answers=correct_answers,
                 incorrect_answers=incorrect_answers,
+                completion_time=total_response_time,
+                completed=True
             )
 
             lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)

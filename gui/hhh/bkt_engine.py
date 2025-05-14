@@ -144,15 +144,6 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
                     "prior": base_prior
                 })
 
-                bkt_data.append({
-                    "user_id": user_id,
-                    "skill_name": vocab,
-                    "correct": 1 if correctness == 'correct' else 0,
-                    "guess": adjusted_guess,
-                    "slip": adjusted_slip,
-                    "prior": base_prior
-                })
-
     if not bkt_data:
         print("[update_bkt] No BKT data to process.")
         return

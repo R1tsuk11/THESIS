@@ -1,60 +1,54 @@
 import flet as ft
 import json
 import os
-from bkt_engine import threaded_update_bkt, get_all_p_masteries, bkt_thread
-from lstm_engine import overall_proficiency
+from bkt_engine import update_bkt, get_all_p_masteries
 import pymongo
 import threading
 import subprocess
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
-def get_user_proficiency(user_id):
-    arami = pymongo.MongoClient(uri)["arami"]
-    usercol = arami["users"]
-    user_data = usercol.find_one({"user_id": user_id})
-    if user_data:
-        return user_data.get("proficiency", 0.0)
-    return 0.0
+def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answers):
+    update_bkt(user_id, correct_answers, incorrect_answers)
 
-def update_user_proficiency(user_id, new_proficiency, history):
-    arami = pymongo.MongoClient(uri)["arami"]
-    usercol = arami["users"]
-    usercol.update_one(
-        {"user_id": user_id},
-        {"$set": {"proficiency": new_proficiency}}
-    )
+    # 1. Gather bkt_sequence and completion_percentage
+    bkt_sequence = get_all_p_masteries()  # List of floats
+    print("[DEBUG] get_all_p_masteries() returns:", bkt_sequence)
+    completion = compute_completion(page)  # Float (0-100 or 0-1)
 
-def run_lstm_after_bkt(page, completion):
-    from bkt_engine import bkt_thread, get_all_p_masteries
-    user_id = page.session.get("user_id")
-    if bkt_thread is not None and bkt_thread.is_alive():
-        print("[LSTM] Waiting for BKT thread to finish...")
-        bkt_thread.join()
-    print("[LSTM] BKT thread finished, running LSTM in subprocess...")
-
-    # Save p_masteries to a temp file
-    p_masteries = get_all_p_masteries()
+    # 2. Save bkt_sequence and completion to temp file
     with open("temp_lstm_input.json", "w") as f:
-        json.dump({"p_masteries": p_masteries}, f)
+        json.dump({
+            "bkt_sequence": bkt_sequence,
+            "completion_percentage": completion
+        }, f)
 
-    # Get current proficiency from DB (for first run/label)
-    history_file = "temp_prof_history.json"
+    # 3. Ensure proficiency history file exists
+    prof_history_path = "temp_prof_history.json"
+    if not os.path.exists(prof_history_path):
+        arami = pymongo.MongoClient(uri)["arami"]
+        usercol = arami["users"]
 
-    # Run the LSTM subprocess
+        proficiency_history = usercol.find_one({"user_id": page.session.get("user_id")}).get("proficiency_history", [])
+        if proficiency_history:
+            with open(prof_history_path, "w") as f:
+                json.dump(proficiency_history, f)
+        else:
+            proficiency = usercol.find_one({"user_id": page.session.get("user_id")}).get("proficiency", 0)
+            with open(prof_history_path, "w") as f:
+                json.dump([{"proficiency": proficiency}], f)
+
+    # 4. Run LSTM in subprocess
     result = subprocess.run(
-        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", str(completion), history_file],
+        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", prof_history_path],
         capture_output=True, text=True
     )
     if result.stdout:
-        print("[LSTM subprocess] Raw stdout:", repr(result.stdout))
         try:
             output = json.loads(result.stdout)
             print("[LSTM subprocess] Output:", output)
             proficiency = output.get("proficiency")
             page.session.set("proficiency", proficiency)
-            # Update proficiency in DB
-            update_user_proficiency(user_id, proficiency)
         except Exception as e:
             print("[LSTM subprocess] Failed to parse output:", e)
     if result.stderr:
@@ -171,6 +165,28 @@ def levels_page(page: ft.Page):
 
     updated = get_updated_data(page)
 
+    if updated and updated["questions"]:
+        # Get any question to extract identifying info (safe if list isn't empty)
+        first_question = updated["questions"][0]
+        
+        completion_time = updated["total_response_time"]
+        grade_percentage = updated["grade"]
+
+        for level in selected_module_levels:
+            if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
+                level.questions_answers = updated["questions"]
+                level.completed = updated["grade"] >= level.pass_threshold
+                level.completion_time = completion_time
+                level.grade_percentage = grade_percentage
+                break
+
+    completion = compute_completion(page)
+
+    if completion:
+        print("DEBUG (levels.py) Completion:", completion)
+    else:
+        print("DEBUG (levels.py) Completion is None")
+
     if os.path.exists("temp_chaptertest_data.json"):
         with open("temp_chaptertest_data.json", "r") as f:
             chaptertest_data = json.load(f)
@@ -197,13 +213,10 @@ def levels_page(page: ft.Page):
             # Merge with existing data
             correct_answers = merge_answer_data(questions_correct, chaptertest_data.get("questions_correct", {}))
             incorrect_answers = merge_answer_data(questions_incorrect, chaptertest_data.get("questions_incorrect", {}))
-        threaded_update_bkt(
-            user_id,
-            correct_answers,
-            incorrect_answers,
-        )
+        
+        threading.Thread(target=run_bkt_and_lstm, args=(page, completion, user_id, correct_answers, incorrect_answers)).start()
 
-    if updated:
+    elif updated:
         # Load previous session data (initialize if none)
         correct_answers = page.session.get("correct_answers")
         incorrect_answers = page.session.get("incorrect_answers")
@@ -229,30 +242,10 @@ def levels_page(page: ft.Page):
         print("DEBUG (levels.py) correct_answers values:", list(correct_answers.values()))
         print("DEBUG (levels.py) incorrect_answers values:", list(incorrect_answers.values()))
 
-        threaded_update_bkt(user_id, correct_answers, incorrect_answers)
-        completion = compute_completion(page)
-
-        if completion:
-            print("DEBUG (levels.py) Completion:", completion)
-        else:
-            print("DEBUG (levels.py) Completion or Proficiency is None")
-
-        threading.Thread(target=run_lstm_after_bkt, args=(page, completion)).start()
-
-        page.session.set("completion", completion)
         page.session.set("correct_answers", correct_answers)
         page.session.set("incorrect_answers", incorrect_answers)
-    if updated and updated["questions"]:
-        # Get any question to extract identifying info (safe if list isn't empty)
-        first_question = updated["questions"][0]
 
-        for level in selected_module_levels:
-            if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
-                level.questions_answers = updated["questions"]
-                level.completed = updated["grade"] >= level.pass_threshold
-                level.completion_time = completion_time
-                level.grade_percentage = grade_percentage
-                break
+        threading.Thread(target=run_bkt_and_lstm, args=(page, completion, user_id, correct_answers, incorrect_answers)).start()
 
     def go_back(e):
         """Navigate back to the main menu"""
