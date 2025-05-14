@@ -23,19 +23,12 @@ if __name__ == "__main__":
         print(f"[LSTM subprocess] completion: {completion}", file=sys.stderr)
         print(f"[LSTM subprocess] proficiency_history: {proficiency_history}", file=sys.stderr)
 
-        proficiency, updated_history = overall_proficiency(
-        bkt_sequence, completion, proficiency_history
-    )
-    
-        # Store the updated history
-        with open(prof_history_path, "w") as f:
-            json.dump(updated_history, f)
-        
-        # Ensure we print valid JSON to stdout
-        if proficiency is not None:
-            print(json.dumps({"proficiency": proficiency}))
-        else:
-            print(json.dumps({"proficiency": 0.0}))
+        output = overall_proficiency(
+            bkt_sequence, completion, proficiency_history
+        )
+        print("[LSTM subprocess] About to print JSON output", file=sys.stderr)
+        print(output)
+        print("[LSTM subprocess] JSON output printed", file=sys.stderr)
             
     except Exception as e:
         print(f"[LSTM subprocess] Exception: {str(e)}", file=sys.stderr)

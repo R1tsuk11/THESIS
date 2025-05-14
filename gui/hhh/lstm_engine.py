@@ -15,7 +15,7 @@ def average_proficiency(p_masteries):
         return 0.0
     return sum(p_masteries) / len(p_masteries)
 
-def track_proficiency_history(p_masteries, proficiency):
+def track_proficiency_history(proficiency):
     """Store only the proficiency values in history"""
     if os.path.exists(history_file):
         with open(history_file, "r") as f:
@@ -100,23 +100,24 @@ def overall_proficiency(bkt_sequence, completion_percentage, proficiency_history
     print(f"[LSTM] Sequence length: {len(bkt_sequence)}", file=sys.stderr)
     
     if proficiency_history is None:
-        print("[LSTM] proficiency_history is None, initializing to empty list.")
+        print("[LSTM] proficiency_history is None, initializing to empty list.", file=sys.stderr)
         proficiency_history = []
     
-    # Check sequence length and use fallback
-    if len(bkt_sequence) < MIN_SEQUENCE_LENGTH:
-        print("[LSTM] Not enough data to predict proficiency. Using average.", file=sys.stderr)
-        avg = average_proficiency(bkt_sequence)
-        result = avg * completion_percentage
-        track_proficiency_history(bkt_sequence, result)  # Track even fallback results
-        print(json.dumps({"proficiency": result}))
-        return result, proficiency_history
-    
-    print("[LSTM] Using LSTM model for prediction.")
-    if history_file and os.path.exists(history_file):
+    try:
+        if len(bkt_sequence) < MIN_SEQUENCE_LENGTH:
+            print("[LSTM] Not enough data to predict proficiency. Using average.", file=sys.stderr)
+            avg = average_proficiency(bkt_sequence)
+            result = avg * completion_percentage
+            print(f"Result: {result}")
+            track_proficiency_history(result)
+            return result
+        
+        print("[LSTM] Using LSTM model for prediction.", file=sys.stderr)
         proficiency = predict_proficiency(bkt_sequence)
-    adjusted_proficiency = proficiency * completion_percentage
-    track_proficiency_history(bkt_sequence, adjusted_proficiency)
-    print(json.dumps({"proficiency": adjusted_proficiency}))
+        adjusted_proficiency = proficiency * completion_percentage
+        track_proficiency_history(adjusted_proficiency)
+        return adjusted_proficiency
 
-    return adjusted_proficiency, proficiency_history
+    except Exception as e:
+        print(f"[LSTM] Error in overall_proficiency: {str(e)}", file=sys.stderr)
+        return {"error": str(e),  "method": "sys"}
