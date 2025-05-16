@@ -6,8 +6,10 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-MODEL_PATH = "lstm_proficiency_model.h5"
+MODEL_PATH = "lstm_proficiency_model.keras"
 MIN_SEQUENCE_LENGTH = 3
+LSTM_REFIT_THRESHOLD = 5
+COUNTER_FILE = "lstm_counter.json"
 history_file = "temp_prof_history.json"
 
 def average_proficiency(p_masteries):
@@ -49,7 +51,7 @@ def build_lstm_model(input_shape):
     model = Sequential()
     model.add(LSTM(64, input_shape=input_shape, return_sequences=False))
     model.add(Dense(1, activation='sigmoid'))  # Output: proficiency (0-1)
-    model.compile(optimizer='adam', loss='mse')
+    model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
     return model
 
 def train_lstm_model(sequences, labels, epochs=10):
@@ -58,27 +60,42 @@ def train_lstm_model(sequences, labels, epochs=10):
     y = np.array(labels)
     model = build_lstm_model((X.shape[1], 1))
     X = np.expand_dims(X, -1)
-    model.fit(X, y, epochs=epochs)
+    history = model.fit(X, y, epochs=epochs, verbose=0)
     model.save(MODEL_PATH)
+    print(f"[LSTM] Model saved to {MODEL_PATH}")
+    print(f"[LSTM] Training loss history: {history.history['loss']}")
+    print(f"[LSTM] Training MAE history: {history.history['mae']}")
+    # Evaluate on training data
+    loss, mae = model.evaluate(X, y, verbose=0)
+    print(f"[LSTM] Final training loss (MSE): {loss}, MAE: {mae}")
     return model
 
 def force_train_if_needed():
+    retrain = False
     if not os.path.exists(MODEL_PATH):
+        retrain = True
         print("[LSTM] Model file not found! Forcing training from history.")
-        if os.path.exists(history_file):
-            with open(history_file, "r") as f:
-                history = json.load(f)
+    if os.path.exists(history_file):
+        with open(history_file, "r") as f:
+            history = json.load(f)
+        last_count = 0
+        if os.path.exists(COUNTER_FILE):
+            with open(COUNTER_FILE, "r") as f:
+                last_count = int(f.read().strip())
+        if len(history) - last_count >= LSTM_REFIT_THRESHOLD or retrain:
             if len(history) >= MIN_SEQUENCE_LENGTH:
-                # Use the proficiency values directly as labels
                 labels = history
-                # Generate sequences from consecutive proficiencies
                 sequences = [history[i:i+MIN_SEQUENCE_LENGTH] 
-                           for i in range(len(history)-MIN_SEQUENCE_LENGTH)]
-                train_lstm_model(sequences, labels[-len(sequences):])
+                             for i in range(len(history)-MIN_SEQUENCE_LENGTH+1)]
+                if sequences:
+                    print(f"[LSTM] Training model on {len(sequences)} sequences.")
+                    train_lstm_model(sequences, labels[-len(sequences):])
+                else:
+                    print("[LSTM] Not enough data to generate sequences for training.")
             else:
                 print("[LSTM] Not enough history to train LSTM.")
-        else:
-            print("[LSTM] No history file found for user.")
+    else:
+        print("[LSTM] No history file found for user.")
 
 def predict_proficiency(bkt_sequence):
     print(f"[LSTM] Predicting proficiency for sequence: {bkt_sequence}")
@@ -87,6 +104,12 @@ def predict_proficiency(bkt_sequence):
     if not os.path.exists(MODEL_PATH):
         print("[LSTM] Model still not found after force training. Returning average.")
         return average_proficiency(bkt_sequence)
+    
+    with open(history_file, "r") as f:
+            history = json.load(f)
+    with open(COUNTER_FILE, "w") as f:
+        f.write(str(len(history)))
+        
     model = load_model(MODEL_PATH)
     X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
     X = np.expand_dims(X, -1)
@@ -105,14 +128,14 @@ def overall_proficiency(bkt_sequence, completion_percentage, proficiency_history
     
     try:
         if len(bkt_sequence) < MIN_SEQUENCE_LENGTH:
-            print("[LSTM] Not enough data to predict proficiency. Using average.", file=sys.stderr)
+            print("[LSTM] Not enough data to predict proficiency. Using average.")
             avg = average_proficiency(bkt_sequence)
             result = avg * completion_percentage
             print(f"Result: {result}")
             track_proficiency_history(result)
             return result
         
-        print("[LSTM] Using LSTM model for prediction.", file=sys.stderr)
+        print("[LSTM] Using LSTM model for prediction.")
         proficiency = predict_proficiency(bkt_sequence)
         adjusted_proficiency = proficiency * completion_percentage
         track_proficiency_history(adjusted_proficiency)

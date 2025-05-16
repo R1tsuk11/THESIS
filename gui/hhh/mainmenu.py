@@ -352,6 +352,19 @@ class User:  # User class
         else:
             print("No temp library cache found.")
 
+    def save_lstm_counter(self):
+        if os.path.exists("lstm_counter.json"):
+            with open("lstm_counter.json", "r") as f:
+                lstm_counter = json.load(f)
+                usercol = connect_to_mongoDB()
+                usercol.update_one(
+                    {"user_id": self.user_id},
+                    {"$set": {"lstm_counter": lstm_counter}},
+                    upsert=True
+                )
+        else:
+            print("No temp lstm counter cache found.")
+
     def save_user(self, page):
         """Saves user data to the database."""
         self.save_library()
