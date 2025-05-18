@@ -5,8 +5,82 @@ import sys
 import json
 import pprint
 import os
+from datetime import datetime
+from supermemo_engine import prepare_daily_review
+import time
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+
+# Add this function to mainmenu.py
+
+def show_daily_review_overlay(page):
+    overlay = ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Icon(ft.Icons.LIGHTBULB_OUTLINE, color="#0078D7", size=60),
+                    padding=ft.padding.only(top=40)
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "Daily Review Required!",
+                        size=22,
+                        weight=ft.FontWeight.BOLD,
+                        color="#0078D7",
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    padding=ft.padding.only(bottom=5)
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "Please complete your daily review before proceeding.",
+                        size=16,
+                        color="#424242",
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    padding=ft.padding.only(bottom=20)
+                ),
+                ft.ElevatedButton(
+                    "Start Review",
+                    width=200,
+                    style=ft.ButtonStyle(
+                        bgcolor={"": "#0078D7"},
+                        color={"": "#FFFFFF"},
+                        shape=ft.RoundedRectangleBorder(radius=8)
+                    ),
+                    on_click=lambda e: (
+                        page.overlay.clear(),
+                        page.update(),
+                        page.go("/daily-review")
+                    )
+                )
+            ],
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10
+        ),
+        alignment=ft.alignment.center,
+        bgcolor="#F5F5F5",
+        width=page.width,
+        height=page.height,
+        border_radius=0,
+        opacity=0.98,
+        animate_opacity=200,
+        padding=40
+    )
+    page.overlay.clear()
+    page.overlay.append(overlay)
+    page.update()
+
+def is_first_login_today(user):
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    last_login = getattr(user, "last_login_date", None)
+    return True
+
+def update_last_login_date(user):
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    usercol = connect_to_mongoDB()
+    usercol.update_one({"user_id": user.user_id}, {"$set": {"last_login_date": today_str}})
 
 def cache_modules_to_temp(modules):
     def module_to_dict(module):
@@ -583,3 +657,11 @@ def main_menu_page(page: ft.Page):
     # Add view with updated styling
     page.views.append(ft.View("/main-menu", controls=[content], padding=0, bgcolor="#FFFFFF"))  # White background
     page.update()
+
+    if is_first_login_today(user):
+        print("Triggering daily review popup!")
+        review_questions = prepare_daily_review(user.user_id)
+        print("Review questions:", review_questions)
+        page.session.set("daily_review_questions", review_questions)
+        show_daily_review_overlay(page)
+        update_last_login_date(user)

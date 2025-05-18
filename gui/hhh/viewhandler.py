@@ -7,6 +7,7 @@ from mainmenu import main_menu_page
 from levels import levels_page
 from lesson import lesson_page
 from chapterTest import chapter_test_page
+from reviewFrame import daily_review_page
 
 def main(page: ft.Page):
     page.title = "User Authentication"
@@ -30,6 +31,8 @@ def main(page: ft.Page):
             lesson_page(page)
         elif page.route == "/chaptertest":
             chapter_test_page(page)
+        elif page.route == "/daily-review":
+            daily_review_page(page)
         else:
             login_page(page)  # Default to login page
 

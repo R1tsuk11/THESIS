@@ -3,6 +3,7 @@ import pymongo
 from pymongo.errors import ConfigurationError
 import sys
 from qbank import module_bank, achievement_bank, eng_name_bank, waray_name_bank, desc_bank
+from datetime import datetime
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -178,6 +179,8 @@ def register_user(user_id, username, email, password):
         "completion_percentage": 0,
         "proficiency_history": [],
         "lstm_counter": 0,
+        "supermemo": {},
+        "last_login_date": datetime.now().strftime("%Y-%m-%d"),
     }
     usercol.insert_one(new_user)
 
