@@ -72,10 +72,10 @@ def show_daily_review_overlay(page):
     page.overlay.append(overlay)
     page.update()
 
-def is_first_login_today(user):
+def is_first_login_today(last_login=None):
     today_str = datetime.now().strftime("%Y-%m-%d")
-    last_login = getattr(user, "last_login_date", None)
-    return True
+    print(f"Today's date: {today_str}, Last login date: {last_login}")
+    return today_str != last_login
 
 def update_last_login_date(user):
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -511,7 +511,30 @@ def main_menu_page(page: ft.Page):
         print("Profile icon clicked")
         
     def navigate_to_levels(e, user, module_id):
-        """Navigates to levels page"""
+        """Navigates to levels page if prerequisites are met."""
+        # Find the index of the selected module
+        module_ids = [m.id for m in user.modules]
+        try:
+            idx = module_ids.index(module_id)
+        except ValueError:
+            page.open(ft.SnackBar(ft.Text("Module not found."), bgcolor="#FF5252"))
+            return
+
+        selected_module = user.modules[idx]
+
+        # Check if selected module is already completed
+        if getattr(selected_module, "completed", False):
+            page.open(ft.SnackBar(ft.Text("This module is already completed."), bgcolor="#FFC107"))
+            return
+
+        # Check if all previous modules are completed
+        if idx > 0:
+            for prev_module in user.modules[:idx]:
+                if not getattr(prev_module, "completed", False):
+                    page.open(ft.SnackBar(ft.Text("Please complete previous modules first."), bgcolor="#FF5252"))
+                    return
+
+        # Proceed if allowed
         cache_modules_to_temp(user.modules)  # Cache modules to temp file
         cache_library_to_temp(user.library)  # Cache library to temp file
         page.session.set("modules", user.modules)
@@ -658,7 +681,12 @@ def main_menu_page(page: ft.Page):
     page.views.append(ft.View("/main-menu", controls=[content], padding=0, bgcolor="#FFFFFF"))  # White background
     page.update()
 
-    if is_first_login_today(user):
+    # Retrieve last_login_date from database for the current user
+    usercol = connect_to_mongoDB()
+    user_db = usercol.find_one({"user_id": user.user_id})
+    last_login = user_db.get("last_login_date") if user_db else None
+
+    if is_first_login_today(last_login):
         print("Triggering daily review popup!")
         review_questions = prepare_daily_review(user.user_id)
         print("Review questions:", review_questions)

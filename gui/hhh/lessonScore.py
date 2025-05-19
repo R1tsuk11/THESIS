@@ -44,10 +44,8 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     )
     
     # Determine which image to show based on accuracy
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    ASSETS_PATH = os.path.join(BASE_DIR, "assets")
-    img1 = os.path.join(ASSETS_PATH, os.path.basename("assets/goodjob.png"))
-    img2 = os.path.join(ASSETS_PATH, os.path.basename("assets/tryagain.png"))
+    img1 = "assets/goodjob.png"
+    img2 = "assets/tryagain.png"
     celebration_image = img1 if accuracyPercentage >= 50 else img2
     
     # Card content

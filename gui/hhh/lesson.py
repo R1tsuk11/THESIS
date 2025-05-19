@@ -214,16 +214,16 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
 def build_imgpicker_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    ASSETS_PATH = os.path.join(BASE_DIR, "assets")
-    img1 = os.path.join(ASSETS_PATH, os.path.basename(question_data.choices[0]))
-    img2 = os.path.join(ASSETS_PATH, os.path.basename(question_data.choices[1]))
+    img1 = "assets/" + question_data.choices[0]
+    img2 = "assets/" + question_data.choices[1]
+    img3 = "assets/" + question_data.choices[2]
     question = question_data.question
     correct_answer = question_data.correct_answer
     global user_library
 
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
+    print("Image 3 src:", img3)
     print(os.path.exists(img1))
 
     def on_option_click(e, option_index):
@@ -325,6 +325,22 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         on_click=lambda e: on_option_click(e, 1)
     )
 
+    image_option3 = ft.Container(
+        content=ft.Image(
+            src=img3,
+            width=320,
+            height=180,
+            fit=ft.ImageFit.COVER,
+            border_radius=ft.border_radius.all(10),
+        ),
+        width=320,
+        height=180,
+        border=ft.border.all(1, "#E0E0E0"),
+        border_radius=ft.border_radius.all(10),
+        margin=ft.margin.only(bottom=15),
+        on_click=lambda e: on_option_click(e, 2)
+    )
+
     return ft.Column(
         [
             # Header
@@ -361,7 +377,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             # Image choices
             ft.Container(
                 content=ft.Column(
-                    [image_option1, image_option2],
+                    [image_option1, image_option2, image_option3],
                     spacing=0
                 )
             ),
@@ -876,6 +892,195 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
+def build_translate_sentence_question(page, question_data, progress_value, on_next, on_back):
+    start_time = time.time()
+    options = question_data.choices
+    word_to_translate = question_data.question
+    selected_option = {"value": None}
+    correct_answer = question_data.correct_answer
+    global user_library
+
+    def on_option_click(e, option_index, option_containers):
+        selected_option["value"] = option_index
+        for i, option in enumerate(option_containers):
+            option.border = ft.border.all(1, "black") if i == option_index else None
+        e.page.update()
+
+    async def handle_next(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
+        if selected_option["value"] == 0:
+            print("User selected Choice 1")
+        elif selected_option["value"] == 1:
+            print("User selected Choice 2")
+        elif selected_option["value"] == 2:
+            print("User selected Choice 3")
+        else:
+            print("User did not select any image")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
+            return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
+
+        if question_data.choices[selected_option["value"]] == correct_answer:
+            print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
+            correct_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
+        else:
+            print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
+            incorrect_answers[question_data.question] = question_data
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
+
+        page.update()
+
+        if on_next:
+            on_next(e)
+
+    # Option containers (created dynamically from the options list)
+    option_containers = []
+    for i, opt_text in enumerate(options):
+        container = ft.Container(
+            content=ft.Text(opt_text, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            width=320,
+            bgcolor="#F5F5F5",
+            padding=ft.padding.symmetric(vertical=15),
+            border_radius=10,
+            margin=ft.margin.only(bottom=10 if i < len(options)-1 else 20),
+        )
+        container.on_click = lambda e, idx=i: on_option_click(e, idx, option_containers)
+        option_containers.append(container)
+
+    return ft.Stack(
+        [
+            ft.Container(bgcolor="white", expand=True),
+            ft.Column([
+                # Blue bar on top
+                ft.Container(height=10, bgcolor="#0078D7", width=50),
+
+                # Main content
+                ft.Column(
+                    [
+                        # Header with close/back button
+                        ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Container(width=50),
+                                    ft.Container(
+                                        width=50,
+                                        content=ft.IconButton(icon=ft.icons.CLOSE, icon_color="black", on_click=on_back),
+                                    ),
+                                ],
+                                alignment=ft.MainAxisAlignment.END,
+                            ),
+                            padding=ft.padding.only(top=10, right=10),
+                        ),
+
+                        # Card content
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    # Instruction
+                                    ft.Text(word_to_translate, color="#0078D7", size=18, weight=ft.FontWeight.BOLD),
+
+                                    # Word to translate
+                                    ft.Container(
+                                        content=ft.Text(word_to_translate, size=20, weight=ft.FontWeight.BOLD),
+                                        width=320,
+                                        bgcolor="#FFF9C4",
+                                        padding=ft.padding.symmetric(vertical=15),
+                                        border_radius=10,
+                                        margin=ft.margin.only(bottom=30)
+                                    ),
+
+                                    # Option buttons
+                                    ft.Column(option_containers)
+                                ],
+                                alignment=ft.MainAxisAlignment.START,
+                                horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                            ),
+                            padding=ft.padding.only(top=20),
+                        ),
+
+                        # Progress bar
+                        ft.Container(
+                            content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+                            margin=ft.margin.only(bottom=20),
+                        ),
+
+                        # Bottom nav
+                        ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Container(
+                                        content=ft.IconButton(
+                                            icon=ft.icons.ARROW_BACK,
+                                            icon_color="grey",
+                                            on_click=on_back
+                                        ),
+                                        width=100,
+                                        bgcolor="white",
+                                        border_radius=ft.border_radius.all(30),
+                                        padding=5,
+                                    ),
+                                    ft.Container(width=10),
+                                    ft.Container(
+                                        content=ft.ElevatedButton(
+                                            content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                                            style=ft.ButtonStyle(
+                                                bgcolor={"": "#0078D7"},
+                                                shape=ft.RoundedRectangleBorder(radius=30),
+                                            ),
+                                            width=200,
+                                            height=50,
+                                            on_click=handle_next
+                                        )
+                                    )
+                                ],
+                                alignment=ft.MainAxisAlignment.CENTER,
+                            ),
+                            padding=ft.padding.only(bottom=20),
+                        )
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    expand=True
+                )
+            ], spacing=0, expand=True)
+        ],
+        expand=True
+    )
+
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a pronunciation type question."""
 
@@ -996,7 +1201,7 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
         return build_lesson_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Image Picker":
         return build_imgpicker_question(page, question_data, progress_value, on_next, on_back)
-    elif question_type == "Word Select / Translate":
+    elif question_type == "Word Select":
         return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "True or False":
         return build_tf_question(page, question_data, progress_value, on_next, on_back)
@@ -1005,6 +1210,8 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
     elif question_type == "Pronounce":
         print("Pronounce question type not implemented yet. Using Word Select Layout")
         return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
+    elif question_type == "Translate Sentence":
+        return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back)
     else:
         return ft.Text("Unknown question type.")
 
