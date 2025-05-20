@@ -92,7 +92,18 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
         waray_phrase = matches[0]
         english_translation = matches[1]
     else:
-        print("Not enough matches found in the question string.")
+        # Fallback: use the vocabulary itself as waray_phrase
+        waray_phrase = question_data.vocabulary
+        # Try to extract the english translation from the question
+        eng_match = re.search(r"means\s+'([^']+)'", question)
+        if eng_match:
+            english_translation = eng_match.group(1)
+        else:
+            # If all else fails, use a default message
+            english_translation = "Translation not available"
+        
+        print(f"Using fallback for vocabulary: {waray_phrase}, translation: {english_translation}")
+
 
     card_content = ft.Container(
         content=ft.Column(
@@ -1193,7 +1204,6 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-
 def render_question_layout(page, question_data, progress_value, on_next, on_back):
     question_type = question_data.type
     
@@ -1207,13 +1217,114 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
         return build_tf_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "Cultural Trivia":
         return build_trivia_question(question_data, progress_value, on_next, on_back)
-    elif question_type == "Pronounce":
-        print("Pronounce question type not implemented yet. Using Word Select Layout")
-        return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
+    elif question_type == "Pronunciation":
+        # Simple placeholder instead of async function
+        return build_placeholder_question(
+            "Pronunciation feature not available yet.", 
+            progress_value, 
+            on_next, 
+            on_back
+        )
     elif question_type == "Translate Sentence":
         return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back)
     else:
         return ft.Text("Unknown question type.")
+
+def build_placeholder_question(message, progress_value, on_next, on_back):
+    """Builds a simple placeholder for question types not yet implemented."""
+    
+    card_content = ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Icon(
+                        name=ft.icons.WARNING_AMBER_ROUNDED,
+                        color="#FFA000",
+                        size=60
+                    ),
+                    margin=ft.margin.only(bottom=20, top=20),
+                    alignment=ft.alignment.center
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        message,
+                        color="black",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    margin=ft.margin.only(bottom=30),
+                    alignment=ft.alignment.center
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "This question will be skipped. Please click Next to continue.",
+                        color="grey",
+                        size=14,
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    margin=ft.margin.only(bottom=20),
+                    alignment=ft.alignment.center
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        ),
+        width=312,
+        bgcolor="white",
+        border_radius=10,
+        padding=20,
+        margin=ft.margin.only(top=20, bottom=20)
+    )
+
+    progress = ft.Container(
+        ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20)
+    )
+
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.icons.ARROW_BACK,
+                        icon_color="grey",
+                        on_click=on_back
+                    ),
+                    width=100,
+                    bgcolor="white",
+                    border_radius=ft.border_radius.all(30),
+                    padding=5
+                ),
+                ft.Container(width=10),
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=200,
+                        height=50,
+                        on_click=on_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER
+        ),
+        padding=ft.padding.only(bottom=20)
+    )
+
+    return ft.Column(
+        [
+            card_content,
+            progress,
+            bottom_nav
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        expand=True
+    )
 
 def lesson_page(page: ft.Page):
     page.title = "Arami - Lesson"

@@ -40,7 +40,7 @@ module_1 = {
         "audio_file": "Maupay nga aga.mp3",
         "accuracy": None,
         "accuracy_threshold": 0.8,
-        "vocabulary": "aga",
+        "vocabulary": "Maupay nga aga",
         "difficulty": 1,
         "response_time": None
     },

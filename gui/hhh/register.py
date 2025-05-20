@@ -151,9 +151,20 @@ class Module:  # Module class
         all_questions = {}
         for level in self.levels:
             for question in level.questions_answers:
-                if "correct_answer" in question:
+                # Only include questions that have a correct answer and aren't lesson type
+                if "correct_answer" in question and question.get("type", "") != "Lesson":
                     all_questions[question["question"]] = question
-        return ChapterTest(all_questions, self.id)
+        
+        # Limit to 20 questions if we have more
+        if len(all_questions) > 20:
+            import random
+            # Get a random selection of 20 questions
+            selected_keys = random.sample(list(all_questions.keys()), 20)
+            limited_questions = {key: all_questions[key] for key in selected_keys}
+            return ChapterTest(limited_questions, self.id)
+        else:
+            # Use all questions if we have 20 or fewer
+            return ChapterTest(all_questions, self.id)
 
 def register_user(user_id, username, email, password):
     usercol = connect_to_mongoDB()

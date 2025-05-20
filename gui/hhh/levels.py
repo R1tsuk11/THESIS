@@ -279,17 +279,23 @@ def levels_page(page: ft.Page):
         level_index = int(level_num) - 1
         level_data = selected_module_levels[level_index]
 
+        # Debug print initial data
+        print(f"[DEBUG] Starting level_select for level {level_num}")
+        print(f"[DEBUG] Level data: {level_data}")
+
         # Prerequisite and completion checks...
         prerequisite_levels = selected_module_levels[:level_index]
         all_prerequisites_completed = all(level.completed for level in prerequisite_levels)
 
         if not all_prerequisites_completed:
+            print("[DEBUG] Prerequisites not completed")
             page.open(ft.SnackBar(ft.Text("You must complete previous levels first."), bgcolor="#FF0000"))
             page.update()
             return
 
         # Prevent re-entering a finished level
         if level_data.completed:
+            print("[DEBUG] Level already completed")
             page.open(ft.SnackBar(ft.Text("Level already completed!"), bgcolor="#FF0000"))
             page.update()
             return
@@ -298,40 +304,75 @@ def levels_page(page: ft.Page):
         user_id = page.session.get("user_id")
         from supermemo_engine import get_user_proficiency
         proficiency = get_user_proficiency(user_id)
+        print(f"[DEBUG] User proficiency: {proficiency}")
 
         # Use the questions stored in the user's level data
         all_questions = level_data.questions_answers
+        print(f"[DEBUG] Total questions in level: {len(all_questions)}")
+        
+        # Debug print some question sample
+        for i, q in enumerate(all_questions[:3]):  # Print first 3 questions for debugging
+            print(f"[DEBUG] Sample question {i+1}: type={getattr(q, 'type', 'unknown')}, "
+                f"vocab={getattr(q, 'vocabulary', 'unknown')}, "
+                f"difficulty={getattr(q, 'difficulty', 'unknown')}")
 
         # Get all unique vocabularies in this lesson
-        vocab_set = set(q.vocabulary.lower() for q in all_questions if q.vocabulary)
-        vocab_list = sorted(list(vocab_set))
+        # Get all unique vocabularies in this lesson - preserve original case
+        vocab_dict = {}
+        for q in all_questions:
+            if q.vocabulary:
+                # Use lowercase as key for case-insensitive matching, but store original case
+                vocab_key = q.vocabulary.lower()
+                vocab_dict[vocab_key] = q.vocabulary  # Store original case
+        
+        # Get sorted list of vocabularies with original casing preserved
+        vocab_list = [vocab_dict[key] for key in sorted(vocab_dict.keys())]
+        print(f"[DEBUG] Vocabularies in this level: {vocab_list}")
 
         def select_lesson_and_practice_questions(all_questions, vocab, proficiency):
+            # Match using lowercase for case-insensitive matching but keep original case for display
             lesson_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") == "Lesson"]
+            print(f"[DEBUG] Found {len(lesson_q)} lesson questions for vocab '{vocab}'")
+            
             if proficiency < 40:
                 practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 2]
+                print(f"[DEBUG] Found {len(practice_q)} practice questions (diff <= 2) for vocab '{vocab}' (proficiency < 40)")
             elif proficiency < 70:
                 practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 3]
+                print(f"[DEBUG] Found {len(practice_q)} practice questions (diff <= 3) for vocab '{vocab}' (40 <= proficiency < 70)")
             else:
                 practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson"]
+                print(f"[DEBUG] Found {len(practice_q)} practice questions (any diff) for vocab '{vocab}' (proficiency >= 70)")
+                
             practice_q.sort(key=lambda q: getattr(q, "difficulty", 1))
-            return lesson_q[:1] + practice_q[:3]
+            
+            # Only take the lesson and practice questions we need
+            selected = []
+            # Always include lesson questions first if available
+            if lesson_q:
+                selected.extend(lesson_q[:1])
+            # Then add practice questions
+            selected.extend(practice_q[:3])
+            
+            print(f"[DEBUG] Selected {len(lesson_q[:1]) if lesson_q else 0} lesson + {min(len(practice_q), 3)} practice questions for vocab '{vocab}'")
+            return selected
 
+        # Process vocabularies in order and keep questions grouped
         questions = []
         for vocab in vocab_list:
             # Get all questions for this vocab
             vocab_questions = select_lesson_and_practice_questions(all_questions, vocab, proficiency)
-            
-            # Make sure lesson comes before practice for this vocab
-            lesson_questions = [q for q in vocab_questions if getattr(q, "type", "") == "Lesson"]
-            practice_questions = [q for q in vocab_questions if getattr(q, "type", "") != "Lesson"]
-            
-            # Add in order: lesson first, then practice
-            questions.extend(lesson_questions + practice_questions)
+            questions.extend(vocab_questions)
 
-        for q in questions:
+        # Debug final question set
+        print(f"[DEBUG] Final question count: {len(questions)}")
+        for i, q in enumerate(questions):
+            print(f"[DEBUG] Question {i+1}: type={getattr(q, 'type', 'unknown')}, "
+                f"vocab={getattr(q, 'vocabulary', 'unknown')}, "
+                f"difficulty={getattr(q, 'difficulty', 'unknown')}")
             q.lesson_id = level_data.lesson_id
             q.module_name = level_data.module_name
+
         level_data.questions_answers = questions
 
         page.session.set("level_data", level_data)
