@@ -18,6 +18,17 @@ def connect_to_mongoDB():
         print(f"Failed to connect to MongoDB: {e}")
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
+def get_user_proficiency(user_id):
+    """
+    Fetches the user's proficiency from the database.
+    This function should be implemented to return the user's proficiency level.
+    """
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    if user and "proficiency" in user:
+        return user["proficiency"]
+    return 0  # Default proficiency if not found
+
 def get_questions_for_vocab_list(vocab_list, module_ids=None):
     """
     Returns a list of question dicts from the question bank that match any vocab in vocab_list.
@@ -33,6 +44,39 @@ def get_questions_for_vocab_list(vocab_list, module_ids=None):
                 if q.get("vocabulary") in vocab_list and q.get("type") not in ["Lesson", "Cultural Trivia"]:
                     questions.append(q)
     return questions
+
+def select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=4, include_lesson=False):
+    # Optionally include lesson question
+    if include_lesson:
+        lesson_q = [q for q in all_questions if q["vocabulary"].lower() == vocab.lower() and q["type"] == "Lesson"]
+    else:
+        lesson_q = []
+    # Filter by proficiency
+    if proficiency < 40:
+        other_q = [q for q in all_questions if q["vocabulary"].lower() == vocab.lower() and q.get("difficulty", 1) <= 2 and q["type"] != "Lesson"]
+    elif proficiency < 70:
+        other_q = [q for q in all_questions if q["vocabulary"].lower() == vocab.lower() and q.get("difficulty", 1) <= 3 and q["type"] != "Lesson"]
+    else:
+        other_q = [q for q in all_questions if q["vocabulary"].lower() == vocab.lower() and q["type"] != "Lesson"]
+    other_q.sort(key=lambda q: q.get("difficulty", 1))
+    # Pick up to max_per_vocab questions (no lesson in review)
+    selected = lesson_q[:1] + other_q[:max_per_vocab - len(lesson_q)]
+    return selected
+
+def get_review_questions_for_user(user_id, vocab_list, proficiency):
+    # Gather all questions from the question bank
+    all_questions = []
+    for module_id in module_bank.keys():
+        module = module_bank[module_id]
+        for lesson in module.values():
+            all_questions.extend(lesson)
+    # For each vocab, select up to 4 questions
+    review_questions = []
+    for vocab in vocab_list:
+        review_questions.extend(
+            select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=4, include_lesson=False)
+        )
+    return review_questions
 
 def get_all_bkt_predictions(user_id):
     print(f"[DEBUG] Fetching BKT predictions for user: {user_id}")
@@ -111,7 +155,7 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
         {"$set": {"supermemo": supermemo_data}}
     )
 
-def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
+def prepare_daily_review(user_id, threshold=0.85, max_questions=15):
     print(f"[DEBUG] Preparing daily review for user: {user_id}")
     predictions = get_all_bkt_predictions(user_id)
     needs_practice, mastered = prioritize_vocabularies(predictions, threshold=threshold)
@@ -142,7 +186,8 @@ def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
 
     print(f"[DEBUG] Final review_items to return: {review_items}")
     vocab_list = [vocab for vocab, state in review_items]
-    review_questions = get_questions_for_vocab_list(vocab_list)
+    proficiency = get_user_proficiency(user_id)  # You need to implement this
+    review_questions = get_review_questions_for_user(user_id, vocab_list, proficiency)
     return review_questions
 
 def update_supermemo_state(state, quality):

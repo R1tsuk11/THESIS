@@ -19,7 +19,7 @@ module_1 = {
         "question": "aga",
         "choices": ["morning_sun.jpg", "afternoon_sun.jpg", "night_sky.jpg"],
         "correct_answer": "morning_sun.jpg",
-        "vocabulary": "aga",
+        "vocabulary": "Maupay nga aga",
         "difficulty": 1,
         "response_time": 0
     },
@@ -37,7 +37,7 @@ module_1 = {
         "id": 4,
         "type": "Pronunciation",
         "question": "How do you pronounce 'aga'?",
-        "audio_file": "aga.mp3",
+        "audio_file": "Maupay nga aga.mp3",
         "accuracy": None,
         "accuracy_threshold": 0.8,
         "vocabulary": "aga",

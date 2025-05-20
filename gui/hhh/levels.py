@@ -252,7 +252,7 @@ def levels_page(page: ft.Page):
         selected_module_levels = page.session.get("module_levels")
         modules = page.session.get("modules")
         module_id = page.session.get("module_id")
-
+ 
         if modules and selected_module_levels and module_id:
             for module in modules:
                 if str(module.id) == str(module_id):
@@ -276,11 +276,10 @@ def levels_page(page: ft.Page):
         page.go("/main-menu")
 
     def level_select(e, level_num):
-        """Handles level selection and navigates to the lesson page."""
         level_index = int(level_num) - 1
         level_data = selected_module_levels[level_index]
 
-        # Check all previous levels (prerequisites)
+        # Prerequisite and completion checks...
         prerequisite_levels = selected_module_levels[:level_index]
         all_prerequisites_completed = all(level.completed for level in prerequisite_levels)
 
@@ -289,15 +288,54 @@ def levels_page(page: ft.Page):
             page.update()
             return
 
-        # Optional: prevent re-entering a finished level
+        # Prevent re-entering a finished level
         if level_data.completed:
             page.open(ft.SnackBar(ft.Text("Level already completed!"), bgcolor="#FF0000"))
             page.update()
             return
 
-        # Proceed to the lesson
+        # Fetch current proficiency
+        user_id = page.session.get("user_id")
+        from supermemo_engine import get_user_proficiency
+        proficiency = get_user_proficiency(user_id)
+
+        # Use the questions stored in the user's level data
+        all_questions = level_data.questions_answers
+
+        # Get all unique vocabularies in this lesson
+        vocab_set = set(q.vocabulary.lower() for q in all_questions if q.vocabulary)
+        vocab_list = sorted(list(vocab_set))
+
+        def select_lesson_and_practice_questions(all_questions, vocab, proficiency):
+            lesson_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") == "Lesson"]
+            if proficiency < 40:
+                practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 2]
+            elif proficiency < 70:
+                practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 3]
+            else:
+                practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson"]
+            practice_q.sort(key=lambda q: getattr(q, "difficulty", 1))
+            return lesson_q[:1] + practice_q[:3]
+
+        questions = []
+        for vocab in vocab_list:
+            # Get all questions for this vocab
+            vocab_questions = select_lesson_and_practice_questions(all_questions, vocab, proficiency)
+            
+            # Make sure lesson comes before practice for this vocab
+            lesson_questions = [q for q in vocab_questions if getattr(q, "type", "") == "Lesson"]
+            practice_questions = [q for q in vocab_questions if getattr(q, "type", "") != "Lesson"]
+            
+            # Add in order: lesson first, then practice
+            questions.extend(lesson_questions + practice_questions)
+
+        for q in questions:
+            q.lesson_id = level_data.lesson_id
+            q.module_name = level_data.module_name
+        level_data.questions_answers = questions
+
         page.session.set("level_data", level_data)
-        print(f"Selected level {level_num}")
+        print(f"Selected level {level_num} (proficiency: {proficiency})")
         page.go("/lesson")
 
     def chapter_test_select(page):

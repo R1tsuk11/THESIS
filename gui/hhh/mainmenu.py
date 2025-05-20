@@ -8,10 +8,37 @@ import os
 from datetime import datetime
 from supermemo_engine import prepare_daily_review
 import time
+import threading
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
-# Add this function to mainmenu.py
+user_active = True
+usage_time_seconds = 0
+idle_seconds = 0
+IDLE_THRESHOLD = 120  # 2 minutes
+
+def start_usage_timer(page):
+    def timer_loop():
+        global usage_time_seconds, idle_seconds, user_active
+        while True:
+            time.sleep(1)
+            if user_active:
+                usage_time_seconds += 1
+                idle_seconds += 1
+                # Optionally update UI or save to session/db periodically
+                if idle_seconds >= IDLE_THRESHOLD:
+                    user_active = False  # User is now idle
+                    print("[DEBUG] User is idle, pausing usage timer.")
+            else:
+                # Wait for activity to resume
+                time.sleep(1)
+    threading.Thread(target=timer_loop, daemon=True).start()
+
+def reset_idle_timer(e=None):
+    global user_active, idle_seconds
+    user_active = True
+    idle_seconds = 0
+    print("[DEBUG] User is active again, resuming usage timer.")
 
 def show_daily_review_overlay(page):
     overlay = ft.Container(
@@ -444,6 +471,8 @@ class User:  # User class
         self.save_library()
         self.save_bkt_data()
         self.save_prof_history()
+
+        print(f"[TEST] Usage time (seconds): {usage_time_seconds}, (minutes): {usage_time_seconds // 60}")
         
         usercol = connect_to_mongoDB()
         user_data = self.to_dict()
@@ -680,6 +709,13 @@ def main_menu_page(page: ft.Page):
     # Add view with updated styling
     page.views.append(ft.View("/main-menu", controls=[content], padding=0, bgcolor="#FFFFFF"))  # White background
     page.update()
+
+    start_usage_timer(page)
+
+    # Attach reset_idle_timer to user interactions
+    page.on_pointer_move = reset_idle_timer
+    page.on_keyboard_event = reset_idle_timer
+    page.on_click = reset_idle_timer
 
     # Retrieve last_login_date from database for the current user
     usercol = connect_to_mongoDB()
