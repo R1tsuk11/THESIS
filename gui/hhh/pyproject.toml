@@ -1,0 +1,12 @@
+[project]
+name = "arami-waray"
+version = "0.1.0"
+description = "Waray Waray Language Learning Application"
+
+[tool.flet.android]
+package = "com.arami.waray"
+min_sdk_version = 23
+permissions = [
+    "android.permission.RECORD_AUDIO",
+    "android.permission.INTERNET"
+]

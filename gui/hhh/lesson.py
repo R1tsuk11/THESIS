@@ -1,10 +1,16 @@
 import flet as ft
 import re
 import os
+import sys
 import time
 import json
 from lessonScore import lesson_score
 import asyncio
+import matplotlib.pyplot as plt  # Import for visualization
+import base64  # Import for encoding visualization images
+from voice_recognition.audio_processing import is_valid_audio, extract_features
+from voice_recognition.speech_recognition_utils import SpeechProcessor, capture_audio  # Import the more complete module
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 correct_answers = {}
 incorrect_answers = {}
@@ -1093,70 +1099,285 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
     )
 
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
-    """Builds the layout for a pronunciation type question."""
-
     start_time = time.time()
-    instruction_text = question_data.question
-    word_text = question_data.get("waray_text", "Aga")
-    translation_text = question_data.get("english_text", "Morning")
-    tap_record_text = question_data.get("record_instruction", "Tap to record")
+    question_text = question_data.question
+    vocabulary = question_data.vocabulary
+    accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.75)
+    
+    # Remove the incorrect Page._current reference
+    # Instead, we'll use the page reference from the update function context
+    
+    # Create speech processor with error handling
+    try:
+        # Use explicit paths to ensure files are found
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        proj_dir = os.path.abspath(os.path.join(script_dir, '../../'))
+        model_path = os.path.join(proj_dir, 'waray_speech_model.keras')
+        encoder_path = os.path.join(proj_dir, 'encoder_classes.npy')
+        
+        speech_processor = SpeechProcessor(model_path=model_path, encoder_path=encoder_path)
+        model_available = speech_processor.model is not None
+    except Exception as e:
+        print(f"Error loading speech processor: {str(e)}")
+        model_available = False
+        speech_processor = None
 
-    def on_mic_press(e):
-        print("Recording started")
-        # Recording logic goes here
+    recording = {"is_recording": False, "audio_data": None, "file_path": None}
+    transcription = {"text": "", "accuracy": 0.0}
 
-    # Card content
+    # Create UI components
+    txt_transcription = ft.Text("Tap the microphone to start recording", color="grey", size=16)
+    txt_accuracy = ft.Text("", size=16)
+    pronunciation_tips = ft.Text("", size=14, color="orange", visible=False)
+    pronunciation_chart = ft.Image(visible=False)
+    button_mic = ft.IconButton(
+        icon=ft.icons.MIC,
+        icon_color="white",
+        bgcolor="#0078D7",
+        icon_size=36,
+        on_click=lambda e: start_recording(e)
+    )
+    
+    # Import threading here to avoid issues
+    import threading
+
+    def start_recording(e):
+        button_mic.disabled = True
+        txt_transcription.value = "Listening..."
+        txt_accuracy.value = ""
+        pronunciation_tips.visible = False
+        pronunciation_chart.visible = False
+        e.page.update()
+        
+        recording["is_recording"] = True
+        threading.Thread(target=lambda: record_audio(e.page)).start()
+
+    def record_audio(page):
+        if not model_available:
+            # Simulate audio processing when model isn't available
+            time.sleep(2)
+            txt_transcription.value = vocabulary  # Assume correct for demo
+            txt_accuracy.value = "Model not available - simulating correct pronunciation"
+            txt_accuracy.color = "orange"
+            button_mic.disabled = False
+            button_mic.bgcolor = "#0078D7"
+            button_mic.icon_color = "white"
+            page.update()
+            return
+            
+        try:
+            recording["file_path"] = capture_audio(duration=3)
+            
+            if recording["file_path"] and os.path.exists(recording["file_path"]):
+                process_recording(page)
+            else:
+                txt_transcription.value = "No audio detected. Please try again."
+                txt_accuracy.value = ""
+                button_mic.disabled = False
+                page.update()
+        except Exception as e:
+            txt_transcription.value = f"Error recording audio: {str(e)}"
+            button_mic.disabled = False
+            page.update()
+        finally:
+            recording["is_recording"] = False
+            
+    def process_recording(page):
+        if not model_available:
+            return
+            
+        try:
+            predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
+                recording["file_path"], vocabulary
+            )
+            
+            if predicted_word:
+                txt_transcription.value = f"You said: {predicted_word}"
+                
+                # Get any pronunciation errors from the NLTK analysis that was performed
+                nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
+                
+                if predicted_word.lower() == vocabulary.lower():
+                    accuracy = confidence if confidence else 0.75
+                    txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
+                    
+                    if accuracy >= accuracy_threshold:
+                        txt_accuracy.color = "green"
+                        question_data.accuracy = accuracy
+                        
+                        # Show detailed phoneme feedback
+                        if phoneme_confidence:
+                            # Identify problematic phonemes
+                            problem_phonemes = [(p, s) for p, s in phoneme_confidence.items() if s < 0.7]
+                            if problem_phonemes:
+                                feedback_text = "Work on: "
+                                feedback_text += ", ".join([f"{p} ({s:.0%})" for p, s in problem_phonemes])
+                                
+                                # Add NLTK analysis if available
+                                if nltk_errors:
+                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
+                                    
+                                pronunciation_tips.value = feedback_text
+                                pronunciation_tips.visible = True
+                            else:
+                                pronunciation_tips.visible = False
+                                
+                            # Generate and display visualization
+                            viz_buffer = visualize_pronunciation_feedback(vocabulary, phoneme_confidence)
+                            if viz_buffer:
+                                pronunciation_chart.src_base64 = base64.b64encode(viz_buffer.read()).decode('utf-8')
+                                pronunciation_chart.visible = True
+                    else:
+                        txt_accuracy.color = "orange"
+                        question_data.accuracy = accuracy
+                        
+                        # Show pronunciation tips for specific syllables
+                        if phoneme_confidence:
+                            problem_syllables = speech_processor._identify_problem_syllables(
+                                [(p, s) for p, s in phoneme_confidence.items() if s < 0.7],
+                                speech_processor._map_phonemes_to_syllables(vocabulary.lower())
+                            )
+                            
+                            feedback_text = ""
+                            if problem_syllables:
+                                feedback_text = f"Focus on syllables: {', '.join(problem_syllables)}"
+                            
+                            # Add NLTK analysis if available
+                            if nltk_errors:
+                                if feedback_text:
+                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
+                                else:
+                                    feedback_text = "Google analysis: " + "\n• ".join([""] + nltk_errors)
+                            
+                            pronunciation_tips.value = feedback_text
+                            pronunciation_tips.visible = bool(feedback_text)
+                else:
+                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{vocabulary}'"
+                    txt_accuracy.value = f"Incorrect word detected"
+                    txt_accuracy.color = "red"
+                    question_data.accuracy = 0.0
+                    
+                    # Show general pronunciation tips with NLTK analysis
+                    feedback_text = "Try again, focusing on clear pronunciation"
+                    
+                    if nltk_errors:
+                        feedback_text += "\n\nPronunciation analysis: " + "\n• ".join([""] + nltk_errors)
+                    
+                    pronunciation_tips.value = feedback_text
+                    pronunciation_tips.visible = True
+                    pronunciation_chart.visible = False
+            else:
+                txt_transcription.value = "Speech not recognized clearly. Please try again."
+                txt_accuracy.value = ""
+                question_data.accuracy = 0.0
+                pronunciation_tips.visible = False
+                pronunciation_chart.visible = False
+                
+        except Exception as e:
+            txt_transcription.value = f"Error processing speech: {str(e)}"
+            txt_accuracy.value = ""
+            pronunciation_tips.visible = False
+            pronunciation_chart.visible = False
+            
+        finally:
+            button_mic.disabled = False
+            page.update()
+            
+            # Clean up temp file
+            try:
+                if recording["file_path"] and os.path.exists(recording["file_path"]):
+                    os.remove(recording["file_path"])
+            except Exception:
+                pass
+
+    def handle_next(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
+        
+        if not question_data.accuracy:
+            question_data.accuracy = 0.0
+            
+        if question_data.accuracy >= accuracy_threshold:
+            print(f"Pronunciation accepted with accuracy: {question_data.accuracy:.2f}")
+            correct_answers[question_data.question] = question_data
+        else:
+            print(f"Pronunciation below threshold: {question_data.accuracy:.2f}")
+            incorrect_answers[question_data.question] = question_data
+            
+        if on_next:
+            on_next(e)
+    
+    # Create the main UI layout
     card_content = ft.Container(
         content=ft.Column(
             [
-                ft.Text(instruction_text, color="#0078D7", size=16, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(name=ft.icons.VOLUME_UP_ROUNDED, color="black", size=20),
-                            ft.Text(word_text, color="black", size=18, weight=ft.FontWeight.BOLD)
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=10
-                    ),
-                    width=320,
-                    bgcolor="#FFF9C4",
-                    padding=ft.padding.symmetric(vertical=15, horizontal=10),
-                    border_radius=10,
-                    margin=ft.margin.only(top=15, bottom=15)
+                ft.Row(
+                    [
+                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
+                        ft.Container(
+                            ft.Text("Pronounce", color="grey", size=14, weight=ft.FontWeight.W_500),
+                            padding=ft.padding.symmetric(horizontal=10)
+                        ),
+                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER
                 ),
-                ft.Text(translation_text, color="black", size=16, text_align=ft.TextAlign.CENTER),
                 ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Container(
-                                content=ft.Icon(name=ft.icons.MIC, color="black", size=40),
-                                width=120,
-                                height=120,
-                                bgcolor="#FFC107",
-                                border_radius=60,
-                                alignment=ft.alignment.center,
-                                on_click=on_mic_press,
-                                margin=ft.margin.only(bottom=20),
-                                shadow=ft.BoxShadow(
-                                    spread_radius=1,
-                                    blur_radius=15,
-                                    color=ft.colors.YELLOW_100,
-                                    offset=ft.Offset(0, 0)
-                                )
-                            ),
-                            ft.Text(tap_record_text, color="black", size=16, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                    ft.Text(
+                        question_text,
+                        text_align=ft.TextAlign.CENTER,
+                        size=16,
+                        weight=ft.FontWeight.W_500
                     ),
-                    margin=ft.margin.only(top=30, bottom=30)
-                )
+                    margin=ft.margin.only(bottom=10, top=10)
+                ),
+                ft.Container(
+                    ft.Text(
+                        vocabulary,
+                        color="#0078D7",
+                        size=28,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    margin=ft.margin.only(bottom=20)
+                ),
+                ft.Container(
+                    button_mic,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=20, top=10)
+                ),
+                ft.Container(
+                    txt_transcription,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=10)
+                ),
+                ft.Container(
+                    txt_accuracy,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=10)
+                ),
+                ft.Container(
+                    pronunciation_tips,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=10)
+                ),
+                ft.Container(
+                    pronunciation_chart,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=20)
+                ),
             ],
             alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=5
         ),
-        padding=ft.padding.only(top=20)
+        width=312,
+        bgcolor="white",
+        border_radius=10,
+        padding=20,
+        margin=ft.margin.only(top=20, bottom=20)
     )
 
     progress = ft.Container(
@@ -1168,9 +1389,13 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.IconButton(icon=ft.icons.ARROW_BACK, icon_color="grey", on_click=on_back),
+                    content=ft.IconButton(
+                        icon=ft.icons.ARROW_BACK,
+                        icon_color="grey",
+                        on_click=on_back
+                    ),
                     width=100,
-                    bgcolor="#F5F5F5",
+                    bgcolor="white",
                     border_radius=ft.border_radius.all(30),
                     padding=5
                 ),
@@ -1184,7 +1409,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                         ),
                         width=200,
                         height=50,
-                        on_click=on_next
+                        on_click=handle_next
                     )
                 )
             ],
@@ -1204,6 +1429,48 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
+def visualize_pronunciation_feedback(word, phoneme_confidence):
+    """Generate a visual representation of pronunciation accuracy for each phoneme."""
+    if not phoneme_confidence:
+        return None
+        
+    # Create figure
+    fig, ax = plt.figure(figsize=(10, 3)), plt.gca()
+    
+    # Colors for different confidence levels
+    colors = ['#ff6b6b', '#ffa06b', '#ffd46b', '#d4ff6b', '#6bff6b']
+    
+    # Create bars for each phoneme
+    phonemes = list(phoneme_confidence.keys())
+    scores = list(phoneme_confidence.values())
+    
+    # Create bars with color gradients based on score
+    bars = ax.bar(phonemes, scores, color=[colors[min(int(s*5), 4)] for s in scores])
+    
+    # Add labels
+    ax.set_ylim(0, 1.1)
+    ax.set_title(f"Pronunciation Analysis for '{word}'")
+    ax.set_ylabel("Confidence Score")
+    ax.set_xlabel("Phonemes")
+    
+    # Add threshold line
+    ax.axhline(y=0.7, linestyle='--', color='gray', alpha=0.7)
+    ax.text(len(phonemes)/2, 0.72, "Acceptable Threshold", ha='center', va='bottom', color='gray')
+    
+    # Add problem indicators
+    for i, score in enumerate(scores):
+        if score < 0.7:
+            ax.text(i, score + 0.05, "!", ha='center', va='bottom', color='red', fontweight='bold')
+    
+    # Save to buffer
+    from io import BytesIO
+    buf = BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    
+    return buf  # Return buffer for display in GUI
+
 def render_question_layout(page, question_data, progress_value, on_next, on_back):
     question_type = question_data.type
     
@@ -1218,13 +1485,7 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
     elif question_type == "Cultural Trivia":
         return build_trivia_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Pronunciation":
-        # Simple placeholder instead of async function
-        return build_placeholder_question(
-            "Pronunciation feature not available yet.", 
-            progress_value, 
-            on_next, 
-            on_back
-        )
+        return build_pronounce_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Translate Sentence":
         return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back)
     else:

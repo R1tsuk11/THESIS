@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./waray_speech_model.keras:/app/waray_speech_model.keras
+      - ./encoder_classes.npy:/app/encoder_classes.npy
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - MODEL_PATH=waray_speech_model.keras
+      - ENCODER_PATH=encoder_classes.npy
+      - CORS_ORIGINS=https://your-app-domain.com,http://localhost:8550
+      - SECRET_KEY=your-secure-secret-key-here
