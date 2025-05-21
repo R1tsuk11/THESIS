@@ -29,7 +29,7 @@ def goto_time(page, user_id):
     page.go(route)
     page.update()
 
-def set_up_proficiency_page(page: ft.Page):
+def set_up_proficiency_page(page: ft.Page, image_urls: list):
     """Defines the Setup Proficiency Page with Routing"""
 
     def get_user_id(page):

@@ -209,7 +209,7 @@ def register_user(user_id, username, email, password):
 
     print(f"User {username} registered successfully!")
 
-def register_page(page: ft.Page):
+def register_page(page: ft.Page, image_urls: list):
     """Defines the Register Page with Routing"""
     
     username_field = ft.TextField(

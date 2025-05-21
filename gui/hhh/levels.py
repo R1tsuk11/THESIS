@@ -154,7 +154,7 @@ def clear_temp_module_cache():
     if os.path.exists("temp_modules.json"):
         os.remove("temp_modules.json")
 
-def levels_page(page: ft.Page):
+def levels_page(page: ft.Page, image_urls: list):
     """Levels selection page"""
     selected_module_levels, selected_module_desc, selected_module_name, user_id = get_module_data(page)
     page.title = f"Arami - \"{selected_module_name}\" Levels"
@@ -397,7 +397,10 @@ def levels_page(page: ft.Page):
         page.session.set("ct_data", ct_level)
         page.go("/chaptertest")
 
-    def create_level_button(level_number, color="#4285F4"):
+    def create_level_button(level_number, is_available=True):
+        # Use dark gray for unavailable levels, blue for available ones
+        color = "#4285F4" if is_available else "#666666"
+        
         return ft.Container(
             content=ft.Text(
                 str(level_number),
@@ -412,14 +415,47 @@ def levels_page(page: ft.Page):
             border_radius=10,
             alignment=ft.alignment.center,
             data=level_number,
-            on_click=lambda e: level_select(page, level_number)
+            # Always keep the click handler, but handle availability inside level_select
+            on_click=lambda e: level_select(e, level_number)
         )
 
+    # Check if all levels are completed to determine chapter test button color
+    all_levels_completed = all(level.completed for level in selected_module_levels)
+    chapter_test_color = "#4285F4" if all_levels_completed else "#666666"
+    
+    # Icon instead of "CT"
+    chapter_test_button = ft.Container(
+        content=ft.Icon(
+            name=ft.Icons.GRADING,  
+            color="#FFFFFF",
+            size=28,
+        ),
+        bgcolor=chapter_test_color,
+        width=60,
+        height=60,
+        border_radius=10,
+        alignment=ft.alignment.center,
+        data="chaptertest",
+        on_click=lambda e: chapter_test_select(page)
+    )
+
+        # Process level buttons
+    level_count = 0
     for index, level in enumerate(selected_module_levels, start=1):
-        level_button = create_level_button(index)
+        # Check if all prerequisites for this level are completed
+        prerequisite_levels = selected_module_levels[:index-1]
+        all_prerequisites_completed = all(level.completed for level in prerequisite_levels)
+        
+        # Create button with appropriate color based on availability
+        level_button = create_level_button(index, all_prerequisites_completed)
 
         row.append(level_button)
+        level_count += 1
 
+        # Add chapter test button next to level 5
+        if index == 5:
+            row.append(chapter_test_button)
+            
         # When we have 3 buttons, or it's the last button, add the row
         if len(row) == 3 or index == len(selected_module_levels):
             level_rows.append(
@@ -431,6 +467,26 @@ def levels_page(page: ft.Page):
             )
             row = []  # reset for the next row
 
+    # If we didn't add the chapter test button yet (in case there are fewer than 5 levels)
+    if level_count < 5 and not any(chapter_test_button in r.controls for r in level_rows):
+        if row:  # If there's an incomplete row
+            row.append(chapter_test_button)
+            level_rows.append(
+                ft.Row(
+                    row,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=10
+                )
+            )
+        else:  # Start a new row for the chapter test button
+            level_rows.append(
+                ft.Row(
+                    [chapter_test_button],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=10
+                )
+            )
+
     # Header with gradient background and title
     header = ft.Container(
         content=ft.Stack([
@@ -440,25 +496,45 @@ def levels_page(page: ft.Page):
                     end=ft.alignment.bottom_right,
                     colors=["#0066FF", "#9370DB"],
                 ),
-                height=130,
+                height=170,
+            ),
+            ft.Container(
+                bgcolor="#4285F4",
+                padding=ft.padding.symmetric(vertical=1, horizontal=16),
+                margin=ft.margin.only(top=150),
+                width=300,
+                height=75,
             ),
             ft.Container(
                 content=ft.Text(
                     selected_module_name,
-                    size=20,
+                    size=26,
                     color="#FFFFFF",
-                    weight=ft.FontWeight.BOLD,
-                    text_align=ft.TextAlign.CENTER,
+                    weight=ft.FontWeight.W_900,
+                    text_align=ft.TextAlign.LEFT,
                 ),
                 bgcolor="#4285F4",
-                border_radius=20,
-                padding=ft.padding.symmetric(vertical=8, horizontal=16),
-                margin=ft.margin.only(top=100),
-                width=240,
-                alignment=ft.alignment.center,
+                border_radius=30,
+                padding=ft.padding.symmetric(vertical=1, horizontal=16),
+                margin=ft.margin.only(top=150),
+                width=350,
+                height=75,
+                alignment=ft.alignment.center_left,
             ),
+            
+            # Button in top-right
+            ft.Container(
+                content=ft.IconButton(
+                    icon=ft.Icons.ARROW_BACK,
+                    icon_color="#FFFFFF",
+                    icon_size=24,
+                    on_click=lambda _: page.go("/main-menu")
+                    ),
+                alignment=ft.alignment.top_left,
+                padding=10,  # Space from the edges
+            )
         ]),
-        height=130,
+        height=230,
     )
 
     explanation = ft.Container(
@@ -468,7 +544,7 @@ def levels_page(page: ft.Page):
             size=14,
             text_align=ft.TextAlign.CENTER,
         ),
-        margin=ft.margin.symmetric(vertical=15, horizontal=20),
+        margin=ft.margin.only(top=10,bottom=15,left=10, right=10),
         alignment=ft.alignment.center,
     )
 
@@ -480,59 +556,93 @@ def levels_page(page: ft.Page):
         margin=ft.margin.only(top=10),
     )
 
-    back_button = ft.Container(
-        content=ft.ElevatedButton(
-            text="Back",
-            on_click=go_back,
-            bgcolor="#4285F4",
-            color="#FFFFFF",
-            width=100,
-            height=40,
-        ),
-        alignment=ft.alignment.center,
-        margin=ft.margin.only(bottom=10),
-    )
-
-    chapter_test = ft.Container(
-            content=ft.Text(
-                "CT",
-                color="#FFFFFF",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER,
-            ),
-            bgcolor="#4285F4",
-            width=60,
-            height=60,
-            border_radius=10,
-            alignment=ft.alignment.center,
-            data="chaptertest",
-            on_click=lambda e: chapter_test_select(page)
-        )
-
     bottom_nav = ft.Container(
         content=ft.Row(
             [
-                ft.IconButton(icon=ft.Icons.MILITARY_TECH_OUTLINED, icon_color="#FFFFFF", icon_size=24),
-                ft.IconButton(icon=ft.Icons.MENU_BOOK_OUTLINED, icon_color="#FFFFFF", icon_size=24),
-                ft.IconButton(icon=ft.Icons.HOME_OUTLINED, icon_color="#FFFFFF", icon_size=24),
-                ft.IconButton(icon=ft.Icons.PERSON_OUTLINED, icon_color="#FFFFFF", icon_size=24),
-                ft.IconButton(icon=ft.Icons.SETTINGS_OUTLINED, icon_color="#FFFFFF", icon_size=24),
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.MENU_BOOK_OUTLINED,
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/word-library")
+                    ),
+                    border_radius=20,
+                    width=50, 
+                    height=50, 
+                    alignment=ft.alignment.center, 
+                    padding=0, 
+                    margin=5,
+                ),
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.HOME_OUTLINED,
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/main-menu")
+                    ),
+                    border_radius=20,
+                    width=50,
+                    height=50,
+                    alignment=ft.alignment.center,
+                    padding=0,
+                    margin=5,
+                ),
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.PERSON_OUTLINED,
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/achievements")
+                    ),
+                    border_radius=20,
+                    width=50,
+                    height=50,
+                    alignment=ft.alignment.center,
+                    padding=0,
+                    margin=5,
+                ),
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.SETTINGS_OUTLINED,  
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/settings")
+                    ),
+                    border_radius=20,
+                    width=50,
+                    height=50,
+                    alignment=ft.alignment.center,
+                    padding=0,
+                    margin=5,
+                ),
             ],
             alignment=ft.MainAxisAlignment.SPACE_AROUND,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER, 
+            height=60,  
         ),
-        bgcolor="#280082",
-        height=60,
-        padding=10
+        border_radius=25,
+        gradient=ft.LinearGradient(
+            begin=ft.alignment.top_center,
+            end=ft.alignment.bottom_center,
+            colors=["#30b4fc", "#2980b9"],
+        ),
+        height=70,  
+        padding=ft.padding.symmetric(horizontal=15, vertical=5),
+        margin=ft.margin.only(bottom=10, left=10, right=10),
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=15,
+            color=ft.Colors.with_opacity(0.3, "#000000"),
+            offset=ft.Offset(0, 0),
+        ),
+        alignment=ft.alignment.center,
     )
 
     content = ft.Column(
         [
             header,
-            back_button,
             explanation,
             level_grid,
-            chapter_test,
             ft.Container(expand=True),
             bottom_nav,
         ],

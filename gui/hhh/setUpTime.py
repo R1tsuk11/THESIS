@@ -28,7 +28,7 @@ def goto_login(page):
     page.go(route)
     page.update()
 
-def set_up_time_page(page: ft.Page):
+def set_up_time_page(page: ft.Page, image_urls: list):
     """Defines the Setup Time Selection Page with Routing"""
     
     def get_user(page):

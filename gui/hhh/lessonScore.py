@@ -16,9 +16,10 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     correct = len(noOfCorrect)
     incorrect = len(noOfIncorrect)
     
-    def go_back(e): # To be voided
-        """Navigate back to the previous page"""
-        page.go("/levels")
+    score_image_urls = [
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653930/tryagain_j5tsjw.png",  # tryagain - 0
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653931/goodjob_jbi6dt.png",  # goodjob - 1
+    ]
     
     def return_to_levels(e):
         """Navigate back to the levels page"""
@@ -29,23 +30,15 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
         content=ft.Row(
             [
                 ft.Container(width=50),  # Spacer
-                ft.Container(
-                    width=50, 
-                    content=ft.IconButton(
-                        icon=ft.icons.CLOSE, 
-                        icon_color="black",
-                        on_click=go_back
-                    )
-                )
             ],
             alignment=ft.MainAxisAlignment.END
         ),
-        padding=ft.padding.only(top=10, right=10)
+        padding=ft.padding.only(top=40) 
     )
     
     # Determine which image to show based on accuracy
-    img1 = "assets/goodjob.png"
-    img2 = "assets/tryagain.png"
+    img1 = score_image_urls[1]  # goodjob
+    img2 = score_image_urls[0]  # tryagain
     celebration_image = img1 if accuracyPercentage >= 50 else img2
     
     # Card content
@@ -83,12 +76,12 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
                             ),
                             ft.Container(
                                 content=ft.Text(
-                                    f"{accuracyPercentage} %",
+                                    f"{round(accuracyPercentage)} %",
                                     color="white",
                                     size=40,
                                     weight=ft.FontWeight.BOLD
                                 ),
-                                padding=ft.padding.symmetric(vertical=8)  # Increased vertical padding
+                                padding=ft.padding.symmetric(vertical=8)   # Increased vertical padding
                             )
                         ],
                         alignment=ft.MainAxisAlignment.CENTER,
@@ -218,10 +211,10 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
                     bgcolor="#FDFDBC",  # More accurate pale yellow background
                     border_radius=12,
                     padding=ft.padding.all(5),
-                    margin=ft.margin.only(top=15)
+                    margin=ft.margin.only(top=15, bottom=30)
                 )
             ],
-            alignment=ft.MainAxisAlignment.START,
+            alignment=ft.MainAxisAlignment.CENTER,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=0
         ),
@@ -231,13 +224,26 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
         border_radius=10,
         border=ft.border.all(2, "#0078D7"),
         padding=15,
-        margin=ft.margin.only(top=20, bottom=20)
+        margin=ft.margin.only(top=20, bottom=20),
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=10,
+            color=ft.Colors.GREY_400,
+            offset=ft.Offset(2, 2)
+        )
     )
     
-    # Progress indicator - calculate based on accuracy for more meaningful progress
-    progress_value = min(1.0, max(0.1, accuracyPercentage / 100))
+    scrollable_content = ft.ListView(
+        controls=[card_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
+    )
+
+    # Progress indicator - set na to 100% because i noticed nagloloko siya sa lesson score page only
     progress = ft.Container(
-        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        content=ft.ProgressBar(value=1.0, bgcolor="#e0e0e0", color="#0078D7", width=300),
         margin=ft.margin.only(bottom=20)
     )
     
@@ -246,32 +252,20 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
-                        icon_color="grey",
-                        on_click=go_back
-                    ),
-                    width=100,
-                    bgcolor="white",
-                    border_radius=ft.border_radius.all(30),
-                    padding=5
-                ),
-                ft.Container(width=10),  # Spacer
-                ft.Container(
                     content=ft.ElevatedButton(
                         content=ft.Text(
-                            "NEXT",
-                            color="white",
+                            "FINISH", 
+                            color="#375a04",
                             weight=ft.FontWeight.BOLD,
                             size=16
                         ),
                         style=ft.ButtonStyle(
-                            bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),  # Rounded corners like lessonTrivia.py
+                            bgcolor={"": "#80ffbe"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
                         ),
-                        width=200,
+                        width=280,
                         height=50,
-                        on_click=return_to_levels  # Navigate back to levels page
+                        on_click=return_to_levels 
                     )
                 )
             ],
@@ -285,8 +279,10 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
         [
             header,
             ft.Container(
-                content=card_content,
-                alignment=ft.alignment.center
+                content=scrollable_content,
+                alignment=ft.alignment.center,
+                expand=True,  # Take available space
+                width=312 
             ),
             progress,
             bottom_nav
@@ -300,7 +296,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     # Background with landscape image
     background = ft.Container(
         content=ft.Image(
-            src="assets/landscape_background.png",
+            src="THESIS-main/THESIS/gui/hhh/assets/landscape_background.png",
             width=page.width,
             height=page.height,
             fit=ft.ImageFit.COVER

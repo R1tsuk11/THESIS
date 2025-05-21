@@ -1,6 +1,6 @@
 import flet as ft
 
-def set_up_preference_page(page: ft.Page):
+def set_up_preference_page(page: ft.Page, image_urls: list):
     """Defines the Setup Preference Page with Routing"""
     
     selected_card = None  # Store the currently selected card

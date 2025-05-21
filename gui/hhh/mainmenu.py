@@ -507,32 +507,64 @@ def get_user_id(page):
             return None
         return page.session.get("user_id")
 
-def main_menu_page(page: ft.Page):
+def main_menu_page(page: ft.Page, image_urls: list):
     """Main menu page with module cards"""
 
-    # Header - empty blue container with no text
+    # ----- HEADER with image -----
     header = ft.Container(
-        content=ft.Row([], alignment=ft.MainAxisAlignment.CENTER),  # Empty row
-        bgcolor="#0066FF",  # Blue color matching the image
-        height=60,
-        padding=10
+        content=ft.Stack(
+            controls=[
+                ft.Column(
+                    controls=[
+                        ft.Container(
+                            content=ft.Row([], alignment=ft.MainAxisAlignment.CENTER),
+                            gradient=ft.LinearGradient(
+                                begin=ft.alignment.top_left,
+                                end=ft.alignment.bottom_right,
+                                colors=["#0066FF", "#9370DB"],
+                            ),
+                            height=70,
+                            # padding=10,
+                        ),
+                    ],
+                    spacing=0
+                ),
+                ft.Container(
+                    content=ft.Image(
+                        src=image_urls[1], #purple logo
+                        width=120,
+                        # height=65,
+                        fit=ft.ImageFit.COVER
+                    ),
+                    alignment=ft.alignment.top_center,
+                    margin=ft.Margin(top=20, left=0, right=0, bottom=15),
+                )
+            ]
+        ),
+        # width=500
     )
 
     # Create modules title
     modules_title = ft.Container(
         content=ft.Text(
             "Modules",
-            size=18,
+            size=15,
             color="#FFFFFF",  # White text
             weight=ft.FontWeight.BOLD,
             text_align=ft.TextAlign.CENTER,
         ),
-        bgcolor="#4285F4",  # Blue button color from image
+        bgcolor="#397BFF", 
         width=300,
-        height=50,
+        height=45,
         border_radius=25,
         alignment=ft.alignment.center,
-        margin=ft.margin.symmetric(vertical=10)
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=15,
+            color=ft.Colors.with_opacity(0.3, "#000000"),
+            offset=ft.Offset(0, 0),
+        ),
+        margin=ft.Margin(top=0, left=0, right=0, bottom=10)
     )
 
     def on_profile_click(e):
@@ -572,57 +604,128 @@ def main_menu_page(page: ft.Page):
 
     # Function to create a module card
     def create_module_card(module_id, main_button_text, sub_button_text, main_color, sub_color, bg_color="#2A2A2A"):
-        return ft.Container(
+        # Create the background container with image
+        module_id = int(module_id) if isinstance(module_id, str) and module_id.isdigit() else module_id
+        
+        # Set colors and background image based on module_id
+        if module_id == 1:      # KAMUSTAHAY
+            bg_image = image_urls[2] 
+            main_color = "#FFC124"
+            sub_color = "#FFE850"
+        elif module_id == 2:    # KALAKAT
+            bg_image = image_urls[3]
+            main_color = "#3FEA8C"
+            sub_color = "#79E17F"
+        elif module_id == 3:    # PAMALIT
+            bg_image = image_urls[4]
+            main_color = "#FFAD60"
+            sub_color = "#D1D1A7"
+        elif module_id == 4:     # PANGAON
+            bg_image = image_urls[5]
+            main_color = "#86C8CD"
+            sub_color = "#6CCDB9"
+        elif module_id == 5:    # SLANG
+            bg_image = image_urls[6]
+            main_color = "#86C8CD"
+            sub_color = "#FFE850"
+        else:
+            bg_image = image_urls[2]
+            main_color = "#86C8CD"
+            sub_color = "#FFE850"
+
+        # Background image container
+        bg_container = ft.Container(
+            content=ft.Image(
+                src=bg_image,
+                width=300,
+                height=150,
+                fit=ft.ImageFit.COVER,
+                error_content=ft.Container(
+                    width=300,
+                    height=150,
+                    bgcolor="orange",
+                    border_radius=15
+                )
+            ),
+            border_radius=15,
+            width=300,
+            height=150
+        )
+        
+        # Main content container with title and description
+        content_container = ft.Container(
             content=ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Container(
-                                content=ft.Text(
-                                    main_button_text,
-                                    color="#000000",
-                                    weight=ft.FontWeight.BOLD,
-                                    size=16,
-                                    text_align=ft.TextAlign.CENTER,  # Center text
-                                ),
-                                bgcolor=main_color,
-                                border_radius=15,
-                                padding=10,
-                                width=180,
-                                alignment=ft.alignment.center,  # Center content
-                            ),
-                            ft.Icon(
-                                ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
-                                color="#FFFFFF",  # White arrow
-                                size=20,
-                            ),
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,  # Keep arrow at right
+                    # TITLE
+                    ft.Container(
+                        content=ft.Text(
+                            main_button_text,
+                            color="#FFFFFF",
+                            weight=ft.FontWeight.BOLD,
+                            size=16,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                        bgcolor=main_color,
+                        border_radius=15,
+                        padding=5,
+                        width=180,
+                        margin=ft.margin.only(top=15),
+                        alignment=ft.alignment.center,
                     ),
+                    # DESCRIPTION
                     ft.Container(
                         content=ft.Text(
                             sub_button_text,
-                            color="#FFFFFF",  # White text
-                            size=14,
-                            text_align=ft.TextAlign.CENTER,  # Center text
+                            color="#FFFFFF",
+                            size=11,
+                            text_align=ft.TextAlign.CENTER,
                         ),
-                        bgcolor=sub_color,
-                        border_radius=15,
-                        padding=10,
+                        bgcolor=ft.Colors.with_opacity(0.7,sub_color),
+                        border_radius=10,
+                        padding=8,
                         width=200,
-                        alignment=ft.alignment.center,  # Center content
-                        margin=ft.margin.only(top=10),  # Remove left margin to center it
+                        alignment=ft.alignment.center,
+                        margin=ft.margin.only(top=8),
                     ),
                 ],
                 spacing=5,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,  # Center column contents
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            bgcolor=bg_color,  # Dark card background
+            alignment=ft.alignment.center,
+        )
+        
+        # Arrow icon container
+        arrow_container = ft.Container(
+            content=ft.Icon(
+                ft.Icons.ARROW_FORWARD,
+                color="#FFFFFF",
+                size=20,
+            ),
+            alignment=ft.alignment.top_right,
+            padding=10
+        )
+        
+        # Final card container with shadow
+        return ft.Container(
+            content=ft.Stack(
+                controls=[
+                    bg_container,
+                    content_container,
+                    arrow_container
+                ]
+            ),
             border_radius=15,
-            padding=15,
-            margin=ft.margin.only(bottom=15),
             width=300,
-            on_click=lambda e: navigate_to_levels(e, user, module_id),  # Navigates to Levels when clicked
+            height=150,
+            margin=ft.margin.only(bottom=15),
+            shadow=ft.BoxShadow(
+                blur_radius=8,
+                color=ft.Colors.BLACK26,
+                offset=ft.Offset(0, 4),
+                spread_radius=1,
+            ),
+            # Keep your existing navigation logic
+            on_click=lambda e, module_id=module_id: navigate_to_levels(e, user, module_id),
         )
 
     # Create the module cards with updated colors
@@ -642,49 +745,94 @@ def main_menu_page(page: ft.Page):
         tooltip="Logout",
         on_click=lambda e: user.save_user(page)  # Navigate to login page on logout
     )
+
     # Create the bottom navigation bar
     bottom_nav = ft.Container(
         content=ft.Row(
             [
-                ft.IconButton(
-                    icon=ft.Icons.MILITARY_TECH_OUTLINED,
-                    icon_color="#FFFFFF",
-                    icon_size=24,
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.MENU_BOOK_OUTLINED,
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/word-library")
+                    ),
+                    border_radius=20,
+                    width=50, 
+                    height=50, 
+                    alignment=ft.alignment.center, 
+                    padding=0, 
+                    margin=5,
                 ),
-                ft.IconButton(
-                    icon=ft.Icons.MENU_BOOK_OUTLINED,
-                    icon_color="#FFFFFF",
-                    icon_size=24,
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.HOME_OUTLINED,
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/main-menu")
+                    ),
+                    border_radius=20,
+                    width=50,
+                    height=50,
+                    alignment=ft.alignment.center,
+                    padding=0,
+                    margin=5,
                 ),
-                ft.IconButton(
-                    icon=ft.Icons.HOME_OUTLINED,
-                    icon_color="#FFFFFF",
-                    icon_size=24,
-                    on_click=on_profile_click(page)
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.PERSON,  
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/achievements")
+                    ),
+                    border_radius=20,
+                    width=50,
+                    height=50,
+                    alignment=ft.alignment.center,
+                    padding=0,
+                    margin=5,
                 ),
-                ft.IconButton(
-                    icon=ft.Icons.PERSON_OUTLINED,
-                    icon_color="#FFFFFF",
-                    icon_size=24,
-                ),
-                ft.IconButton(
-                    icon=ft.Icons.SETTINGS_OUTLINED,
-                    icon_color="#FFFFFF",
-                    icon_size=24,
+                ft.Container(
+                    content=ft.IconButton(
+                        icon=ft.Icons.SETTINGS_OUTLINED,  
+                        icon_color="#FFFFFF",
+                        icon_size=24,
+                        on_click=lambda _: page.go("/settings")
+                    ),
+                    border_radius=20,
+                    width=50,
+                    height=50,
+                    alignment=ft.alignment.center,
+                    padding=0,
+                    margin=5,
                 ),
             ],
             alignment=ft.MainAxisAlignment.SPACE_AROUND,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER, 
+            height=60,  
         ),
-        bgcolor="#280082",  # Dark purple color
-        height=60,
-        padding=10
+        border_radius=25,
+        gradient=ft.LinearGradient(
+            begin=ft.alignment.top_center,
+            end=ft.alignment.bottom_center,
+            colors=["#30b4fc", "#2980b9"],
+        ),
+        height=70,  
+        padding=ft.padding.symmetric(horizontal=15, vertical=5),
+        margin=ft.margin.only(bottom=10, left=10, right=10),
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=15,
+            color=ft.Colors.with_opacity(0.3, "#000000"),
+            offset=ft.Offset(0, 0),
+        ),
+        alignment=ft.alignment.center,
     )
 
     # Main content with centered items
     content = ft.Column(
         [
             header,
-            logout_button,
             ft.Container(
                 content=ft.Column(
                     [
@@ -696,6 +844,7 @@ def main_menu_page(page: ft.Page):
                 alignment=ft.alignment.center,
                 expand=True
             ),
+            logout_button,
             bottom_nav,
         ],
         spacing=0,

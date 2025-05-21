@@ -2,7 +2,14 @@ import flet as ft
 import os
 import time
 import json
+import sys
+import asyncio
 from lessonScore import lesson_score
+import matplotlib.pyplot as plt  # Import for visualization
+import base64  # Import for encoding visualization images
+from voice_recognition.audio_processing import is_valid_audio, extract_features
+from voice_recognition.speech_recognition_utils import SpeechProcessor, capture_audio  # Import the more complete module
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 correct_answers = {}
 incorrect_answers = {}
@@ -10,6 +17,20 @@ grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
 id = 0
+
+correctDlg = ft.AlertDialog(
+    content=ft.Column(
+        [
+            ft.Container(content=ft.Icon(size=60), padding=ft.padding.only(top=15)),  # Placeholder for icon
+            ft.Container(content=ft.Text(""))        # Placeholder for text
+        ],
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=10
+    ),
+    alignment=ft.alignment.center,
+    bgcolor="#F5F5F5"
+)
 
 class Question:
     def __init__(self, data):
@@ -48,31 +69,71 @@ def sanitize_keys(d):
     else:
         return d
 
-def build_imgpicker_question(question_data, progress_value, on_next, on_back):
+def build_imgpicker_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    ASSETS_PATH = os.path.join(BASE_DIR, "assets")
-    img1 = os.path.join(ASSETS_PATH, os.path.basename(question_data.choices[0]))
-    img2 = os.path.join(ASSETS_PATH, os.path.basename(question_data.choices[1]))
+    m_one_image = [
+
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V1_fzmf6o.png", # 0 - M1V1
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V2_ebbvj7.png", # 1 - M1V2
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V3_fca0i3.png", # 2 - M1V3
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V4_czg2wz.png", # 3 - M1V4
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V5_ifphew.png", # 4 - M1V5
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V6_gpvjj3.png", # 5 - M1V6
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V7_s7iuny.png", # 6 - M1V7
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V8_obseud.png", # 7 - M1V8
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712837/M1V9_ohh2bf.png", # 8 - M1V9
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V10_k3p0za.png", # 9 - M1V10
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V11_yn14oe.png", # 10 - M1V11
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V12_fvcmkb.png", # 11 - M1V12
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V13_rgxhc3.png", # 12 - M1V13
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V14_rhov3g.png", # 13 - M1V14
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V15_nnsh6x.png", # 14 - M1V15
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712837/M1V16_yuxzyw.png", # 15 - M1V16
+    ]
     question = question_data.question
     correct_answer = question_data.correct_answer
 
+    # Try to get image URLs based on the indices in choices
+    try:
+        # Check if choices contains numeric indices
+        if all(str(choice).isdigit() for choice in question_data.choices):
+            img1 = m_one_image[int(question_data.choices[0])]
+            img2 = m_one_image[int(question_data.choices[1])]
+            if len(question_data.choices) > 2:
+                img3 = m_one_image[int(question_data.choices[2])]
+            else:
+                img3 = None
+        else:
+            # Fall back to direct URLs in choices
+            img1 = question_data.choices[0]
+            img2 = question_data.choices[1]
+            img3 = question_data.choices[2] if len(question_data.choices) > 2 else None
+    except (ValueError, IndexError) as e:
+        print(f"Error loading images: {e}")
+        # Fallback to local files as last resort
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        ASSETS_PATH = os.path.join(BASE_DIR, "assets")
+        img1 = os.path.join(ASSETS_PATH, os.path.basename(str(question_data.choices[0])))
+        img2 = os.path.join(ASSETS_PATH, os.path.basename(str(question_data.choices[1])))
+        img3 = os.path.join(ASSETS_PATH, os.path.basename(str(question_data.choices[2]))) if len(question_data.choices) > 2 else None
+        
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
-    print(os.path.exists(img1))
+    if img3:
+        print("Image 3 src:", img3)
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
 
-        for i, option in enumerate([image_option1, image_option2]):
+        for i, option in enumerate([image_option1, image_option2, image_option3]):
             if i == selected_option["value"]:
                 option.border = ft.border.all(3, "#0078D7")  # Blue border for selected
             else:
                 option.border = ft.border.all(1, "#E0E0E0")  # Light gray border
         e.page.update()
 
-    def handle_next(e):
+    async def handle_next(e):
         response_time = time.time() - start_time
         question_data.response_time = response_time
         global total_response_time
@@ -81,19 +142,51 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
             print("User selected Choice 1")
         elif selected_option["value"] == 1:
             print("User selected Choice 2")
+        elif selected_option["value"] == 2:
+            print("User selected Choice 3")
         else:
             print("User did not select any image")
-
-        if selected_option["value"] is None:
-            print("No option selected")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
             return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             correct_answers[question_data.question] = question_data
+            
         else:
             print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             incorrect_answers[question_data.question] = question_data
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
 
         if on_next:
             on_next(e)
@@ -130,7 +223,24 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
         on_click=lambda e: on_option_click(e, 1)
     )
 
-    return ft.Column(
+    image_option3 = ft.Container(
+        content=ft.Image(
+            src=img3,
+            width=320,
+            height=180,
+            fit=ft.ImageFit.COVER,
+            border_radius=ft.border_radius.all(10),
+        ),
+        width=320,
+        height=180,
+        border=ft.border.all(1, "#E0E0E0"),
+        border_radius=ft.border_radius.all(10),
+        margin=ft.margin.only(bottom=15),
+        on_click=lambda e: on_option_click(e, 2)
+    )
+
+    # Create content for scrollable area
+    scrollable_content = ft.Column(
         [
             # Header
             ft.Container(
@@ -140,8 +250,8 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
                         ft.Container(
                             width=50,
                             content=ft.IconButton(
-                                icon=ft.icons.CLOSE,
-                                icon_color="black",
+                                icon=ft.Icons.CLOSE,
+                                icon_color="#000000",
                                 on_click=on_back
                             )
                         )
@@ -166,62 +276,81 @@ def build_imgpicker_question(question_data, progress_value, on_next, on_back):
             # Image choices
             ft.Container(
                 content=ft.Column(
-                    [image_option1, image_option2],
+                    [image_option1, image_option2, image_option3],
                     spacing=0
                 )
             ),
-
-            # Progress bar
-            ft.Container(
-                content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-                margin=ft.margin.only(bottom=20, top=10)
-            ),
-
-            # Navigation buttons
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Container(
-                            content=ft.IconButton(
-                                icon=ft.icons.ARROW_BACK,
-                                icon_color="grey",
-                                on_click=on_back
-                            ),
-                            width=70,
-                            bgcolor="#F5F5F5",
-                            border_radius=ft.border_radius.all(30),
-                            padding=5
-                        ),
-                        ft.Container(width=10),
-                        ft.Container(
-                            content=ft.ElevatedButton(
-                                content=ft.Text(
-                                    "NEXT",
-                                    color="white",
-                                    weight=ft.FontWeight.BOLD,
-                                    size=16
-                                ),
-                                style=ft.ButtonStyle(
-                                    bgcolor={"": "#0078D7"},
-                                    shape=ft.RoundedRectangleBorder(radius=30),
-                                ),
-                                width=200,
-                                height=50,
-                                on_click=handle_next
-                            )
-                        )
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER
-                ),
-                padding=ft.padding.only(bottom=20)
-            )
+            
+            # Extra space at the bottom to ensure content isn't cut off when scrolling
+            ft.Container(height=20)
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        expand=True
+        alignment=ft.MainAxisAlignment.START,
+    )
+    
+    # Make the content scrollable with ListView
+    scrollable_area = ft.ListView(
+        controls=[scrollable_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
     )
 
-def build_wordselect_question(question_data, progress_value, on_next, on_back):
+    # Progress bar (fixed position)
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20, top=10)
+    )
+
+    # Navigation buttons (fixed position)
+    nav_buttons = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text(
+                            "NEXT",
+                            color="white",
+                            weight=ft.FontWeight.BOLD,
+                            size=16
+                        ),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=280, 
+                        height=50,
+                        on_click=handle_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER
+        ),
+        padding=ft.padding.only(bottom=30)
+    )
+
+    return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Container(
+                        content=scrollable_area,
+                        expand=True,
+                        width=320,
+                        alignment=ft.alignment.center
+                    ),
+                    progress_bar,
+                    nav_buttons
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                expand=True
+            ),
+            bgcolor="#FFFFFF",  # Set background color to white
+            expand=True
+        )
+
+def build_wordselect_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     options = question_data.choices
     word_to_translate = question_data.question
@@ -231,10 +360,10 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
     def on_option_click(e, option_index, option_containers):
         selected_option["value"] = option_index
         for i, option in enumerate(option_containers):
-            option.border = ft.border.all(1, "black") if i == option_index else None
+            option.border = ft.border.all(1, "#000000") if i == option_index else None
         e.page.update()
 
-    def handle_next(e):
+    async def handle_next(e):
         response_time = time.time() - start_time
         question_data.response_time = response_time
         global total_response_time
@@ -255,6 +384,45 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
             print("Incorrect answer.")
             incorrect_answers[question_data.question] = question_data
 
+        if question_data.choices[selected_option["value"]] == correct_answer:
+            print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
+            correct_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
+        else:
+            print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
+            incorrect_answers[question_data.question] = question_data
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
+
+        page.update()
+
         if on_next:
             on_next(e)
 
@@ -262,7 +430,15 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
     option_containers = []
     for i, opt_text in enumerate(options):
         container = ft.Container(
-            content=ft.Text(opt_text, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            content=ft.Text(
+                opt_text,
+                color="#000000",  
+                size=18,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER,
+                max_lines=3,  # Allow up to 3 lines
+                overflow=ft.TextOverflow.VISIBLE
+            ),
             width=320,
             bgcolor="#F5F5F5",
             padding=ft.padding.symmetric(vertical=15),
@@ -272,96 +448,117 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
         container.on_click = lambda e, idx=i: on_option_click(e, idx, option_containers)
         option_containers.append(container)
 
+    # Create content to be scrollable
+    scrollable_content = ft.Column(
+        [
+            # Header with close/back button
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Container(width=50),
+                        ft.Container(
+                            width=50,
+                            content=ft.IconButton(icon=ft.Icons.CLOSE, icon_color="#000000", on_click=on_back),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
+                ),
+                padding=ft.padding.only(top=10, right=10),
+            ),
+
+            # Instruction
+            ft.Container(
+                content=ft.Text("Translate to Waray:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                margin=ft.margin.only(top=10)
+            ),
+
+            ft.Container(
+                content=ft.Text(
+                    word_to_translate,
+                    color="#000000",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER,
+                    max_lines=4,  # Allow multiple lines
+                    overflow=ft.TextOverflow.VISIBLE
+                ),
+                width=320,
+                bgcolor="#FFF9C4",
+                padding=ft.padding.symmetric(vertical=15, horizontal=10),
+                border_radius=10,
+                margin=ft.margin.only(bottom=30)
+            ),
+
+            # Option buttons
+            ft.Column(option_containers),
+            
+            # Add some extra space at the bottom to prevent cut-off
+            ft.Container(height=20)
+        ],
+        alignment=ft.MainAxisAlignment.START,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+    )
+    
+    # Make content scrollable with ListView
+    scrollable_area = ft.ListView(
+        controls=[scrollable_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
+    )
+
+    # Progress bar (fixed position)
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20),
+    )
+
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=280,  
+                        height=50,
+                        on_click=handle_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(bottom=30),
+    )
+    
+    # Main layout with fixed top bar, scrollable content, and fixed bottom elements
     return ft.Stack(
         [
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
-                # Blue bar on top
+                # Blue bar on top (fixed)
                 ft.Container(height=10, bgcolor="#0078D7", width=50),
 
-                # Main content
+                # Main content with three sections
                 ft.Column(
                     [
-                        # Header with close/back button
+                        # 1. Scrollable content area
                         ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Container(width=50),
-                                    ft.Container(
-                                        width=50,
-                                        content=ft.IconButton(icon=ft.icons.CLOSE, icon_color="black", on_click=on_back),
-                                    ),
-                                ],
-                                alignment=ft.MainAxisAlignment.END,
-                            ),
-                            padding=ft.padding.only(top=10, right=10),
+                            content=scrollable_area,
+                            expand=True,
+                            width=320,  # Fixed width
+                            alignment=ft.alignment.center
                         ),
-
-                        # Card content
-                        ft.Container(
-                            content=ft.Column(
-                                [
-                                    # Instruction
-                                    ft.Text(word_to_translate, color="#0078D7", size=18, weight=ft.FontWeight.BOLD),
-
-                                    # Word to translate
-                                    ft.Container(
-                                        content=ft.Text(word_to_translate, size=20, weight=ft.FontWeight.BOLD),
-                                        width=320,
-                                        bgcolor="#FFF9C4",
-                                        padding=ft.padding.symmetric(vertical=15),
-                                        border_radius=10,
-                                        margin=ft.margin.only(bottom=30)
-                                    ),
-
-                                    # Option buttons
-                                    ft.Column(option_containers)
-                                ],
-                                alignment=ft.MainAxisAlignment.START,
-                                horizontal_alignment=ft.CrossAxisAlignment.CENTER
-                            ),
-                            padding=ft.padding.only(top=20),
-                        ),
-
-                        # Progress bar
-                        ft.Container(
-                            content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-                            margin=ft.margin.only(bottom=20),
-                        ),
-
-                        # Bottom nav
-                        ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Container(
-                                        content=ft.IconButton(
-                                            icon=ft.icons.ARROW_BACK,
-                                            icon_color="grey",
-                                            on_click=on_back
-                                        ),
-                                        width=100,
-                                        bgcolor="white",
-                                        border_radius=ft.border_radius.all(30),
-                                        padding=5,
-                                    ),
-                                    ft.Container(width=10),
-                                    ft.Container(
-                                        content=ft.ElevatedButton(
-                                            content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                                            style=ft.ButtonStyle(
-                                                bgcolor={"": "#0078D7"},
-                                                shape=ft.RoundedRectangleBorder(radius=30),
-                                            ),
-                                            width=200,
-                                            height=50,
-                                            on_click=handle_next
-                                        )
-                                    )
-                                ],
-                                alignment=ft.MainAxisAlignment.CENTER,
-                            ),
-                            padding=ft.padding.only(bottom=20),
-                        )
+                        
+                        # 2. Fixed progress bar
+                        progress_bar,
+                        
+                        # 3. Fixed bottom navigation
+                        bottom_nav
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -372,7 +569,7 @@ def build_wordselect_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def build_tf_question(question_data, progress_value, on_next, on_back):
+def build_tf_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
@@ -380,10 +577,10 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
         for i, option in enumerate([option1, option2]):
-            option.border = ft.border.all(1, "black") if i == selected_option["value"] else None
+            option.border = ft.border.all(1, "#000000") if i == selected_option["value"] else None
         e.page.update()
 
-    def handle_next(e):
+    async def handle_next(e):
         response_time = time.time() - start_time
         question_data.response_time = response_time
         global total_response_time
@@ -394,13 +591,49 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
             print("Selected option: False")
         else:
             print("No option selected")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
+            return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             correct_answers[question_data.question] = question_data
+
         else:
             print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
             incorrect_answers[question_data.question] = question_data    
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
+
+        page.update()
 
         if on_next:
             on_next(e)
@@ -411,7 +644,7 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
     option2_text = question_data.choices[1]
 
     option1 = ft.Container(
-        content=ft.Text(option1_text, color="black", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+        content=ft.Text(option1_text, color="#000000", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
         width=320,
         bgcolor="#F5F5F5",
         padding=ft.padding.symmetric(vertical=15),
@@ -421,7 +654,7 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
     )
 
     option2 = ft.Container(
-        content=ft.Text(option2_text, color="black", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+        content=ft.Text(option2_text, color="#000000", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
         width=320,
         bgcolor="#F5F5F5",
         padding=ft.padding.symmetric(vertical=15),
@@ -430,12 +663,36 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
         on_click=lambda e: on_option_click(e, 1)
     )
 
+    # Header with close/back button
+    header = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(width=50),
+                ft.Container(
+                    width=50,
+                    content=ft.IconButton(icon=ft.Icons.CLOSE, icon_color="#000000", on_click=on_back),
+                ),
+            ],
+            alignment=ft.MainAxisAlignment.END,
+        ),
+        padding=ft.padding.only(top=10, right=10),
+    )
+
+    # Content with question and options
     card_content = ft.Container(
         content=ft.Column(
             [
                 ft.Text("TRUE OR FALSE", color="#0078D7", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
                 ft.Container(
-                    content=ft.Text(question_text, color="black", size=20, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                    content=ft.Text(
+                        question_text,
+                        color="#000000",
+                        size=20,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER,
+                        max_lines=6,  # Allow up to 6 lines
+                        overflow=ft.TextOverflow.VISIBLE
+                    ),
                     width=320,
                     bgcolor="#FFF9C4",
                     padding=ft.padding.symmetric(vertical=15, horizontal=10),
@@ -451,100 +708,566 @@ def build_tf_question(question_data, progress_value, on_next, on_back):
         padding=ft.padding.only(top=20)
     )
 
-    progress = ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300)
+    # Progress bar
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20),
+    )
 
-    return ft.Column(
-        [
-            card_content,
-            ft.Container(content=progress, margin=ft.margin.only(bottom=20)),
-            ft.Row(
-                [
-                    ft.IconButton(icon=ft.icons.ARROW_BACK, icon_color="grey", on_click=on_back),
-                    ft.Container(width=10),
-                    ft.ElevatedButton(
+    # Bottom navigation
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
                         content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
                         style=ft.ButtonStyle(
                             bgcolor={"": "#0078D7"},
                             shape=ft.RoundedRectangleBorder(radius=30),
                         ),
-                        width=200,
+                        width=280,  
                         height=50,
                         on_click=handle_next
                     )
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(bottom=30),
+    )
+
+    # Main layout with stack for white background
+    return ft.Stack(
+        [
+            ft.Container(bgcolor="white", expand=True),
+            ft.Column([
+                # Blue bar on top (fixed)
+                ft.Container(height=10, bgcolor="#0078D7", width=50),
+
+                # Main content with three sections
+                ft.Column(
+                    [
+                        # Header with close button
+                        header,
+                        
+                        # Scrollable content area
+                        ft.Container(
+                            content=card_content,
+                            expand=True,
+                            width=320,  # Fixed width
+                            alignment=ft.alignment.center
+                        ),
+                        
+                        # Fixed progress bar
+                        progress_bar,
+                        
+                        # Fixed bottom navigation
+                        bottom_nav
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    expand=True
+                )
+            ], spacing=0, expand=True)
+        ],
+        expand=True
+    )
+
+def build_translate_sentence_question(page, question_data, progress_value, on_next, on_back):
+    start_time = time.time()
+    options = question_data.choices
+    word_to_translate = question_data.question
+    selected_option = {"value": None}
+    correct_answer = question_data.correct_answer
+
+    def on_option_click(e, option_index, option_containers):
+        selected_option["value"] = option_index
+        for i, option in enumerate(option_containers):
+            option.border = ft.border.all(1, "#000000") if i == option_index else None
+        e.page.update()
+
+    async def handle_next(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
+        if selected_option["value"] == 0:
+            print("User selected Choice 1")
+        elif selected_option["value"] == 1:
+            print("User selected Choice 2")
+        elif selected_option["value"] == 2:
+            print("User selected Choice 3")
+        else:
+            print("User did not select any image")
+            page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
+            page.update()
+            return
+
+        question_data.answer = question_data.choices[selected_option["value"]]
+
+        if question_data.choices[selected_option["value"]] == correct_answer:
+            print("Correct answer!")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                color="green",
+                size=60
             )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Correct",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
+            correct_answers[question_data.question] = question_data
+
+        else:
+            print("Incorrect answer.")
+            correctDlg.content.controls[0].content = ft.Icon(
+                name=ft.icons.CLOSE,
+                color="red",
+                size=60
+            )
+            correctDlg.content.controls[1].content = ft.Text(
+                "Incorrect",
+                color="black",
+                size=20,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER
+            )
+            incorrect_answers[question_data.question] = question_data
+
+        page.open(correctDlg)
+        await asyncio.sleep(1.5)
+        page.close(correctDlg)
+
+        page.update()
+
+        if on_next:
+            on_next(e)
+
+    # Option containers (created dynamically from the options list)
+    option_containers = []
+    for i, opt_text in enumerate(options):
+        container = ft.Container(
+            content=ft.Text(
+                opt_text,
+                color="#000000",  
+                size=18,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER,
+                max_lines=3,  # Allow up to 3 lines
+                overflow=ft.TextOverflow.VISIBLE
+            ),
+            width=320,
+            bgcolor="#F5F5F5",
+            padding=ft.padding.symmetric(vertical=15),
+            border_radius=10,
+            margin=ft.margin.only(bottom=10 if i < len(options)-1 else 20),
+        )
+        container.on_click = lambda e, idx=i: on_option_click(e, idx, option_containers)
+        option_containers.append(container)
+
+    scrollable_content = ft.Column(
+        [
+            # Header with close/back button
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Container(width=50),
+                        ft.Container(
+                            width=50,
+                            content=ft.IconButton(icon=ft.Icons.CLOSE, icon_color="#000000", on_click=on_back),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
+                ),
+                padding=ft.padding.only(top=10, right=10),
+            ),
+
+            # Instruction
+            ft.Container(
+                content=ft.Text("Translate to Waray:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                margin=ft.margin.only(top=10)
+            ),
+
+            ft.Container(
+                content=ft.Text(
+                    word_to_translate,
+                    color="#000000",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER,
+                    max_lines=4,  # Allow multiple lines
+                    overflow=ft.TextOverflow.VISIBLE
+                ),
+                width=320,
+                bgcolor="#FFF9C4",
+                padding=ft.padding.symmetric(vertical=15, horizontal=10),
+                border_radius=10,
+                margin=ft.margin.only(bottom=30)
+            ),
+
+            # Option buttons
+            ft.Column(option_containers),
+            
+            # Add some extra space at the bottom to prevent cut-off
+            ft.Container(height=20)
         ],
         alignment=ft.MainAxisAlignment.START,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=0
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+    )
+    
+    # Make content scrollable with ListView
+    scrollable_area = ft.ListView(
+        controls=[scrollable_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
+    )
+
+    # Progress bar (fixed position)
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20),
+    )
+
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=280,  
+                        height=50,
+                        on_click=handle_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(bottom=30),
+    )
+    
+    # Main layout with fixed top bar, scrollable content, and fixed bottom elements
+    return ft.Stack(
+        [
+            ft.Container(bgcolor="white", expand=True),
+            ft.Column([
+                # Blue bar on top (fixed)
+                ft.Container(height=10, bgcolor="#0078D7", width=50),
+
+                # Main content with three sections
+                ft.Column(
+                    [
+                        # 1. Scrollable content area
+                        ft.Container(
+                            content=scrollable_area,
+                            expand=True,
+                            width=320,  # Fixed width
+                            alignment=ft.alignment.center
+                        ),
+                        
+                        # 2. Fixed progress bar
+                        progress_bar,
+                        
+                        # 3. Fixed bottom navigation
+                        bottom_nav
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    expand=True
+                )
+            ], spacing=0, expand=True)
+        ],
+        expand=True
     )
 
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
-    """Builds the layout for a pronunciation type question."""
-
     start_time = time.time()
-    instruction_text = question_data.question
-    word_text = question_data.get("waray_text", "Aga")
-    translation_text = question_data.get("english_text", "Morning")
-    tap_record_text = question_data.get("record_instruction", "Tap to record")
+    question_text = question_data.question
+    vocabulary = question_data.vocabulary
+    accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.75)
+    
+    # Remove the incorrect Page._current reference
+    # Instead, we'll use the page reference from the update function context
+    
+    # Create speech processor with error handling
+    try:
+        # Use explicit paths to ensure files are found
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        proj_dir = os.path.abspath(os.path.join(script_dir, '../../'))
+        model_path = os.path.join(proj_dir, 'waray_speech_model.keras')
+        encoder_path = os.path.join(proj_dir, 'encoder_classes.npy')
+        
+        speech_processor = SpeechProcessor(model_path=model_path, encoder_path=encoder_path)
+        model_available = speech_processor.model is not None
+    except Exception as e:
+        print(f"Error loading speech processor: {str(e)}")
+        model_available = False
+        speech_processor = None
 
-    def on_mic_press(e):
-        print("Recording started")
-        # Recording logic goes here
+    recording = {"is_recording": False, "audio_data": None, "file_path": None}
+    transcription = {"text": "", "accuracy": 0.0}
 
-    # Card content
+    # Create UI components
+    txt_transcription = ft.Text("Tap the microphone to start recording", color="grey", size=16)
+    txt_accuracy = ft.Text("", size=16)
+    pronunciation_tips = ft.Text("", size=14, color="orange", visible=False)
+    pronunciation_chart = ft.Image(visible=False)
+    button_mic = ft.IconButton(
+        icon=ft.icons.MIC,
+        icon_color="white",
+        bgcolor="#0078D7",
+        icon_size=36,
+        on_click=lambda e: start_recording(e)
+    )
+    
+    # Import threading here to avoid issues
+    import threading
+
+    def start_recording(e):
+        button_mic.disabled = True
+        txt_transcription.value = "Listening..."
+        txt_accuracy.value = ""
+        pronunciation_tips.visible = False
+        pronunciation_chart.visible = False
+        e.page.update()
+        
+        recording["is_recording"] = True
+        threading.Thread(target=lambda: record_audio(e.page)).start()
+
+    def record_audio(page):
+        if not model_available:
+            # Simulate audio processing when model isn't available
+            time.sleep(2)
+            txt_transcription.value = vocabulary  # Assume correct for demo
+            txt_accuracy.value = "Model not available - simulating correct pronunciation"
+            txt_accuracy.color = "orange"
+            button_mic.disabled = False
+            button_mic.bgcolor = "#0078D7"
+            button_mic.icon_color = "white"
+            page.update()
+            return
+            
+        try:
+            recording["file_path"] = capture_audio(duration=3)
+            
+            if recording["file_path"] and os.path.exists(recording["file_path"]):
+                process_recording(page)
+            else:
+                txt_transcription.value = "No audio detected. Please try again."
+                txt_accuracy.value = ""
+                button_mic.disabled = False
+                page.update()
+        except Exception as e:
+            txt_transcription.value = f"Error recording audio: {str(e)}"
+            button_mic.disabled = False
+            page.update()
+        finally:
+            recording["is_recording"] = False
+            
+    def process_recording(page):
+        if not model_available:
+            return
+            
+        try:
+            predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
+                recording["file_path"], vocabulary
+            )
+            
+            if predicted_word:
+                txt_transcription.value = f"You said: {predicted_word}"
+                
+                # Get any pronunciation errors from the NLTK analysis that was performed
+                nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
+                
+                if predicted_word.lower() == vocabulary.lower():
+                    accuracy = confidence if confidence else 0.75
+                    txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
+                    
+                    if accuracy >= accuracy_threshold:
+                        txt_accuracy.color = "green"
+                        question_data.accuracy = accuracy
+                        
+                        # Show detailed phoneme feedback
+                        if phoneme_confidence:
+                            # Identify problematic phonemes
+                            problem_phonemes = [(p, s) for p, s in phoneme_confidence.items() if s < 0.7]
+                            if problem_phonemes:
+                                feedback_text = "Work on: "
+                                feedback_text += ", ".join([f"{p} ({s:.0%})" for p, s in problem_phonemes])
+                                
+                                # Add NLTK analysis if available
+                                if nltk_errors:
+                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
+                                    
+                                pronunciation_tips.value = feedback_text
+                                pronunciation_tips.visible = True
+                            else:
+                                pronunciation_tips.visible = False
+                                
+                            # Generate and display visualization
+                            viz_buffer = visualize_pronunciation_feedback(vocabulary, phoneme_confidence)
+                            if viz_buffer:
+                                pronunciation_chart.src_base64 = base64.b64encode(viz_buffer.read()).decode('utf-8')
+                                pronunciation_chart.visible = True
+                    else:
+                        txt_accuracy.color = "orange"
+                        question_data.accuracy = accuracy
+                        
+                        # Show pronunciation tips for specific syllables
+                        if phoneme_confidence:
+                            problem_syllables = speech_processor._identify_problem_syllables(
+                                [(p, s) for p, s in phoneme_confidence.items() if s < 0.7],
+                                speech_processor._map_phonemes_to_syllables(vocabulary.lower())
+                            )
+                            
+                            feedback_text = ""
+                            if problem_syllables:
+                                feedback_text = f"Focus on syllables: {', '.join(problem_syllables)}"
+                            
+                            # Add NLTK analysis if available
+                            if nltk_errors:
+                                if feedback_text:
+                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
+                                else:
+                                    feedback_text = "Google analysis: " + "\n• ".join([""] + nltk_errors)
+                            
+                            pronunciation_tips.value = feedback_text
+                            pronunciation_tips.visible = bool(feedback_text)
+                else:
+                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{vocabulary}'"
+                    txt_accuracy.value = f"Incorrect word detected"
+                    txt_accuracy.color = "red"
+                    question_data.accuracy = 0.0
+                    
+                    # Show general pronunciation tips with NLTK analysis
+                    feedback_text = "Try again, focusing on clear pronunciation"
+                    
+                    if nltk_errors:
+                        feedback_text += "\n\nPronunciation analysis: " + "\n• ".join([""] + nltk_errors)
+                    
+                    pronunciation_tips.value = feedback_text
+                    pronunciation_tips.visible = True
+                    pronunciation_chart.visible = False
+            else:
+                txt_transcription.value = "Speech not recognized clearly. Please try again."
+                txt_accuracy.value = ""
+                question_data.accuracy = 0.0
+                pronunciation_tips.visible = False
+                pronunciation_chart.visible = False
+                
+        except Exception as e:
+            txt_transcription.value = f"Error processing speech: {str(e)}"
+            txt_accuracy.value = ""
+            pronunciation_tips.visible = False
+            pronunciation_chart.visible = False
+            
+        finally:
+            button_mic.disabled = False
+            page.update()
+            
+            # Clean up temp file
+            try:
+                if recording["file_path"] and os.path.exists(recording["file_path"]):
+                    os.remove(recording["file_path"])
+            except Exception:
+                pass
+
+    def handle_next(e):
+        response_time = time.time() - start_time
+        question_data.response_time = response_time
+        global total_response_time
+        total_response_time += response_time
+        
+        if not question_data.accuracy:
+            question_data.accuracy = 0.0
+            
+        if question_data.accuracy >= accuracy_threshold:
+            print(f"Pronunciation accepted with accuracy: {question_data.accuracy:.2f}")
+            correct_answers[question_data.question] = question_data
+        else:
+            print(f"Pronunciation below threshold: {question_data.accuracy:.2f}")
+            incorrect_answers[question_data.question] = question_data
+            
+        if on_next:
+            on_next(e)
+    
+    # Create the main UI layout
     card_content = ft.Container(
         content=ft.Column(
             [
-                ft.Text(instruction_text, color="#0078D7", size=16, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(name=ft.icons.VOLUME_UP_ROUNDED, color="black", size=20),
-                            ft.Text(word_text, color="black", size=18, weight=ft.FontWeight.BOLD)
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=10
-                    ),
-                    width=320,
-                    bgcolor="#FFF9C4",
-                    padding=ft.padding.symmetric(vertical=15, horizontal=10),
-                    border_radius=10,
-                    margin=ft.margin.only(top=15, bottom=15)
+                ft.Row(
+                    [
+                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
+                        ft.Container(
+                            ft.Text("Pronounce", color="grey", size=14, weight=ft.FontWeight.W_500),
+                            padding=ft.padding.symmetric(horizontal=10)
+                        ),
+                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER
                 ),
-                ft.Text(translation_text, color="black", size=16, text_align=ft.TextAlign.CENTER),
                 ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Container(
-                                content=ft.Icon(name=ft.icons.MIC, color="black", size=40),
-                                width=120,
-                                height=120,
-                                bgcolor="#FFC107",
-                                border_radius=60,
-                                alignment=ft.alignment.center,
-                                on_click=on_mic_press,
-                                margin=ft.margin.only(bottom=20),
-                                shadow=ft.BoxShadow(
-                                    spread_radius=1,
-                                    blur_radius=15,
-                                    color=ft.colors.YELLOW_100,
-                                    offset=ft.Offset(0, 0)
-                                )
-                            ),
-                            ft.Text(tap_record_text, color="black", size=16, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                    ft.Text(
+                        question_text,
+                        text_align=ft.TextAlign.CENTER,
+                        size=16,
+                        weight=ft.FontWeight.W_500
                     ),
-                    margin=ft.margin.only(top=30, bottom=30)
-                )
+                    margin=ft.margin.only(bottom=10, top=10)
+                ),
+                ft.Container(
+                    ft.Text(
+                        vocabulary,
+                        color="#0078D7",
+                        size=28,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    margin=ft.margin.only(bottom=20)
+                ),
+                ft.Container(
+                    button_mic,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=20, top=10)
+                ),
+                ft.Container(
+                    txt_transcription,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=10)
+                ),
+                ft.Container(
+                    txt_accuracy,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=10)
+                ),
+                ft.Container(
+                    pronunciation_tips,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=10)
+                ),
+                ft.Container(
+                    pronunciation_chart,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=20)
+                ),
             ],
             alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=5
         ),
-        padding=ft.padding.only(top=20)
+        width=312,
+        bgcolor="white",
+        border_radius=10,
+        padding=20,
+        margin=ft.margin.only(top=20, bottom=20)
     )
 
     progress = ft.Container(
@@ -556,9 +1279,13 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.IconButton(icon=ft.icons.ARROW_BACK, icon_color="grey", on_click=on_back),
+                    content=ft.IconButton(
+                        icon=ft.icons.ARROW_BACK,
+                        icon_color="grey",
+                        on_click=on_back
+                    ),
                     width=100,
-                    bgcolor="#F5F5F5",
+                    bgcolor="white",
                     border_radius=ft.border_radius.all(30),
                     padding=5
                 ),
@@ -572,7 +1299,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                         ),
                         width=200,
                         height=50,
-                        on_click=on_next
+                        on_click=handle_next
                     )
                 )
             ],
@@ -592,17 +1319,91 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def chapter_test_page(page):
+def visualize_pronunciation_feedback(word, phoneme_confidence):
+    """Generate a visual representation of pronunciation accuracy for each phoneme."""
+    if not phoneme_confidence:
+        return None
+        
+    # Create figure
+    fig, ax = plt.figure(figsize=(10, 3)), plt.gca()
+    
+    # Colors for different confidence levels
+    colors = ['#ff6b6b', '#ffa06b', '#ffd46b', '#d4ff6b', '#6bff6b']
+    
+    # Create bars for each phoneme
+    phonemes = list(phoneme_confidence.keys())
+    scores = list(phoneme_confidence.values())
+    
+    # Create bars with color gradients based on score
+    bars = ax.bar(phonemes, scores, color=[colors[min(int(s*5), 4)] for s in scores])
+    
+    # Add labels
+    ax.set_ylim(0, 1.1)
+    ax.set_title(f"Pronunciation Analysis for '{word}'")
+    ax.set_ylabel("Confidence Score")
+    ax.set_xlabel("Phonemes")
+    
+    # Add threshold line
+    ax.axhline(y=0.7, linestyle='--', color='gray', alpha=0.7)
+    ax.text(len(phonemes)/2, 0.72, "Acceptable Threshold", ha='center', va='bottom', color='gray')
+    
+    # Add problem indicators
+    for i, score in enumerate(scores):
+        if score < 0.7:
+            ax.text(i, score + 0.05, "!", ha='center', va='bottom', color='red', fontweight='bold')
+    
+    # Save to buffer
+    from io import BytesIO
+    buf = BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    
+    return buf  # Return buffer for display in GUI
+
+
+def chapter_test_page(page, image_urls: list):
     page.title = "Arami - Chapter Test"
     page.padding = 0
 
+        # EXIT ALERT
+    dlg_modal = ft.AlertDialog(
+        modal=True,
+        title=ft.Text(
+            "Are you sure you want to leave?",
+            size=20,
+            color="black",
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER,
+        ),
+        content=ft.Text(
+            "Your progress will be lost.",
+            size=14,
+            color="black",
+            text_align=ft.TextAlign.CENTER,
+        ),
+        actions=[
+            ft.TextButton("Yes", 
+                          style=ft.ButtonStyle(color=ft.Colors.BLUE),
+                          on_click=lambda e: page.go("/levels")),
+            ft.TextButton("No", 
+                          style=ft.ButtonStyle(color=ft.Colors.BLUE), 
+                          on_click=lambda e: page.close(dlg_modal)),
+        ],
+        actions_alignment=ft.MainAxisAlignment.CENTER,
+        bgcolor=ft.Colors.WHITE
+    )
+    
     def go_back(e):
-        page.go("/levels")
+    # Show exit dialog instead of immediately navigating back
+        page.open(dlg_modal)
+        page.update()
+        # page.go("/levels")
 
     # Background with landscape image
     background = ft.Container(
         content=ft.Image(
-            src="assets/landscape_background.png",
+            src=image_urls[8],
             width=page.width,
             height=page.height,
             fit=ft.ImageFit.COVER
@@ -622,14 +1423,15 @@ def chapter_test_page(page):
         question_type = question_data.type
         
         if question_type == "Image Picker":
-            return build_imgpicker_question(question_data, progress_value, on_next, on_back)
+            return build_imgpicker_question(page, question_data, progress_value, on_next, on_back)
         elif question_type == "Word Select / Translate":
-            return build_wordselect_question(question_data, progress_value, on_next, on_back)
+            return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
         elif question_type == "True or False":
-            return build_tf_question(question_data, progress_value, on_next, on_back)
-        elif question_type == "Pronounce":
-            print("Pronounce question type not implemented yet. Using Word Select Layout")
-            return build_wordselect_question(question_data, progress_value, on_next, on_back)
+            return build_tf_question(page, question_data, progress_value, on_next, on_back)
+        elif question_type == "Pronunciation":
+            return build_pronounce_question(question_data, progress_value, on_next, on_back)
+        elif question_type == "Translate Sentence":
+            return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back)
         else:
             return ft.Text("Unknown question type.")
 

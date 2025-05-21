@@ -71,8 +71,39 @@ def update_user_library():
 
 def build_lesson_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
+    # Dynamic image selection based on vocabulary
+    vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
+    
+    # First try to find a matching image in assets folder
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    ASSETS_PATH = os.path.join(BASE_DIR, "assets")
+    
+    # Try multiple file extensions and naming patterns
+    possible_image_paths = [
+        os.path.join(ASSETS_PATH, f"{vocabulary}.png"),
+        os.path.join(ASSETS_PATH, f"{vocabulary}.jpg"),
+        os.path.join(ASSETS_PATH, f"{vocabulary.replace(' ', '_')}.png"),
+        os.path.join(ASSETS_PATH, f"{vocabulary.replace(' ', '_')}.jpg"),
+        os.path.join(ASSETS_PATH, f"M1V{question_data.lesson_id}.png")  # Module 1, Vocabulary X format
+    ]
+    
+    # Find the first existing image path
+    lessonImg = None
+    for img_path in possible_image_paths:
+        if os.path.exists(img_path):
+            lessonImg = img_path
+            break
+    
+    # Fallback to default image if none found
+    if not lessonImg:
+        lessonImg = os.path.join(ASSETS_PATH, "default_vocab.png")
+        # If even the default doesn't exist, use a placeholder
+        if not os.path.exists(lessonImg):
+            lessonImg = "THESIS-main/THESIS/gui/hhh/assets/M1V1.png"
+    
+    print(f"Selected image for '{vocabulary}': {lessonImg}")
     start_time = time.time()
-    header = "Lesson"
+    header_text = "Lesson"
     waray_phrase = None
     english_translation = None
     full_definition = question_data.question
@@ -110,62 +141,107 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
         
         print(f"Using fallback for vocabulary: {waray_phrase}, translation: {english_translation}")
 
+    # Close button header
+    header = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(width=50),  # Spacer
+                ft.Container(
+                    width=50,
+                    content=ft.IconButton(
+                        icon=ft.Icons.CLOSE,
+                        icon_color="#000000",
+                        on_click=on_back
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.END
+        ),
+        padding=ft.padding.only(top=10, right=10)
+    )
 
     card_content = ft.Container(
         content=ft.Column(
             [
+                # Header row with dividers and title
                 ft.Row(
                     [
-                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
+                        ft.Container(content=ft.Divider(color="grey", thickness=1), expand=True),
                         ft.Container(
-                            ft.Text(header, color="grey", size=14, weight=ft.FontWeight.W_500),
+                            content=ft.Text(
+                                header_text,
+                                color="grey",
+                                size=14,
+                                weight=ft.FontWeight.W_500
+                            ),
                             padding=ft.padding.symmetric(horizontal=10)
                         ),
-                        ft.Container(ft.Divider(color="grey", thickness=1), width=60),
+                        ft.Container(content=ft.Divider(color="grey", thickness=1), expand=True),
                     ],
                     alignment=ft.MainAxisAlignment.CENTER
                 ),
-                ft.Row(
-                    [
-                        ft.IconButton(
-                            icon=ft.icons.VOLUME_UP,
-                            icon_color="#0078D7",
-                            icon_size=24,
-                            # Optionally play audio here
-                        ),
-                        ft.Text(
-                            waray_phrase,
-                            color="#0078D7",
-                            size=24,
-                            weight=ft.FontWeight.BOLD
-                        )
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=5
-                ),
+                # Waray phrase with volume icon - now wrapping enabled
                 ft.Container(
-                    ft.Text(english_translation, color="grey", size=16),
+                    content=ft.Row(
+                        [
+                            ft.IconButton(
+                                icon=ft.Icons.VOLUME_UP,
+                                icon_color="#0078D7",
+                                icon_size=24,
+                            ),
+                            ft.Text(
+                                waray_phrase,
+                                color="#0078D7",
+                                size=24,
+                                weight=ft.FontWeight.BOLD,
+                                text_align=ft.TextAlign.CENTER,
+                                max_lines=3,  # Allow up to 3 lines
+                                overflow=ft.TextOverflow.VISIBLE,  # Show all text
+                            )
+                        ],
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        spacing=5,
+                        wrap=True  # Enable wrapping
+                    ),
+                    margin=ft.margin.only(bottom=10)
+                ),
+                # English translation - now with wrapping
+                ft.Container(
+                    content=ft.Text(
+                        english_translation,
+                        color="grey",
+                        size=16,
+                        text_align=ft.TextAlign.CENTER,
+                        max_lines=4,  # Allow up to 4 lines
+                        overflow=ft.TextOverflow.VISIBLE
+                    ),
                     margin=ft.margin.only(bottom=20)
                 ),
+                # Image
                 ft.Container(
-                    ft.Image(
-                        src="assets/L1.png",
-                        width=250,
-                        height=150,
-                        fit=ft.ImageFit.CONTAIN
+                    content=ft.Image(
+                        src=lessonImg,
+                        width=300,
+                        #height=150,
+                        fit=ft.ImageFit.CONTAIN,
+                        border_radius=ft.border_radius.all(16)  
                     ),
                     alignment=ft.alignment.center,
                     margin=ft.margin.only(bottom=20)
                 ),
+                # Full definition - now with wrapping
                 ft.Container(
-                    ft.Text(
+                    content=ft.Text(
                         full_definition,
                         text_align=ft.TextAlign.CENTER,
                         size=16,
                         weight=ft.FontWeight.W_500,
-                        color="black"
+                        color="#000000",
+                        max_lines=8,  # Allow up to 8 lines
+                        overflow=ft.TextOverflow.VISIBLE
                     ),
-                    margin=ft.margin.only(bottom=20)
+                    margin=ft.margin.only(bottom=20),
+                    padding=ft.padding.symmetric(horizontal=10)  # Add horizontal padding
                 )
             ],
             alignment=ft.MainAxisAlignment.START,
@@ -176,37 +252,42 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
         bgcolor="white",
         border_radius=10,
         padding=20,
-        margin=ft.margin.only(top=20, bottom=20)
+        margin=ft.margin.symmetric(vertical=20),
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=10,
+            color=ft.Colors.GREY_400,
+            offset=ft.Offset(2, 2)
+        )
+    )
+    
+    # Create a ListView for scrollable content
+    scrollable_content = ft.ListView(
+        controls=[card_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
     )
 
+    # Progress bar
     progress = ft.Container(
-        ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
         margin=ft.margin.only(bottom=20)
     )
 
+    # Navigation controls
     bottom_nav = ft.Container(
         content=ft.Row(
             [
-                ft.Container(
-                    content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
-                        icon_color="grey",
-                        on_click=on_back
-                    ),
-                    width=100,
-                    bgcolor="white",
-                    border_radius=ft.border_radius.all(30),
-                    padding=5
-                ),
-                ft.Container(width=10),
                 ft.Container(
                     content=ft.ElevatedButton(
                         content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
                         style=ft.ButtonStyle(
                             bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),
+                            shape=ft.RoundedRectangleBorder(radius=25),
                         ),
-                        width=200,
+                        width=280,
                         height=50,
                         on_click=add_time
                     )
@@ -214,12 +295,19 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
             ],
             alignment=ft.MainAxisAlignment.CENTER
         ),
-        padding=ft.padding.only(bottom=20)
+        padding=ft.padding.only(bottom=30)
     )
 
     return ft.Column(
         [
-            card_content,
+            header,  # Added header with close button
+            # Scrollable content area (takes available space)
+            ft.Container(
+                content=scrollable_content,
+                expand=True,  # This makes it take up available space
+                alignment=ft.alignment.center,
+                width=312  # Keep the width constrained
+            ),
             progress,
             bottom_nav
         ],
@@ -231,22 +319,95 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
 def build_imgpicker_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
-    img1 = "assets/" + question_data.choices[0]
-    img2 = "assets/" + question_data.choices[1]
-    img3 = "assets/" + question_data.choices[2]
+    m_one_image = [
+
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V1_fzmf6o.png", # 0 - M1V1
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V2_ebbvj7.png", # 1 - M1V2
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V3_fca0i3.png", # 2 - M1V3
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V4_czg2wz.png", # 3 - M1V4
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V5_ifphew.png", # 4 - M1V5
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V6_gpvjj3.png", # 5 - M1V6
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V7_s7iuny.png", # 6 - M1V7
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V8_obseud.png", # 7 - M1V8
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712837/M1V9_ohh2bf.png", # 8 - M1V9
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V10_k3p0za.png", # 9 - M1V10
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V11_yn14oe.png", # 10 - M1V11
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V12_fvcmkb.png", # 11 - M1V12
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V13_rgxhc3.png", # 12 - M1V13
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V14_rhov3g.png", # 13 - M1V14
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V15_nnsh6x.png", # 14 - M1V15
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712837/M1V16_yuxzyw.png", # 15 - M1V16
+    ]
     question = question_data.question
     correct_answer = question_data.correct_answer
     global user_library
 
+   # Define image variables
+    img1 = None
+    img2 = None
+    img3 = None
+    
+    # Try to get image URLs based on the indices in choices
+    try:
+        # Check if choices contains numeric indices
+        if all(str(choice).isdigit() for choice in question_data.choices):
+            try:
+                # Try cloudinary URLs first
+                img1 = m_one_image[int(question_data.choices[0])]
+                img2 = m_one_image[int(question_data.choices[1])]
+                if len(question_data.choices) > 2:
+                    img3 = m_one_image[int(question_data.choices[2])]
+                else:
+                    img3 = None
+                print("Using cloudinary URLs for images")
+            except (ValueError, IndexError) as e:
+                print(f"Cloudinary URL error: {e}")
+                raise  # Re-raise to trigger the fallback
+        else:
+            # Fall back to direct URLs in choices
+            img1 = question_data.choices[0]
+            img2 = question_data.choices[1]
+            img3 = question_data.choices[2] if len(question_data.choices) > 2 else None
+    except Exception as e:
+        print(f"Error loading images: {e}")
+        # Fallback to local files
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        ASSETS_PATH = os.path.join(BASE_DIR, "assets")
+        
+        # For each choice, try different ways to find the image
+        def find_image(choice):
+            # Try direct filename
+            path = os.path.join(ASSETS_PATH, os.path.basename(str(choice)))
+            if os.path.exists(path):
+                return path
+                
+            # Try with extension
+            for ext in ['.jpg', '.png', '.jpeg']:
+                path = os.path.join(ASSETS_PATH, f"{str(choice)}{ext}")
+                if os.path.exists(path):
+                    return path
+                    
+            # Try with underscores instead of spaces
+            path = os.path.join(ASSETS_PATH, f"{str(choice).replace(' ', '_')}.png")
+            if os.path.exists(path):
+                return path
+                
+            # Last resort - return the choice as is (might be a URL or path)
+            return str(choice)
+            
+        img1 = find_image(question_data.choices[0])
+        img2 = find_image(question_data.choices[1])
+        img3 = find_image(question_data.choices[2]) if len(question_data.choices) > 2 else None
+        
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
-    print("Image 3 src:", img3)
-    print(os.path.exists(img1))
+    if img3:
+        print("Image 3 src:", img3)
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
 
-        for i, option in enumerate([image_option1, image_option2]):
+        for i, option in enumerate([image_option1, image_option2, image_option3]):
             if i == selected_option["value"]:
                 option.border = ft.border.all(3, "#0078D7")  # Blue border for selected
             else:
@@ -262,6 +423,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             print("User selected Choice 1")
         elif selected_option["value"] == 1:
             print("User selected Choice 2")
+        elif selected_option["value"] == 2:
+            print("User selected Choice 3")
         else:
             print("User did not select any image")
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
@@ -302,7 +465,9 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                 text_align=ft.TextAlign.CENTER
             )
             incorrect_answers[question_data.question] = question_data
-            
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
+
         page.open(correctDlg)
         await asyncio.sleep(1.5)
         page.close(correctDlg)
@@ -358,7 +523,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         on_click=lambda e: on_option_click(e, 2)
     )
 
-    return ft.Column(
+    # Create content for scrollable area
+    scrollable_content = ft.Column(
         [
             # Header
             ft.Container(
@@ -368,8 +534,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                         ft.Container(
                             width=50,
                             content=ft.IconButton(
-                                icon=ft.icons.CLOSE,
-                                icon_color="black",
+                                icon=ft.Icons.CLOSE,
+                                icon_color="#000000",
                                 on_click=on_back
                             )
                         )
@@ -398,56 +564,75 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                     spacing=0
                 )
             ),
-
-            # Progress bar
-            ft.Container(
-                content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-                margin=ft.margin.only(bottom=20, top=10)
-            ),
-
-            # Navigation buttons
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Container(
-                            content=ft.IconButton(
-                                icon=ft.icons.ARROW_BACK,
-                                icon_color="grey",
-                                on_click=on_back
-                            ),
-                            width=70,
-                            bgcolor="#F5F5F5",
-                            border_radius=ft.border_radius.all(30),
-                            padding=5
-                        ),
-                        ft.Container(width=10),
-                        ft.Container(
-                            content=ft.ElevatedButton(
-                                content=ft.Text(
-                                    "NEXT",
-                                    color="white",
-                                    weight=ft.FontWeight.BOLD,
-                                    size=16
-                                ),
-                                style=ft.ButtonStyle(
-                                    bgcolor={"": "#0078D7"},
-                                    shape=ft.RoundedRectangleBorder(radius=30),
-                                ),
-                                width=200,
-                                height=50,
-                                on_click=handle_next
-                            )
-                        )
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER
-                ),
-                padding=ft.padding.only(bottom=20)
-            )
+            
+            # Extra space at the bottom to ensure content isn't cut off when scrolling
+            ft.Container(height=20)
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        expand=True
+        alignment=ft.MainAxisAlignment.START,
     )
+    
+    # Make the content scrollable with ListView
+    scrollable_area = ft.ListView(
+        controls=[scrollable_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
+    )
+
+    # Progress bar (fixed position)
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20, top=10)
+    )
+
+    # Navigation buttons (fixed position)
+    nav_buttons = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text(
+                            "NEXT",
+                            color="white",
+                            weight=ft.FontWeight.BOLD,
+                            size=16
+                        ),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=280, 
+                        height=50,
+                        on_click=handle_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER
+        ),
+        padding=ft.padding.only(bottom=30)
+    )
+
+    return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Container(
+                        content=scrollable_area,
+                        expand=True,
+                        width=320,
+                        alignment=ft.alignment.center
+                    ),
+                    progress_bar,
+                    nav_buttons
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                expand=True
+            ),
+            bgcolor="#FFFFFF",  # Set background color to white
+            expand=True
+        )
 
 def build_wordselect_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
@@ -460,7 +645,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
     def on_option_click(e, option_index, option_containers):
         selected_option["value"] = option_index
         for i, option in enumerate(option_containers):
-            option.border = ft.border.all(1, "black") if i == option_index else None
+            option.border = ft.border.all(1, "#000000") if i == option_index else None
         e.page.update()
 
     async def handle_next(e):
@@ -514,6 +699,8 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 text_align=ft.TextAlign.CENTER
             )
             incorrect_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -528,7 +715,15 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
     option_containers = []
     for i, opt_text in enumerate(options):
         container = ft.Container(
-            content=ft.Text(opt_text, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            content=ft.Text(
+                opt_text,
+                color="#000000",  
+                size=18,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER,
+                max_lines=3,  # Allow up to 3 lines
+                overflow=ft.TextOverflow.VISIBLE
+            ),
             width=320,
             bgcolor="#F5F5F5",
             padding=ft.padding.symmetric(vertical=15),
@@ -538,96 +733,116 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         container.on_click = lambda e, idx=i: on_option_click(e, idx, option_containers)
         option_containers.append(container)
 
+    scrollable_content = ft.Column(
+        [
+            # Header with close/back button
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Container(width=50),
+                        ft.Container(
+                            width=50,
+                            content=ft.IconButton(icon=ft.Icons.CLOSE, icon_color="#000000", on_click=on_back),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
+                ),
+                padding=ft.padding.only(top=10, right=10),
+            ),
+
+            # Instruction
+            ft.Container(
+                content=ft.Text("Translate to Waray:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                margin=ft.margin.only(top=10)
+            ),
+
+            ft.Container(
+                content=ft.Text(
+                    word_to_translate,
+                    color="#000000",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER,
+                    max_lines=4,  # Allow multiple lines
+                    overflow=ft.TextOverflow.VISIBLE
+                ),
+                width=320,
+                bgcolor="#FFF9C4",
+                padding=ft.padding.symmetric(vertical=15, horizontal=10),
+                border_radius=10,
+                margin=ft.margin.only(bottom=30)
+            ),
+
+            # Option buttons
+            ft.Column(option_containers),
+            
+            # Add some extra space at the bottom to prevent cut-off
+            ft.Container(height=20)
+        ],
+        alignment=ft.MainAxisAlignment.START,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+    )
+    
+    # Make content scrollable with ListView
+    scrollable_area = ft.ListView(
+        controls=[scrollable_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
+    )
+
+    # Progress bar (fixed position)
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20),
+    )
+
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=280,  
+                        height=50,
+                        on_click=handle_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(bottom=30),
+    )
+    
+    # Main layout with fixed top bar, scrollable content, and fixed bottom elements
     return ft.Stack(
         [
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
-                # Blue bar on top
+                # Blue bar on top (fixed)
                 ft.Container(height=10, bgcolor="#0078D7", width=50),
 
-                # Main content
+                # Main content with three sections
                 ft.Column(
                     [
-                        # Header with close/back button
+                        # 1. Scrollable content area
                         ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Container(width=50),
-                                    ft.Container(
-                                        width=50,
-                                        content=ft.IconButton(icon=ft.icons.CLOSE, icon_color="black", on_click=on_back),
-                                    ),
-                                ],
-                                alignment=ft.MainAxisAlignment.END,
-                            ),
-                            padding=ft.padding.only(top=10, right=10),
+                            content=scrollable_area,
+                            expand=True,
+                            width=320,  # Fixed width
+                            alignment=ft.alignment.center
                         ),
-
-                        # Card content
-                        ft.Container(
-                            content=ft.Column(
-                                [
-                                    # Instruction
-                                    ft.Text(word_to_translate, color="#0078D7", size=18, weight=ft.FontWeight.BOLD),
-
-                                    # Word to translate
-                                    ft.Container(
-                                        content=ft.Text(word_to_translate, size=20, weight=ft.FontWeight.BOLD),
-                                        width=320,
-                                        bgcolor="#FFF9C4",
-                                        padding=ft.padding.symmetric(vertical=15),
-                                        border_radius=10,
-                                        margin=ft.margin.only(bottom=30)
-                                    ),
-
-                                    # Option buttons
-                                    ft.Column(option_containers)
-                                ],
-                                alignment=ft.MainAxisAlignment.START,
-                                horizontal_alignment=ft.CrossAxisAlignment.CENTER
-                            ),
-                            padding=ft.padding.only(top=20),
-                        ),
-
-                        # Progress bar
-                        ft.Container(
-                            content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-                            margin=ft.margin.only(bottom=20),
-                        ),
-
-                        # Bottom nav
-                        ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Container(
-                                        content=ft.IconButton(
-                                            icon=ft.icons.ARROW_BACK,
-                                            icon_color="grey",
-                                            on_click=on_back
-                                        ),
-                                        width=100,
-                                        bgcolor="white",
-                                        border_radius=ft.border_radius.all(30),
-                                        padding=5,
-                                    ),
-                                    ft.Container(width=10),
-                                    ft.Container(
-                                        content=ft.ElevatedButton(
-                                            content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                                            style=ft.ButtonStyle(
-                                                bgcolor={"": "#0078D7"},
-                                                shape=ft.RoundedRectangleBorder(radius=30),
-                                            ),
-                                            width=200,
-                                            height=50,
-                                            on_click=handle_next
-                                        )
-                                    )
-                                ],
-                                alignment=ft.MainAxisAlignment.CENTER,
-                            ),
-                            padding=ft.padding.only(bottom=20),
-                        )
+                        
+                        # 2. Fixed progress bar
+                        progress_bar,
+                        
+                        # 3. Fixed bottom navigation
+                        bottom_nav
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -647,7 +862,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
         for i, option in enumerate([option1, option2]):
-            option.border = ft.border.all(1, "black") if i == selected_option["value"] else None
+            option.border = ft.border.all(1, "#000000") if i == selected_option["value"] else None
         e.page.update()
 
     async def handle_next(e):
@@ -698,7 +913,9 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data    
+            incorrect_answers[question_data.question] = question_data  
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)  
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -715,7 +932,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
     option2_text = question_data.choices[1]
 
     option1 = ft.Container(
-        content=ft.Text(option1_text, color="black", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+        content=ft.Text(option1_text, color="#000000", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
         width=320,
         bgcolor="#F5F5F5",
         padding=ft.padding.symmetric(vertical=15),
@@ -725,7 +942,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
     )
 
     option2 = ft.Container(
-        content=ft.Text(option2_text, color="black", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+        content=ft.Text(option2_text, color="#000000", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
         width=320,
         bgcolor="#F5F5F5",
         padding=ft.padding.symmetric(vertical=15),
@@ -734,12 +951,36 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
         on_click=lambda e: on_option_click(e, 1)
     )
 
+    # Header with close/back button
+    header = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(width=50),
+                ft.Container(
+                    width=50,
+                    content=ft.IconButton(icon=ft.Icons.CLOSE, icon_color="#000000", on_click=on_back),
+                ),
+            ],
+            alignment=ft.MainAxisAlignment.END,
+        ),
+        padding=ft.padding.only(top=10, right=10),
+    )
+
+    # Content with question and options
     card_content = ft.Container(
         content=ft.Column(
             [
                 ft.Text("TRUE OR FALSE", color="#0078D7", size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
                 ft.Container(
-                    content=ft.Text(question_text, color="black", size=20, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                    content=ft.Text(
+                        question_text,
+                        color="#000000",
+                        size=20,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER,
+                        max_lines=6,  # Allow up to 6 lines
+                        overflow=ft.TextOverflow.VISIBLE
+                    ),
                     width=320,
                     bgcolor="#FFF9C4",
                     padding=ft.padding.symmetric(vertical=15, horizontal=10),
@@ -755,33 +996,69 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
         padding=ft.padding.only(top=20)
     )
 
-    progress = ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300)
+    # Progress bar
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20),
+    )
 
-    return ft.Column(
-        [
-            card_content,
-            ft.Container(content=progress, margin=ft.margin.only(bottom=20)),
-            ft.Row(
-                [
-                    ft.IconButton(icon=ft.icons.ARROW_BACK, icon_color="grey", on_click=on_back),
-                    ft.Container(width=10),
-                    ft.ElevatedButton(
+    # Bottom navigation
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
                         content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
                         style=ft.ButtonStyle(
                             bgcolor={"": "#0078D7"},
                             shape=ft.RoundedRectangleBorder(radius=30),
                         ),
-                        width=200,
+                        width=280,  
                         height=50,
                         on_click=handle_next
                     )
-                ],
-                alignment=ft.MainAxisAlignment.CENTER
-            )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(bottom=30),
+    )
+
+    # Main layout with stack for white background
+    return ft.Stack(
+        [
+            ft.Container(bgcolor="white", expand=True),
+            ft.Column([
+                # Blue bar on top (fixed)
+                ft.Container(height=10, bgcolor="#0078D7", width=50),
+
+                # Main content with three sections
+                ft.Column(
+                    [
+                        # Header with close button
+                        header,
+                        
+                        # Scrollable content area
+                        ft.Container(
+                            content=card_content,
+                            expand=True,
+                            width=320,  # Fixed width
+                            alignment=ft.alignment.center
+                        ),
+                        
+                        # Fixed progress bar
+                        progress_bar,
+                        
+                        # Fixed bottom navigation
+                        bottom_nav
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    expand=True
+                )
+            ], spacing=0, expand=True)
         ],
-        alignment=ft.MainAxisAlignment.START,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=0
+        expand=True
     )
 
 def build_trivia_question(question_data, progress_value, on_next, on_back):
@@ -806,8 +1083,8 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
                 ft.Container(
                     width=50,
                     content=ft.IconButton(
-                        icon=ft.icons.CLOSE,
-                        icon_color="black",
+                        icon=ft.Icons.CLOSE,
+                        icon_color="#000000",
                         on_click=on_back
                     )
                 )
@@ -837,11 +1114,13 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
                         trivia_text,
                         text_align=ft.TextAlign.CENTER,
                         size=16,
-                        weight=ft.FontWeight.BOLD,  # Changed to BOLD
-                        color="#0078D7"
+                        weight=ft.FontWeight.BOLD,
+                        color="#0078D7",
+                        max_lines=10,  # Allow up to 10 lines
+                        overflow=ft.TextOverflow.VISIBLE
                     ),
                     margin=ft.margin.only(top=20, bottom=20),
-                    padding=ft.padding.symmetric(horizontal=10)
+                    padding=ft.padding.symmetric(horizontal=20)
                 )
             ],
             alignment=ft.MainAxisAlignment.START,
@@ -849,11 +1128,19 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
             spacing=10
         ),
         width=312,
-        height=280,
         bgcolor="white",
         border_radius=10,
         padding=20,
         margin=ft.margin.only(top=20, bottom=20)
+    )
+
+    # Create a ListView for scrollable content
+    scrollable_content = ft.ListView(
+        controls=[card_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
     )
 
     # Progress bar
@@ -862,30 +1149,18 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
         margin=ft.margin.only(bottom=20)
     )
 
-    # Navigation controls
+    # Navigation controls - removed back button and adjusted next button width
     bottom_nav = ft.Container(
         content=ft.Row(
             [
-                ft.Container(
-                    content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
-                        icon_color="grey",
-                        on_click=on_back
-                    ),
-                    width=100,
-                    bgcolor="white",
-                    border_radius=ft.border_radius.all(30),
-                    padding=5
-                ),
-                ft.Container(width=10),
                 ft.Container(
                     content=ft.ElevatedButton(
                         content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
                         style=ft.ButtonStyle(
                             bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),
+                            shape=ft.RoundedRectangleBorder(radius=25),
                         ),
-                        width=200,
+                        width=280,
                         height=50,
                         on_click=add_time
                     )
@@ -893,19 +1168,24 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
             ],
             alignment=ft.MainAxisAlignment.CENTER
         ),
-        padding=ft.padding.only(bottom=20)
+        padding=ft.padding.only(bottom=30)
     )
 
     return ft.Column(
         [
             header,
-            ft.Container(content=card_content, alignment=ft.alignment.center),
+            # Scrollable content area (takes available space)
+            ft.Container(
+                content=scrollable_content,
+                expand=True,
+                alignment=ft.alignment.center,
+                width=312  # Keep the width constrained
+            ),
             progress,
             bottom_nav
         ],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=0,
         expand=True
     )
 
@@ -920,7 +1200,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
     def on_option_click(e, option_index, option_containers):
         selected_option["value"] = option_index
         for i, option in enumerate(option_containers):
-            option.border = ft.border.all(1, "black") if i == option_index else None
+            option.border = ft.border.all(1, "#000000") if i == option_index else None
         e.page.update()
 
     async def handle_next(e):
@@ -974,6 +1254,8 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
                 text_align=ft.TextAlign.CENTER
             )
             incorrect_answers[question_data.question] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -988,7 +1270,15 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
     option_containers = []
     for i, opt_text in enumerate(options):
         container = ft.Container(
-            content=ft.Text(opt_text, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            content=ft.Text(
+                opt_text,
+                color="#000000",  
+                size=18,
+                weight=ft.FontWeight.BOLD,
+                text_align=ft.TextAlign.CENTER,
+                max_lines=3,  # Allow up to 3 lines
+                overflow=ft.TextOverflow.VISIBLE
+            ),
             width=320,
             bgcolor="#F5F5F5",
             padding=ft.padding.symmetric(vertical=15),
@@ -998,96 +1288,116 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
         container.on_click = lambda e, idx=i: on_option_click(e, idx, option_containers)
         option_containers.append(container)
 
+    scrollable_content = ft.Column(
+        [
+            # Header with close/back button
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Container(width=50),
+                        ft.Container(
+                            width=50,
+                            content=ft.IconButton(icon=ft.Icons.CLOSE, icon_color="#000000", on_click=on_back),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
+                ),
+                padding=ft.padding.only(top=10, right=10),
+            ),
+
+            # Instruction
+            ft.Container(
+                content=ft.Text("Translate to Waray:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                margin=ft.margin.only(top=10)
+            ),
+
+            ft.Container(
+                content=ft.Text(
+                    word_to_translate,
+                    color="#000000",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER,
+                    max_lines=4,  # Allow multiple lines
+                    overflow=ft.TextOverflow.VISIBLE
+                ),
+                width=320,
+                bgcolor="#FFF9C4",
+                padding=ft.padding.symmetric(vertical=15, horizontal=10),
+                border_radius=10,
+                margin=ft.margin.only(bottom=30)
+            ),
+
+            # Option buttons
+            ft.Column(option_containers),
+            
+            # Add some extra space at the bottom to prevent cut-off
+            ft.Container(height=20)
+        ],
+        alignment=ft.MainAxisAlignment.START,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER
+    )
+    
+    # Make content scrollable with ListView
+    scrollable_area = ft.ListView(
+        controls=[scrollable_content],
+        expand=True,
+        spacing=0,
+        padding=0,
+        auto_scroll=False
+    )
+
+    # Progress bar (fixed position)
+    progress_bar = ft.Container(
+        content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
+        margin=ft.margin.only(bottom=20),
+    )
+
+    bottom_nav = ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        style=ft.ButtonStyle(
+                            bgcolor={"": "#0078D7"},
+                            shape=ft.RoundedRectangleBorder(radius=30),
+                        ),
+                        width=280,  
+                        height=50,
+                        on_click=handle_next
+                    )
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(bottom=30),
+    )
+    
+    # Main layout with fixed top bar, scrollable content, and fixed bottom elements
     return ft.Stack(
         [
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
-                # Blue bar on top
+                # Blue bar on top (fixed)
                 ft.Container(height=10, bgcolor="#0078D7", width=50),
 
-                # Main content
+                # Main content with three sections
                 ft.Column(
                     [
-                        # Header with close/back button
+                        # 1. Scrollable content area
                         ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Container(width=50),
-                                    ft.Container(
-                                        width=50,
-                                        content=ft.IconButton(icon=ft.icons.CLOSE, icon_color="black", on_click=on_back),
-                                    ),
-                                ],
-                                alignment=ft.MainAxisAlignment.END,
-                            ),
-                            padding=ft.padding.only(top=10, right=10),
+                            content=scrollable_area,
+                            expand=True,
+                            width=320,  # Fixed width
+                            alignment=ft.alignment.center
                         ),
-
-                        # Card content
-                        ft.Container(
-                            content=ft.Column(
-                                [
-                                    # Instruction
-                                    ft.Text(word_to_translate, color="#0078D7", size=18, weight=ft.FontWeight.BOLD),
-
-                                    # Word to translate
-                                    ft.Container(
-                                        content=ft.Text(word_to_translate, size=20, weight=ft.FontWeight.BOLD),
-                                        width=320,
-                                        bgcolor="#FFF9C4",
-                                        padding=ft.padding.symmetric(vertical=15),
-                                        border_radius=10,
-                                        margin=ft.margin.only(bottom=30)
-                                    ),
-
-                                    # Option buttons
-                                    ft.Column(option_containers)
-                                ],
-                                alignment=ft.MainAxisAlignment.START,
-                                horizontal_alignment=ft.CrossAxisAlignment.CENTER
-                            ),
-                            padding=ft.padding.only(top=20),
-                        ),
-
-                        # Progress bar
-                        ft.Container(
-                            content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-                            margin=ft.margin.only(bottom=20),
-                        ),
-
-                        # Bottom nav
-                        ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Container(
-                                        content=ft.IconButton(
-                                            icon=ft.icons.ARROW_BACK,
-                                            icon_color="grey",
-                                            on_click=on_back
-                                        ),
-                                        width=100,
-                                        bgcolor="white",
-                                        border_radius=ft.border_radius.all(30),
-                                        padding=5,
-                                    ),
-                                    ft.Container(width=10),
-                                    ft.Container(
-                                        content=ft.ElevatedButton(
-                                            content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                                            style=ft.ButtonStyle(
-                                                bgcolor={"": "#0078D7"},
-                                                shape=ft.RoundedRectangleBorder(radius=30),
-                                            ),
-                                            width=200,
-                                            height=50,
-                                            on_click=handle_next
-                                        )
-                                    )
-                                ],
-                                alignment=ft.MainAxisAlignment.CENTER,
-                            ),
-                            padding=ft.padding.only(bottom=20),
-                        )
+                        
+                        # 2. Fixed progress bar
+                        progress_bar,
+                        
+                        # 3. Fixed bottom navigation
+                        bottom_nav
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1491,113 +1801,48 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
     else:
         return ft.Text("Unknown question type.")
 
-def build_placeholder_question(message, progress_value, on_next, on_back):
-    """Builds a simple placeholder for question types not yet implemented."""
-    
-    card_content = ft.Container(
-        content=ft.Column(
-            [
-                ft.Container(
-                    content=ft.Icon(
-                        name=ft.icons.WARNING_AMBER_ROUNDED,
-                        color="#FFA000",
-                        size=60
-                    ),
-                    margin=ft.margin.only(bottom=20, top=20),
-                    alignment=ft.alignment.center
-                ),
-                ft.Container(
-                    content=ft.Text(
-                        message,
-                        color="black",
-                        size=16,
-                        weight=ft.FontWeight.BOLD,
-                        text_align=ft.TextAlign.CENTER
-                    ),
-                    margin=ft.margin.only(bottom=30),
-                    alignment=ft.alignment.center
-                ),
-                ft.Container(
-                    content=ft.Text(
-                        "This question will be skipped. Please click Next to continue.",
-                        color="grey",
-                        size=14,
-                        text_align=ft.TextAlign.CENTER
-                    ),
-                    margin=ft.margin.only(bottom=20),
-                    alignment=ft.alignment.center
-                )
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER
-        ),
-        width=312,
-        bgcolor="white",
-        border_radius=10,
-        padding=20,
-        margin=ft.margin.only(top=20, bottom=20)
-    )
-
-    progress = ft.Container(
-        ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20)
-    )
-
-    bottom_nav = ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(
-                    content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
-                        icon_color="grey",
-                        on_click=on_back
-                    ),
-                    width=100,
-                    bgcolor="white",
-                    border_radius=ft.border_radius.all(30),
-                    padding=5
-                ),
-                ft.Container(width=10),
-                ft.Container(
-                    content=ft.ElevatedButton(
-                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                        style=ft.ButtonStyle(
-                            bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),
-                        ),
-                        width=200,
-                        height=50,
-                        on_click=on_next
-                    )
-                )
-            ],
-            alignment=ft.MainAxisAlignment.CENTER
-        ),
-        padding=ft.padding.only(bottom=20)
-    )
-
-    return ft.Column(
-        [
-            card_content,
-            progress,
-            bottom_nav
-        ],
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True
-    )
-
-def lesson_page(page: ft.Page):
+def lesson_page(page: ft.Page, image_urls: list):
     page.title = "Arami - Lesson"
     page.padding = 0
 
+    # EXIT ALERT
+    dlg_modal = ft.AlertDialog(
+        modal=True,
+        title=ft.Text(
+            "Are you sure you want to leave?",
+            size=20,
+            color="black",
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER,
+        ),
+        content=ft.Text(
+            "Your progress will be lost.",
+            size=14,
+            color="black",
+            text_align=ft.TextAlign.CENTER,
+        ),
+        actions=[
+            ft.TextButton("Yes", 
+                          style=ft.ButtonStyle(color=ft.Colors.BLUE),
+                          on_click=lambda e: page.go("/levels")),
+            ft.TextButton("No", 
+                          style=ft.ButtonStyle(color=ft.Colors.BLUE), 
+                          on_click=lambda e: page.close(dlg_modal)),
+        ],
+        actions_alignment=ft.MainAxisAlignment.CENTER,
+        bgcolor=ft.Colors.WHITE
+    )
+    
     def go_back(e):
-        page.go("/levels")
+    # Show exit dialog instead of immediately navigating back
+        page.open(dlg_modal)
+        page.update()
+        # page.go("/levels")
 
     # Background with landscape image
     background = ft.Container(
         content=ft.Image(
-            src="assets/landscape_background.png",
+            src=image_urls[8],
             width=page.width,
             height=page.height,
             fit=ft.ImageFit.COVER

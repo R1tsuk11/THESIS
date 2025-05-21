@@ -35,7 +35,7 @@ def goto_register(page):
     page.go("/register")
     page.update()
 
-def login_page(page: ft.Page):
+def login_page(page: ft.Page, image_urls: list):
     username_field = ft.TextField(
         hint_text="Example: johndoe", 
         bgcolor="white", 
@@ -61,87 +61,97 @@ def login_page(page: ft.Page):
         if user_exists:
             page.open(ft.SnackBar(ft.Text(f"Welcome {username}!"), bgcolor="#4CAF50", duration=2000))
             page.update()
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
             goto_main_menu(page, user_exists[1])  # Pass user ID to the main menu
             page.update()
         else:
-            page.open(ft.SnackBar(ft.Text(f"Invalid Credentials!"), bgcolor="#4CAF50"))
+            page.open(ft.SnackBar(ft.Text(f"Invalid Credentials!"), bgcolor="#FF0000"))
             page.update()
 
-    page.views.append(
-        ft.View(
-            route="/",
-            controls=[
+    # Content container with the form elements
+    login_content = ft.Container(
+        content=ft.Column(
+            [
+                # Logo aligned to the right
+                ft.Row(
+                    [ft.Image(src=image_urls[1], height=70)],
+                    alignment=ft.MainAxisAlignment.END
+                ),
+                # Welcome Text
+                ft.Text("Let's Login!", size=26, weight=ft.FontWeight.BOLD, color="black"),
+                ft.Text("Maupay nga pagbalik!", size=14, color="black"),
+                # Username & Password Fields
+                ft.Text("Username", color="black"),
+                username_field,
+                ft.Container(height=10),  # Padding
+                ft.Text("Password", color="black"),
+                password_field,
+                # Forgot Password
+                ft.Row(
+                    [ft.TextButton(
+                        "Forgot Password", 
+                        on_click=lambda _: print("Forgot Password clicked"), 
+                        style=ft.ButtonStyle(color="#4285F4")  # Blue color
+                    )],
+                    alignment=ft.MainAxisAlignment.START
+                ),
+                # Centered Login Section
                 ft.Container(
                     content=ft.Column(
                         [
-                            # Logo aligned to the right
-                            ft.Row(
-                                [ft.Image(src="assets/image_1.png", height=120)],
-                                alignment=ft.MainAxisAlignment.END
-                            ),
-                            # Welcome Text
-                            ft.Text("Let's Login!", size=26, weight=ft.FontWeight.BOLD, color="black"),
-                            ft.Text("Maupay nga pagbalik!", size=14, color="black"),
-                            # Username & Password Fields
-                            ft.Text("Username", color="black"),
-                            username_field,
-                            ft.Container(height=10),  # Padding
-                            ft.Text("Password", color="black"),
-                            password_field,
-                            # Forgot Password
-                            ft.Row(
-                                [ft.TextButton(
-                                    "Forgot Password", 
-                                    on_click=lambda _: print("Forgot Password clicked"), 
-                                    style=ft.ButtonStyle(color="#4285F4")  # Blue color
-                                )],
-                                alignment=ft.MainAxisAlignment.START
-                            ),
-                            # Centered Login Section
+                # Login Button
+                ft.ElevatedButton(
+                    "Login",
+                    width=300,
+                    bgcolor="#4285F4",  # Blue color
+                    color="white",
+                    on_click=on_login_click,
+                    icon=ft.Icons.ARROW_FORWARD,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=20)
+                    )
+                ),
+                            # "Or" Divider
                             ft.Container(
-                                content=ft.Column(
-                                    [
-                                        # Login Button
-                                        ft.ElevatedButton(
-                                            "Login",
-                                            width=300,
-                                            bgcolor="#4285F4",  # Blue color
-                                            color="white",
-                                            on_click=on_login_click,
-                                            icon=ft.icons.ARROW_FORWARD,
-                                            style=ft.ButtonStyle(
-                                                shape=ft.RoundedRectangleBorder(radius=20)
-                                            )
-                                        ),
-                                        # "Or" Divider
-                                        ft.Container(
-                                            content=ft.Text("Or", color="black", text_align=ft.TextAlign.CENTER),
-                                            padding=ft.padding.only(top=10, bottom=10),
-                                        ),
-                                        # Register Link
-                                        ft.TextButton(
-                                            "First time here? Register here",
-                                            on_click=lambda _: goto_register(page),
-                                            style=ft.ButtonStyle(color="#4285F4")  # Blue color
-                                        ),
-                                    ],
-                                    alignment=ft.MainAxisAlignment.CENTER,
-                                    horizontal_alignment=ft.CrossAxisAlignment.CENTER
-                                ),
-                                alignment=ft.alignment.center,
-                                expand=True
-                            )
+                                content=ft.Text("Or", color="black", text_align=ft.TextAlign.CENTER),
+                                padding=ft.padding.only(top=10, bottom=10),
+                            ),
+                            # Register Link
+                            ft.TextButton(
+                                "First time here? Register here",
+                                on_click=lambda _: goto_register(page),
+                                style=ft.ButtonStyle(color="#4285F4")  # Blue color
+                            ),
                         ],
-                        spacing=10,
-                        alignment=ft.MainAxisAlignment.START
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER
                     ),
-                    padding=ft.padding.only(top=50),
-                    width=350,
-                    bgcolor="white"  # White background
+                    alignment=ft.alignment.center,
+                    expand=True
                 )
             ],
-            bgcolor="white"  # White background for the entire view
+            spacing=10,
+            alignment=ft.MainAxisAlignment.START
+        ),
+        padding=ft.padding.all(25),
+        width=400,
+        bgcolor="white",
+        border_radius=15
+    )
+
+    # Main container that centers the login content
+    centered_container = ft.Container(
+        content=login_content,
+        alignment=ft.alignment.center,
+        margin=ft.margin.only(top=50),  # Margin to center vertically
+        expand=True  # Make container take all available space
+    )
+
+    page.views.append(
+        ft.View(
+            route="/login",
+            controls=[centered_container],
+            bgcolor="white"
         )
     )
 
