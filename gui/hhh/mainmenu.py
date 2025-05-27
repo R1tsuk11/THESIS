@@ -172,6 +172,7 @@ class Question:
         self.correct_answer = question_data.get("correct_answer")
         self.difficulty = question_data.get("difficulty")
         self.response_time = question_data.get("response_time")
+        self.word_to_translate = question_data.get("word_to_translate")
 
     def to_dict(self):
         return {
@@ -182,7 +183,8 @@ class Question:
             "choices": self.choices,
             "correct_answer": self.correct_answer,
             "difficulty": self.difficulty,
-            "response_time": self.response_time
+            "response_time": self.response_time,
+            "word_to_translate": self.word_to_translate
         }
 
 class Level:  # Level class
@@ -746,6 +748,26 @@ def main_menu_page(page: ft.Page, image_urls: list):
         on_click=lambda e: user.save_user(page)  # Navigate to login page on logout
     )
 
+    def navigate_to_achievements(e, user):
+        # Extract needed data from user
+        achievement_data = {
+            "username": user.user_name,
+            "progress_percentage": user.completion_percentage,
+            "lessons_completed": len([l for m in user.modules for l in m.levels if l.completed]),
+            "words_learned": len(user.library),
+            "language_proficiency": user.proficiency if hasattr(user, 'proficiency') else 0,
+            "achievements": user.achievements
+        }
+        
+        # Store in session
+        page.session.set("achievement_data", achievement_data)
+        page.go("/achievements")
+
+    def navigate_to_word_library(e, user_library):
+        # Store just the library in the page session
+        page.session.set("user_library", user_library)
+        page.go("/word-library")
+
     # Create the bottom navigation bar
     bottom_nav = ft.Container(
         content=ft.Row(
@@ -755,8 +777,8 @@ def main_menu_page(page: ft.Page, image_urls: list):
                         icon=ft.Icons.MENU_BOOK_OUTLINED,
                         icon_color="#FFFFFF",
                         icon_size=24,
-                        on_click=lambda _: page.go("/word-library")
-                    ),
+                        on_click=lambda e: navigate_to_word_library(e, user.library)  # Pass library directly
+    ),
                     border_radius=20,
                     width=50, 
                     height=50, 
@@ -783,7 +805,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
                         icon=ft.Icons.PERSON,  
                         icon_color="#FFFFFF",
                         icon_size=24,
-                        on_click=lambda _: page.go("/achievements")
+                        on_click=lambda e: navigate_to_achievements(e, user)  # Use the new function
                     ),
                     border_radius=20,
                     width=50,

@@ -5,7 +5,7 @@ module_1 = {
     {
         "id": 1,
         "type": "Lesson",
-        "question": "Maupay nga aga means 'Good morning' — maupay is 'good', nga serves as a linker word, and aga means 'morning.'",
+        "question": "'Maupay nga aga' means 'Good morning' — maupay is 'good', nga serves as a linker word, and aga means 'morning.'",
         "audio_file": "maupay_nga_aga.mp3",
         "image": "maupay_nga_aga.jpg",
         "answer": None,
@@ -68,7 +68,7 @@ module_1 = {
     {
         "id": 7,
         "type": "Lesson",
-        "question": "Gihapon means 'too' or 'also' and is used the same way as 'din' in Filipino.",
+        "question": "'Gihapon' means 'too' or 'also' and is used the same way as 'din' in Filipino.",
         "audio_file": "gihapon.mp3",
         "image": "gihapon.jpg",
         "answer": None,
@@ -217,7 +217,7 @@ module_1 = {
     {
         "id": 21,
         "type": "Lesson",
-        "question": "Okay la ako means 'I'm just okay.' 'La' is the Waray word for 'just' or 'only,' same as 'lang' in Filipino.",
+        "question": "'Okay la ako' means 'I`m just okay'. 'La' is the Waray word for 'just' or 'only,' same as 'lang' in Filipino.",
         "audio_file": "okay_la_ako.mp3",
         "image": "okay_la_ako.jpg",
         "answer": None,
@@ -232,7 +232,7 @@ module_1 = {
         "word_to_translate": "la",
         "choices": ["not", "too", "only"],
         "correct_answer": "only",
-        "vocabulary": "la",
+        "vocabulary": "okay la ako",
         "difficulty": 1,
         "response_time": 0
     },
@@ -261,7 +261,7 @@ module_1 = {
     {
         "id": 25,
         "type": "Lesson",
-        "question": "Maupay nga kulop means 'Good afternoon.' 'Maupay' means 'good,' and 'kulop' means 'afternoon.'",
+        "question": "'Maupay nga kulop' means 'Good afternoon.' 'Maupay' means 'good,' and 'kulop' means 'afternoon.'",
         "audio_file": "maupay_nga_kulop.mp3",
         "image": "maupay_nga_kulop.jpg",
         "answer": None,
@@ -315,7 +315,7 @@ module_1 = {
     {
         "id": 30,
         "type": "Lesson",
-        "question": "Diri / Oo\nDiri means no or not, while Oo means yes.",
+        "question": "'Diri' means 'no' or 'not', while 'Oo' means 'yes'.",
         "audio_file": "diri_oo.mp3",
         "image": "diri_oo.jpg",
         "answer": None,
@@ -369,7 +369,7 @@ module_1 = {
     {
         "id": 35,
         "type": "Lesson",
-        "question": "It in Waray is used like 'the' in English and 'ang' in Filipino to refer to something specific.",
+        "question": "'It' in Waray is used like 'the' in English and 'ang' in Filipino to refer to something specific.",
         "audio_file": "it.mp3",
         "image": "it.jpg",
         "answer": None,
@@ -747,7 +747,7 @@ module_1 = {
     {
         "id": 70,
         "type": "Lesson",
-        "question": "Pasaylo-a ako means 'I'm sorry' or 'Forgive me' in English — 'pasaylo-a' means 'forgive'.",
+        "question": "'Pasaylo-a' ako means 'I'm sorry' or 'Forgive me' in English — 'pasaylo-a' means 'forgive'.",
         "audio_file": "pasaylo-a_ako.mp3",
         "image": "pasaylo-a_ako.jpg",
         "answer": None,
@@ -2856,6 +2856,99 @@ desc_bank = {
     4: "Learn how to order food in Waray.",
     # Add more descriptions
 }
+
+word_library = {
+    # Module 1 Vocabulary
+    "Maupay nga aga": "Good morning",
+    "gihapon": "too/also",
+    "kamusta ka": "How are you?",
+    "ikaw?": "How about you?",
+    "la": "just/only",
+    "okay la ako": "I'm just okay",
+    "kulop": "afternoon",
+    "Maupay nga kulop": "Good afternoon",
+    "diri": "no/not",
+    "It": "The",
+    "gab-i": "night",
+    "Maupay nga gab-i": "Good evening",
+    "ano it imo ngaran?": "What is your name?",
+    "ngaran": "name",
+    "ako hi": "I am",
+    "damo nga salamat": "Thank you very much",
+    "damo": "many/a lot",
+    "salamat": "thanks",
+    "waray sapayan": "You're welcome",
+    "pasaylo-a ako": "I'm sorry",
+    "maaram ka mag-english": "Do you know how to speak English?",
+    "maaram": "to know",
+    "diri ako makarit ha waray": "I'm not good at Waray",
+    "makarit": "good at/skilled",
+    "ambot": "I don't know",
+
+    # Module 2 Vocabulary
+    "Hain": "Where (present)",
+    "Hain ka?": "Where are you?",
+    "Makain": "Where (future)",
+    "Makain ka?": "Where are you going?",
+    "Lakat": "Walk",
+    "Lakat kita": "Let's go",
+    "Pakadto": "Go (future tense)",
+    "Pakadto kita ha": "Let's go to",
+    "Para": "Stop the jeepney",
+    "Tag-pira": "How much",
+    "Tagpira it pasahe": "How much is the fare",
+    "Alayon": "Please",
+    "Hirayo": "Far",
+    "Hirani": "Near",
+    "Aadi": "Here",
+    "Yana": "Right now/today",
+    "Buwas": "Tomorrow",
+    "Niyan": "Later",
+    "Kakulop": "Yesterday",
+    "San-o": "When",
+    "Hinay": "Slow/take care",
+
+    # Module 3 Vocabulary
+    "Maupay": "Good/Hey (to call vendor)",
+    "Ano ini": "What is this?",
+    "ini": "this",
+    "Ano iton": "What is that?",
+    "iton": "that",
+    "Mapalit ako hin": "I want to buy",
+    "Mapalit": "to buy",
+    "ngan": "and",
+    "Tagpira": "How much?",
+    "Tagpira nga tanan": "How much for all of it?",
+    "Gusto ko ini": "I want this",
+    "Gusto ko iton": "I want that",
+    "Nadiri": "I don't like/I refuse",
+    "Ayaw nala": "Nevermind",
+    "Adi": "here (when handing)",
+    "Bayad": "payment",
+    "Sukli": "change (money)",
+    "Mayda": "there is/have",
+    "Amo la": "That's all",
+    "Pwede tumawad": "Can I ask for a discount?",
+
+    # Module 4 Vocabulary
+    "Kaon": "to eat",
+    "Pagkaon": "food",
+    "Pangaon": "mealtime/act of eating",
+    "kumaon": "ate (past tense)",
+    "magutom": "hungry",
+    "marasa": "delicious/tasty",
+    "tilawon": "to try/taste",
+    "kaunon": "to eat (future)",
+    "maaro": "Can I have some?",
+    "mapaalayon": "May I have, please",
+    "salamat ha pagkaon": "Thank you for the food",
+    "busog na ak": "I'm full already",
+    "busog": "full (after eating)",
+    "Adi it pagkaon": "Here is the food",
+    "Mapaso": "hot (temperature)",
+    "Mahagkot": "cold (temperature)"
+}
+
 
 # Add image attributes wherever applicable depending on gui design
 

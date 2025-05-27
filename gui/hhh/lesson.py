@@ -78,20 +78,64 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     ASSETS_PATH = os.path.join(BASE_DIR, "assets")
     
-    # Try multiple file extensions and naming patterns
-    possible_image_paths = [
+    # Try multiple file naming patterns for multi-word vocabularies
+    possible_image_paths = []
+    
+    # Clean vocabulary for filenames - strip special chars like ?, !, etc.
+    clean_vocab = re.sub(r'[^\w\s]', '', vocabulary)
+    
+    # First add exact match with different extensions
+    possible_image_paths.extend([
         os.path.join(ASSETS_PATH, f"{vocabulary}.png"),
         os.path.join(ASSETS_PATH, f"{vocabulary}.jpg"),
+        # Add cleaned version without special chars
+        os.path.join(ASSETS_PATH, f"{clean_vocab}.png"),
+        os.path.join(ASSETS_PATH, f"{clean_vocab}.jpg"),
+    ])
+    
+    # Add underscore version
+    possible_image_paths.extend([
         os.path.join(ASSETS_PATH, f"{vocabulary.replace(' ', '_')}.png"),
         os.path.join(ASSETS_PATH, f"{vocabulary.replace(' ', '_')}.jpg"),
-        os.path.join(ASSETS_PATH, f"M1V{question_data.lesson_id}.png")  # Module 1, Vocabulary X format
-    ]
+        # Add cleaned version with underscores
+        os.path.join(ASSETS_PATH, f"{clean_vocab.replace(' ', '_')}.png"),
+        os.path.join(ASSETS_PATH, f"{clean_vocab.replace(' ', '_')}.jpg"),
+    ])
+    
+    # Handle multi-word vocabularies by trying progressive words
+    if ' ' in vocabulary:
+        words = vocabulary.split()
+        # Try first word only
+        possible_image_paths.extend([
+            os.path.join(ASSETS_PATH, f"{words[0]}.png"),
+            os.path.join(ASSETS_PATH, f"{words[0]}.jpg"),
+        ])
+        
+        # Try progressive combinations (e.g., "maupay", "maupay_nga", "maupay_nga_aga")
+        for i in range(2, len(words) + 1):
+            partial_vocab = '_'.join(words[:i])
+            possible_image_paths.extend([
+                os.path.join(ASSETS_PATH, f"{partial_vocab}.png"),
+                os.path.join(ASSETS_PATH, f"{partial_vocab}.jpg"),
+            ])
+            
+            # Also try without special chars for each progressive combination
+            clean_partial = '_'.join([re.sub(r'[^\w\s]', '', w) for w in words[:i]])
+            if clean_partial != partial_vocab:
+                possible_image_paths.extend([
+                    os.path.join(ASSETS_PATH, f"{clean_partial}.png"),
+                    os.path.join(ASSETS_PATH, f"{clean_partial}.jpg"),
+                ])
+    
+    # Add the module vocabulary format as fallback
+    possible_image_paths.append(os.path.join(ASSETS_PATH, f"M1V{question_data.lesson_id}.png"))
     
     # Find the first existing image path
     lessonImg = None
     for img_path in possible_image_paths:
         if os.path.exists(img_path):
             lessonImg = img_path
+            print(f"Found image for '{vocabulary}' at: {img_path}")
             break
     
     # Fallback to default image if none found
@@ -102,12 +146,64 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
             lessonImg = "THESIS-main/THESIS/gui/hhh/assets/M1V1.png"
     
     print(f"Selected image for '{vocabulary}': {lessonImg}")
+    
     start_time = time.time()
     header_text = "Lesson"
+    
+    # More robust extraction of waray_phrase and english_translation
     waray_phrase = None
     english_translation = None
     full_definition = question_data.question
-    question = full_definition
+
+    # First attempt: extract phrases in single quotes
+    matches = re.findall(r"'([^']+)'", full_definition)
+    
+    # Check if we have the expected pattern with Waray and English in quotes
+    if len(matches) >= 2:
+        waray_phrase = matches[0]
+        english_translation = matches[1]
+    else:
+        # Second attempt: try to use vocabulary and other patterns
+        waray_phrase = question_data.vocabulary
+        
+        # Different ways to extract English meaning
+        # Pattern: "means 'X' in English"
+        eng_match = re.search(r"means\s+'([^']+)'", full_definition)
+        if eng_match:
+            english_translation = eng_match.group(1)
+        # Pattern: "means X in English" (without quotes)
+        elif "means" in full_definition and "in English" in full_definition:
+            parts = full_definition.split("means")[1].split("in English")[0].strip()
+            if parts and not parts.startswith("'"):
+                english_translation = parts
+        # Pattern: check if there's a hyphen/dash with English after
+        elif " - " in full_definition:
+            english_translation = full_definition.split(" - ")[1].strip()
+        # Pattern: check if there's "translation" in the text
+        elif "translation" in full_definition.lower():
+            parts = full_definition.lower().split("translation")[1].strip()
+            if parts.startswith(":"):
+                english_translation = parts[1:].strip()
+            else:
+                english_translation = parts
+        else:
+            # Last resort - check what's after vocabulary in the question
+            vocab_pos = full_definition.find(question_data.vocabulary)
+            if vocab_pos > -1:
+                rest = full_definition[vocab_pos + len(question_data.vocabulary):].strip()
+                if rest.startswith("="):
+                    english_translation = rest[1:].strip()
+                elif rest.startswith("means"):
+                    english_translation = rest[5:].strip()
+                else:
+                    english_translation = "Translation not available"
+            else:
+                english_translation = "Translation not available"
+    
+    # Debug output
+    print(f"Waray phrase: '{waray_phrase}'")
+    print(f"English translation: '{english_translation}'")
+    
     global user_library
 
     if question_data.vocabulary not in user_library:
@@ -121,25 +217,6 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
 
         if on_next:
             on_next(e)
-
-    # Find all substrings in single quotes
-    matches = re.findall(r"'(.*?)'", question)
-
-    if len(matches) >= 2:
-        waray_phrase = matches[0]
-        english_translation = matches[1]
-    else:
-        # Fallback: use the vocabulary itself as waray_phrase
-        waray_phrase = question_data.vocabulary
-        # Try to extract the english translation from the question
-        eng_match = re.search(r"means\s+'([^']+)'", question)
-        if eng_match:
-            english_translation = eng_match.group(1)
-        else:
-            # If all else fails, use a default message
-            english_translation = "Translation not available"
-        
-        print(f"Using fallback for vocabulary: {waray_phrase}, translation: {english_translation}")
 
     # Close button header
     header = ft.Container(
@@ -637,7 +714,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
 def build_wordselect_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     options = question_data.choices
-    word_to_translate = question_data.question
+    word_to_translate = question_data.word_to_translate
+    instruction = question_data.question
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
     global user_library
@@ -752,7 +830,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
 
             # Instruction
             ft.Container(
-                content=ft.Text("Translate to Waray:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                content=ft.Text(f"{instruction}:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
                 margin=ft.margin.only(top=10)
             ),
 
@@ -1411,7 +1489,24 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
     start_time = time.time()
     question_text = question_data.question
-    vocabulary = question_data.vocabulary
+    vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
+    
+    # Check if the question is specifically asking for a subword (like "aga" from "Maupay nga aga")
+    # This is often in the question text: "How do you pronounce 'aga'?"
+    target_word = vocabulary
+    question_text = question_data.question.lower()
+    
+    # Try to extract the specific word to pronounce from the question
+    if "pronounce" in question_text and "'" in question_text:
+        # Extract word between single quotes
+        quoted_parts = re.findall(r"'([^']+)'", question_text)
+        if quoted_parts:
+            target_word = quoted_parts[0].lower()
+            print(f"Pronunciation target extracted from question: '{target_word}'")
+    
+    # Set the actual word to recognize
+    recognition_target = target_word
+    print(f"Will recognize pronunciation for: '{recognition_target}'")
     accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.75)
     
     # Remove the incorrect Page._current reference
@@ -1497,17 +1592,19 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             return
             
         try:
+            # Pass the target_word instead of vocabulary
             predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
-                recording["file_path"], vocabulary
+                recording["file_path"], recognition_target
             )
             
+            # Compare with the specific target word not the full vocabulary
             if predicted_word:
                 txt_transcription.value = f"You said: {predicted_word}"
                 
                 # Get any pronunciation errors from the NLTK analysis that was performed
                 nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
                 
-                if predicted_word.lower() == vocabulary.lower():
+                if predicted_word.lower() == recognition_target.lower():
                     accuracy = confidence if confidence else 0.75
                     txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
                     
@@ -1883,20 +1980,54 @@ def lesson_page(page: ft.Page, image_urls: list):
         page.update()
     
     def next_question(e=None):
+    # Remove this line since it's causing the error
+    # global weighted_questions, correct_answers, incorrect_answers, total_response_time
+    
+    # Instead, use the outer scope variables directly
+
         current_question_index["value"] += 1
         progress_value = (current_question_index["value"] + 1) / total_questions
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:
-            print("DEBUG correct_answers:", correct_answers)
-            print("DEBUG incorrect_answers:", incorrect_answers)
-            print("DEBUG correct_answers keys:", list(correct_answers.keys()))
-            print("DEBUG incorrect_answers keys:", list(incorrect_answers.keys()))
-            print("DEBUG correct_answers values:", list(correct_answers.values()))
-            print("DEBUG incorrect_answers values:", list(incorrect_answers.values()))
-            print(len(weighted_questions))
-            print(len(correct_answers))
-            grade_percentage = round((len(correct_answers) / len(weighted_questions)) * 100, 2)
+            # Debug what's happening with the counts
+            print("\n--- QUESTION COUNT DIAGNOSTIC ---")
+            print(f"Total questions: {total_questions}")
+            print(f"Original weighted questions: {len(weighted_questions)}")
+            
+            # Track question types to ensure proper counting
+            question_types = {}
+            for q in questions:
+                q_type = getattr(q, "type", "Unknown")
+                question_types[q_type] = question_types.get(q_type, 0) + 1
+            print(f"Questions by type: {question_types}")
+            
+            # Fix the weighted questions count to include Pronunciation questions
+            # Use a different variable name to avoid scoping issues
+            corrected_weighted = [q for q in questions if (
+                getattr(q, 'correct_answer', None) is not None or
+                q.type == "Pronunciation"
+            )]
+            
+            print(f"Corrected weighted questions count: {len(corrected_weighted)}")
+            
+            # Show what's been answered
+            print(f"Correct answers: {len(correct_answers)}")
+            print(f"Incorrect answers: {len(incorrect_answers)}")
+            
+            # Calculate the grade properly using corrected_weighted instead
+            total_answered = len(correct_answers) + len(incorrect_answers)
+            total_weighted = len(corrected_weighted)
+            
+            if total_weighted > 0:
+                grade_percentage = round((len(correct_answers) / total_weighted) * 100, 2)
+                # Ensure grade doesn't exceed 100%
+                grade_percentage = min(grade_percentage, 100)
+            else:
+                grade_percentage = 0
+                
+            print(f"Final grade percentage: {grade_percentage}%")
+                    
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
             correct_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()}
             incorrect_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()}

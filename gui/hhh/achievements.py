@@ -8,34 +8,77 @@ def achievement_page(page: ft.Page, image_urls: list):
     page.bgcolor = "#f0f8ff"  # Light blue background
     page.theme_mode = ft.ThemeMode.LIGHT    
 
-    # Dynamic data
-    username = "johndoe"
-    progress_percentage = 75
-    lessons_completed = 3
-    words_learned = 50
-    language_proficiency = 75  # Added language proficiency percentage
+    # Get data from session
+    achievement_data = page.session.get("achievement_data")
     
-    # List of achievements
-    achievements_data = [
-        {
-            "title": "Makarit",
-            "description": "Completed your first lesson",
-            "icon": ft.Icons.STAR,
-            "color": "#0055b3"
-        },
-        {
-            "title": "Word Master",
-            "description": "Learned 50 new words",
-            "icon": ft.Icons.BOOKMARK,
-            "color": "#9370DB"
-        },
-        {
-            "title": "Dedicated Learner",
-            "description": "Studied for 3 consecutive days",
-            "icon": ft.Icons.TRENDING_UP,
-            "color": "#FFA500"
-        },
-    ]
+    if achievement_data:
+        # Use session data
+        username = achievement_data.get("username", "Guest")
+        progress_percentage = achievement_data.get("progress_percentage", 0)
+        lessons_completed = achievement_data.get("lessons_completed", 0)
+        words_learned = achievement_data.get("words_learned", 0)
+        language_proficiency = achievement_data.get("language_proficiency", 0)
+        user_achievements = achievement_data.get("achievements", {})
+    else:
+        # Fallback to default data
+        try:
+            from mainmenu import get_user_id, User
+            user_id = get_user_id(page)
+            if user_id:
+                user = User().load_data(user_id, page)
+                username = user.user_name
+                progress_percentage = user.completion_percentage
+                lessons_completed = len([l for m in user.modules for l in m.levels if l.completed])
+                words_learned = len(user.library)
+                language_proficiency = user.proficiency if hasattr(user, 'proficiency') else 0
+                user_achievements = user.achievements
+            else:
+                # Sample data if no user found
+                username = "johndoe"
+                progress_percentage = 4
+                lessons_completed = 1
+                words_learned = 4
+                language_proficiency = 5.2
+                user_achievements = {}
+        except Exception as e:
+            print(f"Error loading user data: {e}")
+            username = "johndoe"
+            progress_percentage = 4
+            lessons_completed = 1
+            words_learned = 4
+            language_proficiency = 5.2
+            user_achievements = {}
+    
+    # Convert achievements to the format needed for display
+    achievements_data = []
+    for achievement_id, achievement in user_achievements.items():
+        if isinstance(achievement, dict):
+            # If it's already a dictionary
+            achievements_data.append({
+                "title": achievement.get("name", "Unknown"),
+                "description": achievement.get("description", ""),
+                "icon": getattr(ft.Icons, achievement.get("icon", "STAR")),
+                "color": "#0055b3"
+            })
+        else:
+            # If it's an Achievement object
+            achievements_data.append({
+                "title": achievement.name,
+                "description": achievement.description,
+                "icon": getattr(ft.Icons, achievement.icon),
+                "color": "#0055b3"
+            })
+    
+    # If no achievements, add default one
+    if not achievements_data:
+        achievements_data = [
+            {
+                "title": "Makarit",
+                "description": "Completed your first lesson",
+                "icon": ft.Icons.STAR,
+                "color": "#0055b3"
+            },
+        ]
 
     header = ft.Container(
         content=ft.Row(

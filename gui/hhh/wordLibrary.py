@@ -1,4 +1,5 @@
 import flet as ft
+from qbank import word_library
 
 def word_library_page(page: ft.Page, image_urls: list):
     """Word library page showing saved vocabulary words"""
@@ -154,37 +155,59 @@ def word_library_page(page: ft.Page, image_urls: list):
             width=page.width - 40,
         )
 
-    # Load words from user's library
+    # Load words from user's library and find translations in global dictionary
     def load_words_from_library(user_library):
         words = []
+        
+        if not user_library or len(user_library) == 0:
+            return words
+            
         for word in user_library:
-            waray_word = word.get("waray_word", "")
-            english_translation = word.get("english_translation", "")
+            # Handle both string-only and dictionary formats
+            if isinstance(word, str):
+                waray_word = word
+                # Get translation from the global dictionary
+                english_translation = word_library.get(waray_word, "Translation not available")
+            elif isinstance(word, dict) and "waray_word" in word and "english_translation" in word:
+                waray_word = word["waray_word"]
+                english_translation = word["english_translation"]
+            else:
+                # Skip invalid entries
+                continue
+                
             words.append({"waray": waray_word, "english": english_translation})
+        
         return words
     
-    # Example library data (in a real app, this would come from user data)
-    sample_library = [
-        {"waray_word": "Aga", "english_translation": "Morning"},
-        {"waray_word": "Gihapon", "english_translation": "Too"},
-        {"waray_word": "Maupay", "english_translation": "Good"},
-        {"waray_word": "Ngaran", "english_translation": "Name"},
-        # Adding more sample words to demonstrate scrolling
-        {"waray_word": "Salamat", "english_translation": "Thank you"},
-        {"waray_word": "Kamusta", "english_translation": "How are you"},
-        {"waray_word": "Halipot", "english_translation": "Short"},
-        {"waray_word": "Hataas", "english_translation": "Long"},
-        {"waray_word": "Bugsay", "english_translation": "Paddle"},
-        {"waray_word": "Kaon", "english_translation": "Eat"},
-    ]
+    # Get user's library directly from session
+    user_library = page.session.get("user_library")
     
-    # Get user's library - in the real app, this would use:
-    # user_id = get_user_id(page)
-    # user = User().load_data(user_id, page)
-    # word_data = load_words_from_library(user.library)
-    word_data = load_words_from_library(sample_library)
+    if user_library:
+        # Use the library from the session
+        word_data = load_words_from_library(user_library)
+        print(f"Loaded {len(word_data)} words from session")
+    else:
+        # Fallback: Try to get from User object if not in session
+        try:
+            from mainmenu import get_user_id, User
+            user_id = get_user_id(page)
+            if user_id:
+                user = User().load_data(user_id, page)
+                word_data = load_words_from_library(user.library)
+                print(f"Loaded {len(word_data)} words from user object")
+            else:
+                # Demo data for testing
+                sample_words = ["Maupay nga aga", "gihapon", "kamusta ka", "ikaw?"]
+                word_data = load_words_from_library(sample_words)
+                print("Using sample words (no user found)")
+        except Exception as e:
+            print(f"Error loading word library: {e}")
+            # Use sample data as fallback
+            sample_words = ["Maupay nga aga", "gihapon", "kamusta ka", "ikaw?"]
+            word_data = load_words_from_library(sample_words)
+            print("Using sample words due to error")
     
-    # Create the word cards
+    # Display word cards - your existing code here...
     word_cards = []
     for word in word_data:
         card = create_word_card(word["waray"], word["english"])
