@@ -205,6 +205,69 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
     state['refit_counter'] = refit_counter
     save_temp_state(state)
 
+    print("\nDisplaying BKT predictions after update:")
+    display_bkt_predictions(user_id)
+
+    # Add this to bkt_engine.py
+def display_bkt_predictions(user_id, filter_vocab=None):
+    """
+    Formats and prints BKT predictions in a readable table format
+    
+    Args:
+        user_id: User ID to check predictions for
+        filter_vocab: Optional vocab name to filter for a specific word
+    """
+    state = load_temp_state()
+    predictions = state.get("predictions", {})
+    
+    if not predictions:
+        print("\n┌───────────────────────────────────────┐")
+        print("│           BKT MODEL PREDICTIONS        │")
+        print("├───────────────────────────────────────┤")
+        print("│ No predictions available               │")
+        print("└───────────────────────────────────────┘")
+        return
+    
+    # Filter if needed
+    if filter_vocab:
+        filtered_preds = {k: v for k, v in predictions.items() if k == filter_vocab}
+        if not filtered_preds:
+            print(f"No BKT prediction found for '{filter_vocab}'")
+            return
+        predictions = filtered_preds
+    
+    # Print header
+    print("\n┌─────────────────────────────────────────────────────────────────────────────────┐")
+    print("│                                 BKT MODEL PREDICTIONS                            │")
+    print("├──────────────────────┬─────────────┬──────────┬──────────┬──────────┬───────────┤")
+    print("│ Vocabulary           │ Mastery     │ Guess    │ Slip     │ Conf     │ Last      │")
+    print("├──────────────────────┼─────────────┼──────────┼──────────┼──────────┼───────────┤")
+    
+    # Sort by mastery descending
+    sorted_items = sorted(predictions.items(), 
+                         key=lambda x: float(x[1].get('p_mastery', 0)), 
+                         reverse=True)
+    
+    # Print each vocabulary item
+    for vocab, pred in sorted_items:
+        p_mastery = float(pred.get('p_mastery', 0))
+        guess = float(pred.get('guess', 0))
+        slip = float(pred.get('slip', 0))
+        conf = float(pred.get('confidence', 0))
+        correct = pred.get('correct', "-")
+        
+        # Format vocab name (truncate if too long)
+        vocab_display = vocab[:18] + '..' if len(vocab) > 20 else vocab.ljust(20)
+        
+        # Format values with color indicators using ASCII
+        mastery_str = f"{p_mastery:.2f}" + ('*' if p_mastery > 0.85 else ' ')
+        
+        # Print the row
+        print(f"│ {vocab_display:<20} │ {mastery_str:^11} │ {guess:^8.2f} │ {slip:^8.2f} │ {conf:^8.2f} │ {correct:^9} │")
+    
+    print("└──────────────────────┴─────────────┴──────────┴──────────┴──────────┴───────────┘")
+    print("* Mastery levels above 0.85 are considered 'mastered'")
+
 #########################################################################################
 
     """if not fitted or refit_counter >= refit_threshold:

@@ -382,7 +382,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
 def build_wordselect_question(page, question_data, progress_value, on_next, on_back):
     start_time = time.time()
     options = question_data.choices
-    word_to_translate = question_data.question
+    word_to_translate = question_data.word_to_translate
+    instruction = question_data.question
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
 
@@ -473,7 +474,6 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         container.on_click = lambda e, idx=i: on_option_click(e, idx, option_containers)
         option_containers.append(container)
 
-    # Create content to be scrollable
     scrollable_content = ft.Column(
         [
             # Header with close/back button
@@ -493,7 +493,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
 
             # Instruction
             ft.Container(
-                content=ft.Text("Translate to Waray:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                content=ft.Text(f"{instruction}:", color="#0078D7", size=17, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
                 margin=ft.margin.only(top=10)
             ),
 
@@ -1036,7 +1036,24 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
 def build_pronounce_question(question_data, progress_value, on_next, on_back):
     start_time = time.time()
     question_text = question_data.question
-    vocabulary = question_data.vocabulary
+    vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
+    
+    # Check if the question is specifically asking for a subword (like "aga" from "Maupay nga aga")
+    # This is often in the question text: "How do you pronounce 'aga'?"
+    target_word = vocabulary
+    question_text = question_data.question.lower()
+    
+    # Try to extract the specific word to pronounce from the question
+    if "pronounce" in question_text and "'" in question_text:
+        # Extract word between single quotes
+        quoted_parts = re.findall(r"'([^']+)'", question_text)
+        if quoted_parts:
+            target_word = quoted_parts[0].lower()
+            print(f"Pronunciation target extracted from question: '{target_word}'")
+    
+    # Set the actual word to recognize
+    recognition_target = target_word
+    print(f"Will recognize pronunciation for: '{recognition_target}'")
     accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.75)
     
     # Remove the incorrect Page._current reference
@@ -1122,17 +1139,19 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             return
             
         try:
+            # Pass the target_word instead of vocabulary
             predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
-                recording["file_path"], vocabulary
+                recording["file_path"], recognition_target
             )
             
+            # Compare with the specific target word not the full vocabulary
             if predicted_word:
                 txt_transcription.value = f"You said: {predicted_word}"
                 
                 # Get any pronunciation errors from the NLTK analysis that was performed
                 nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
                 
-                if predicted_word.lower() == vocabulary.lower():
+                if predicted_word.lower() == recognition_target.lower():
                     accuracy = confidence if confidence else 0.75
                     txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
                     
@@ -1411,7 +1430,7 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
     
     if question_type == "Image Picker":
         return build_imgpicker_question(page, question_data, progress_value, on_next, on_back)
-    elif question_type == "Word Select / Translate":
+    elif question_type == "Word Select":
         return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "True or False":
         return build_tf_question(page, question_data, progress_value, on_next, on_back)

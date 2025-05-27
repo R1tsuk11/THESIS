@@ -4,6 +4,7 @@ from pymongo.errors import ConfigurationError
 import sys
 from qbank import module_bank, achievement_bank, eng_name_bank, waray_name_bank, desc_bank
 from datetime import datetime
+import re
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -209,6 +210,66 @@ def register_user(user_id, username, email, password):
 
     print(f"User {username} registered successfully!")
 
+def validate_email(email):
+    """Validates that the email follows standard email format"""
+    # Regular expression for basic email validation
+    email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(email_regex, email))
+
+def validate_password(password):
+    """
+    Validates password strength:
+    - At least 8 characters long
+    - Contains at least one digit
+    - Contains at least one uppercase letter
+    - Contains at least one lowercase letter
+    - Contains at least one special character
+    """
+    # Check length
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    
+    # Check for digit
+    if not any(char.isdigit() for char in password):
+        return False, "Password must contain at least one digit"
+    
+    # Check for uppercase letter
+    if not any(char.isupper() for char in password):
+        return False, "Password must contain at least one uppercase letter"
+    
+    # Check for lowercase letter
+    if not any(char.islower() for char in password):
+        return False, "Password must contain at least one lowercase letter"
+    
+    # Check for special character
+    special_chars = "!@#$%^&*()-_=+[]{}|;:'\",.<>/?`~"
+    if not any(char in special_chars for char in password):
+        return False, "Password must contain at least one special character"
+    
+    return True, "Password is strong"
+
+def validate_username(username):
+    """
+    Validates username:
+    - Between 3-20 characters
+    - Only contains letters, numbers, underscores, or hyphens
+    - Doesn't start with a number
+    """
+    # Check length
+    if len(username) < 3 or len(username) > 20:
+        return False, "Username must be between 3-20 characters"
+    
+    # Check if starts with a number
+    if username[0].isdigit():
+        return False, "Username cannot start with a number"
+    
+    # Check characters
+    username_regex = r'^[a-zA-Z][a-zA-Z0-9_-]*$'
+    if not re.match(username_regex, username):
+        return False, "Username can only contain letters, numbers, underscores, or hyphens"
+    
+    return True, "Username is valid"
+
 def register_page(page: ft.Page, image_urls: list):
     """Defines the Register Page with Routing"""
     
@@ -249,33 +310,65 @@ def register_page(page: ft.Page, image_urls: list):
     )
 
     def on_register_click(e):
-        """Handles the Register button click event."""
+        """Handles the Register button click event with enhanced validation."""
         username = username_field.value
         email = email_field.value
         password = password_field.value
         retype_password = retype_password_field.value
 
-        user_exists = check_user(username)  # Check if the username already exists
+        # Check if all fields are filled
         if not username or not email or not password or not retype_password:
-                page.open(ft.SnackBar(ft.Text(f"Please fill in all fields!"), bgcolor="#4CAF50"))
-                page.update()
-                return
-        elif password != retype_password:
-            page.open(ft.SnackBar(ft.Text(f"Passwords do not match!"), bgcolor="#4CAF50"))
+            page.open(ft.SnackBar(ft.Text("Please fill in all fields!"), bgcolor="#F44336"))
             page.update()
             return
-        elif not user_exists:
-            page.open(ft.SnackBar(ft.Text(f"Username already exists!"), bgcolor="#4CAF50"))
+        
+        # Validate username format
+        username_valid, username_message = validate_username(username)
+        if not username_valid:
+            page.open(ft.SnackBar(ft.Text(username_message), bgcolor="#F44336"))
             page.update()
             return
-        else:
-            user_id = get_next_user_id()  # Get the next user ID
-            register_user(user_id, username, email, password)  # Function to register the user in the database
-            page.update()
-            goto_proficiency(page, user_id)  # Navigate to proficiency setup page
-            page.update()
             
-    
+        # Check if username exists
+        user_exists = check_user(username)
+        if not user_exists:
+            page.open(ft.SnackBar(ft.Text("Username already exists!"), bgcolor="#F44336"))
+            page.update()
+            return
+        
+        # Validate email format
+        if not validate_email(email):
+            page.open(ft.SnackBar(ft.Text("Please enter a valid email address!"), bgcolor="#F44336"))
+            page.update()
+            return
+        
+        # Validate password strength
+        password_valid, password_message = validate_password(password)
+        if not password_valid:
+            page.open(ft.SnackBar(ft.Text(password_message), bgcolor="#F44336"))
+            page.update()
+            return
+        
+        # Check if passwords match
+        if password != retype_password:
+            page.open(ft.SnackBar(ft.Text("Passwords do not match!"), bgcolor="#F44336"))
+            page.update()
+            return
+        
+        # All validations passed, proceed with registration
+        user_id = get_next_user_id()
+        register_user(user_id, username, email, password)
+        page.update()
+        goto_proficiency(page, user_id)
+        page.update()
+            
+    password_requirements = ft.Text(
+        "Password must be at least 8 characters and include uppercase, lowercase, number, and special character",
+        size=10,
+        color="#666666",
+        italic=True
+    )
+
     page.views.append(
         ft.View(
             route="/register",
@@ -311,6 +404,7 @@ def register_page(page: ft.Page, image_urls: list):
 
                             ft.Text("Password", color="black"),
                             password_field,
+                            password_requirements,  # Add password requirements text
 
                             ft.Text("Retype Password", color="black"),
                             retype_password_field,

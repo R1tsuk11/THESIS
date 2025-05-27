@@ -1,5 +1,6 @@
 import flet as ft
 from flet import Theme, PageTransitionsTheme, PageTransitionTheme
+from mainmenu import connect_to_mongoDB, clear_all_temp_files
 
 
 def settings_page(page: ft.Page):
@@ -11,8 +12,16 @@ def settings_page(page: ft.Page):
     page.theme_mode = ft.ThemeMode.LIGHT    
     page.theme = ft.Theme(font_family="Poppins")
 
-    nameHolder = "johndoe"
-    emailHolder = "johndoe@gmail.com"
+    user_id = page.session.get("user_id")
+    
+    if user_id:
+        from mainmenu import User
+        user = User().load_data(user_id, page)
+        nameHolder = user.user_name
+        emailHolder = user.email or "No email provided"
+    else:
+        nameHolder = "Guest User"
+        emailHolder = "Not logged in"
 
     # Header with logo and back button
     header = ft.Container(
@@ -149,9 +158,134 @@ def settings_page(page: ft.Page):
         ft.Icons.LOCK_OUTLINE, 
         "Change Password",
         trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, color="#0055b3"),
-        on_click=lambda e: print("Change Password clicked")
-    )
+        on_click=lambda e: show_change_password_dialog(e)
+        )
     
+    def validate_password(password):
+        """
+        Validates password strength:
+        - At least 8 characters long
+        - Contains at least one digit
+        - Contains at least one uppercase letter
+        - Contains at least one lowercase letter
+        - Contains at least one special character
+        """
+        # Check length
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters long"
+        
+        # Check for digit
+        if not any(char.isdigit() for char in password):
+            return False, "Password must contain at least one digit"
+        
+        # Check for uppercase letter
+        if not any(char.isupper() for char in password):
+            return False, "Password must contain at least one uppercase letter"
+        
+        # Check for lowercase letter
+        if not any(char.islower() for char in password):
+            return False, "Password must contain at least one lowercase letter"
+        
+        # Check for special character
+        special_chars = "!@#$%^&*()-_=+[]{}|;:'\",.<>/?`~"
+        if not any(char in special_chars for char in password):
+            return False, "Password must contain at least one special character"
+        
+        return True, "Password is strong"
+        
+    def show_change_password_dialog(e):
+        """Show dialog for changing password with strength validation"""
+        # Create password fields
+        current_password = ft.TextField(
+            label="Current Password",
+            password=True,
+            border_color="#0055b3",
+            focused_border_color="#0055b3",
+            width=300
+        )
+        
+        new_password = ft.TextField(
+            label="New Password",
+            password=True,
+            border_color="#0055b3",
+            focused_border_color="#0055b3",
+            width=300
+        )
+        
+        confirm_password = ft.TextField(
+            label="Confirm New Password",
+            password=True,
+            border_color="#0055b3",
+            focused_border_color="#0055b3",
+            width=300
+        )
+        
+        # Password requirements helper text
+        password_requirements = ft.Text(
+            "Password must be at least 8 characters and include uppercase, lowercase, number, and special character",
+            size=12,
+            color="#666666",
+            italic=True,
+            text_align=ft.TextAlign.LEFT
+        )
+        
+        # Function to handle password change
+        def change_password(e):
+            # Check if passwords match
+            if new_password.value != confirm_password.value:
+                page.open(ft.SnackBar(ft.Text("Passwords do not match!"), bgcolor="#F44336"))
+                return
+            
+            # Validate password strength
+            is_valid, message = validate_password(new_password.value)
+            if not is_valid:
+                page.open(ft.SnackBar(ft.Text(message), bgcolor="#F44336"))
+                return
+                
+            # Check if current password is valid
+            user_id = page.session.get("user_id")
+            if not user_id:
+                page.open(ft.SnackBar(ft.Text("User session expired!"), bgcolor="#F44336"))
+                return
+                
+            usercol = connect_to_mongoDB()
+            user = usercol.find_one({"user_id": user_id})
+            
+            if not user or user["password"] != current_password.value:
+                page.open(ft.SnackBar(ft.Text("Current password is incorrect!"), bgcolor="#F44336"))
+                return
+                
+            # Update password in database
+            usercol.update_one(
+                {"user_id": user_id},
+                {"$set": {"password": new_password.value}}
+            )
+            
+            # Close dialog and show confirmation
+            page.close(password_dialog)
+            page.open(ft.SnackBar(ft.Text("Password changed successfully!"), bgcolor="#4CAF50"))
+        
+        # Create dialog with enhanced content including password requirements
+        password_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Change Password", size=20, weight=ft.FontWeight.BOLD),
+            content=ft.Column([
+                current_password,
+                ft.Container(height=5),  # Spacing
+                new_password,
+                password_requirements,  # Add requirements text
+                ft.Container(height=5),  # Spacing
+                confirm_password,
+            ], spacing=10, width=300, height=240),  # Increased height to accommodate the requirements text
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: page.close(password_dialog)),
+                ft.TextButton("Change Password", on_click=change_password)
+            ],
+            actions_alignment=ft.MainAxisAlignment.END
+        )
+        
+        page.open(password_dialog)
+
     acknowledgements = create_setting_item(
         ft.Icons.INFO_OUTLINE, 
         "Acknowledgements",
@@ -177,8 +311,15 @@ def settings_page(page: ft.Page):
         page.open(logout_dialog)
 
     # In a real app, perform actual logout operations      
+    # Replace the existing perform_logout function with this:
     def perform_logout(e):
-        print("User logged out")
+        if user_id:
+            user = User().load_data(user_id, page)
+            user.save_user(page)
+        else:
+            # If no user is found, just redirect to login
+            page.session.clear()
+            page.go("/login")
         
     # LOGOUT DIALOG ALERT
     logout_dialog = ft.AlertDialog(
@@ -240,10 +381,75 @@ def settings_page(page: ft.Page):
     delete_account = create_setting_item(
         ft.Icons.DELETE_OUTLINE, 
         "Delete Account",
-        on_click=lambda e: print("Delete Acccount clicked"),
+        on_click=lambda e: show_delete_account_dialog(e),
         divider=False
     )
     
+    def show_delete_account_dialog(e):
+    # Create password field for confirmation
+        password = ft.TextField(
+            label="Enter your password to confirm",
+            password=True,
+            border_color="#F44336",
+            focused_border_color="#F44336",
+            width=300
+        )
+        
+        # Create warning text
+        warning_text = ft.Text(
+            "Warning: This action cannot be undone. All your data will be permanently deleted.",
+            color="#F44336",
+            size=14,
+            text_align=ft.TextAlign.CENTER
+        )
+        
+        # Function to handle account deletion
+        def delete_account(e):
+            from mainmenu import connect_to_mongoDB, clear_all_temp_files
+            
+            user_id = page.session.get("user_id")
+            if not user_id:
+                page.open(ft.SnackBar(ft.Text("User session expired!"), bgcolor="#F44336"))
+                return
+                
+            usercol = connect_to_mongoDB()
+            user = usercol.find_one({"user_id": user_id})
+            
+            if not user or user["password"] != password.value:
+                page.open(ft.SnackBar(ft.Text("Password is incorrect!"), bgcolor="#F44336"))
+                return
+                
+            # Delete account from database
+            usercol.delete_one({"user_id": user_id})
+            
+            # Clean up temporary files
+            clear_all_temp_files()
+            
+            # Close dialog and redirect to login
+            page.close(delete_dialog)
+            page.session.clear()
+            page.go("/login")
+        
+        # Create dialog
+        delete_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Delete Account", size=20, weight=ft.FontWeight.BOLD, color="#F44336"),
+            content=ft.Column([
+                warning_text,
+                ft.Divider(),
+                password
+            ], spacing=20, width=350, height=150),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: page.close(delete_dialog)),
+                ft.TextButton("Delete Account", 
+                            on_click=delete_account, 
+                            style=ft.ButtonStyle(color={"": "#F44336"}))
+            ],
+            actions_alignment=ft.MainAxisAlignment.END
+        )
+        
+        page.open(delete_dialog)
+
     # Red texts for log out and delete acc
     log_out_text = log_out.content.controls[0].title
     log_out_text.color = "#F44336"  # Red color

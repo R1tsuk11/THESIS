@@ -10,6 +10,7 @@ if __name__ == "__main__":
     try:
         input_json = sys.argv[1]
         prof_history_path = sys.argv[2]
+        user_id = sys.argv[3] if len(sys.argv) > 3 else None
 
         with open(input_json, "r") as f:
             data = json.load(f)
@@ -24,7 +25,7 @@ if __name__ == "__main__":
         print(f"[LSTM subprocess] proficiency_history: {proficiency_history}", file=sys.stderr)
 
         output = overall_proficiency(
-            bkt_sequence, completion, proficiency_history
+            bkt_sequence, completion, proficiency_history, user_id
         )
         print("[LSTM subprocess] About to print JSON output", file=sys.stderr)
         print(output)

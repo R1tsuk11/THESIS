@@ -117,14 +117,9 @@ def predict_proficiency(bkt_sequence):
     print(f"[LSTM] Prediction result: {pred}")
     return float(pred[0][0])
 
-def overall_proficiency(bkt_sequence, completion_percentage, proficiency_history=None):
-    print(f"[LSTM] DEBUG: Starting overall_proficiency", file=sys.stderr)
-    print(f"[LSTM] DEBUG: MIN_SEQUENCE_LENGTH={MIN_SEQUENCE_LENGTH}", file=sys.stderr)
-    print(f"[LSTM] Sequence length: {len(bkt_sequence)}", file=sys.stderr)
-    
-    if proficiency_history is None:
-        print("[LSTM] proficiency_history is None, initializing to empty list.", file=sys.stderr)
-        proficiency_history = []
+# At the end of overall_proficiency function
+def overall_proficiency(bkt_sequence, completion_percentage, proficiency_history, user_id=None):
+    # Your existing code
     
     try:
         if len(bkt_sequence) < MIN_SEQUENCE_LENGTH:
@@ -133,14 +128,99 @@ def overall_proficiency(bkt_sequence, completion_percentage, proficiency_history
             result = avg * completion_percentage
             print(f"Result: {result}")
             track_proficiency_history(result)
+            
+            # Display the LSTM proficiency
+            print("\n=== LSTM PROFICIENCY ===")
+            display_lstm_proficiency(user_id)
+            print("=======================\n")
+            
             return result
         
         print("[LSTM] Using LSTM model for prediction.")
         proficiency = predict_proficiency(bkt_sequence)
         adjusted_proficiency = proficiency * completion_percentage
         track_proficiency_history(adjusted_proficiency)
+        
+        # Display the LSTM proficiency
+        print("\n=== LSTM PROFICIENCY ===")
+        display_lstm_proficiency(user_id)
+        print("=======================\n")
+        
         return adjusted_proficiency
-
+        
     except Exception as e:
         print(f"[LSTM] Error in overall_proficiency: {str(e)}", file=sys.stderr)
         return {"error": str(e),  "method": "sys"}
+    
+# Add this to lstm_engine.py
+def display_lstm_proficiency(user_id=None):
+    """
+    Formats and prints LSTM proficiency prediction in a readable format
+    
+    Args:
+        user_id: Optional user ID to include in the display
+    """
+    # Get history data
+    if os.path.exists(history_file):
+        with open(history_file, "r") as f:
+            history = json.load(f)
+    else:
+        history = []
+    
+    # Get prediction if we have enough data
+    if len(history) >= MIN_SEQUENCE_LENGTH:
+        # Get the last sequence for prediction
+        sequence = history[-MIN_SEQUENCE_LENGTH:]
+        prediction = predict_proficiency(sequence)
+        model_status = "Active"
+    else:
+        sequence = history if history else []
+        prediction = average_proficiency(sequence) if sequence else 0.0
+        model_status = f"Inactive (Need {MIN_SEQUENCE_LENGTH-len(history)} more data points)"
+    
+    # Print header
+    print("\n┌───────────────────────────────────────────────────────────────────┐")
+    print("│                          LSTM PROFICIENCY                          │")
+    print("├───────────────────────────────────────────────────────────────────┤")
+    
+    # User info
+    if user_id:
+        print(f"│ User ID:                 {user_id:<41} │")
+    
+    # Model status
+    print(f"│ Model Status:            {model_status:<41} │")
+    print(f"│ History Data Points:     {len(history):<41} │")
+    
+    # Current prediction
+    proficiency_percent = prediction * 100
+    print(f"│ Current Proficiency:     {proficiency_percent:.1f}% {get_proficiency_level(prediction):<33} │")
+    
+    # Learning curve
+    if len(history) >= 2:
+        trend = history[-1] - history[-2]
+        trend_display = f"{trend*100:+.1f}% " + ("↑" if trend > 0 else "↓" if trend < 0 else "→")
+        print(f"│ Recent Trend:           {trend_display:<41} │")
+    
+    print("├───────────────────────────────────────────────────────────────────┤")
+    
+    # Show recent history points
+    print("│ Recent Proficiency History:                                       │")
+    recent = history[-5:] if len(history) > 5 else history
+    for i, h in enumerate(recent):
+        idx = len(history) - len(recent) + i
+        print(f"│   Point {idx+1:<2}: {h*100:>6.1f}%                                            │")
+    
+    print("└───────────────────────────────────────────────────────────────────┘")
+
+def get_proficiency_level(proficiency):
+    """Returns a text description of proficiency level"""
+    if proficiency < 0.2:
+        return "(Beginner)"
+    elif proficiency < 0.4:
+        return "(Elementary)"
+    elif proficiency < 0.6:
+        return "(Intermediate)"
+    elif proficiency < 0.8:
+        return "(Advanced)"
+    else:
+        return "(Proficient)"

@@ -3,7 +3,6 @@ import pymongo
 from pymongo.errors import ConfigurationError
 import sys
 import json
-import pprint
 import os
 from datetime import datetime
 from supermemo_engine import prepare_daily_review
@@ -145,13 +144,32 @@ def cache_library_to_temp(library):
     with open("temp_library.json", "w") as f:
         json.dump(library, f)
 
-def clear_temp_library_cache():
-    if os.path.exists("temp_library.json"):
-        os.remove("temp_library.json")
-
-def clear_temp_chaptertest_cache():
-    if os.path.exists("temp_chaptertest_data.json"):
-        os.remove("temp_chaptertest_data.json")
+def clear_all_temp_files():
+    """
+    Clear all temporary files used by the application.
+    This should be called on logout to ensure clean state for next login.
+    """
+    temp_files = [
+        "temp_library.json",                # User vocabulary library
+        "temp_modules.json",                # User modules data
+        "temp_chaptertest_data.json",       # Chapter test results
+        "temp_bkt_data.json",               # BKT model state
+        "temp_prof_history.json",           # Proficiency history
+        "lstm_counter.json",                # LSTM counter
+        "bkt_predictions.json",             # BKT predictions
+        "bkt_input.csv",                    # BKT input data
+    ]
+    
+    print("[Cleanup] Clearing all temporary files...")
+    for file_path in temp_files:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"[Cleanup] Deleted: {file_path}")
+        except Exception as e:
+            print(f"[Cleanup] Error deleting {file_path}: {e}")
+    
+    print("[Cleanup] All temporary files cleared.")
 
 def connect_to_mongoDB():
     try:
@@ -473,6 +491,8 @@ class User:  # User class
         self.save_library()
         self.save_bkt_data()
         self.save_prof_history()
+        self.save_lstm_counter()  # Added this to ensure LSTM counter is saved
+
 
         print(f"[TEST] Usage time (seconds): {usage_time_seconds}, (minutes): {usage_time_seconds // 60}")
         
@@ -490,8 +510,7 @@ class User:  # User class
             "Upserted ID:", result.upserted_id)
 
         try:
-            clear_temp_library_cache()
-            clear_temp_chaptertest_cache()
+            clear_all_temp_files()
         except FileNotFoundError:
             print("No temp file to clear.")
 
@@ -734,7 +753,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
     cards = []
     user_id = get_user_id(page)  # Get user ID from session
     user = User().load_data(user_id, page)  # Load user data
-    pprint.pprint(user.to_dict())
+    page.session.set("user_library", user.library)  # Cache library for later use
     for module in user.modules:
         card = create_module_card(module.id, module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
         cards.append(card)
@@ -765,7 +784,6 @@ def main_menu_page(page: ft.Page, image_urls: list):
 
     def navigate_to_word_library(e, user_library):
         # Store just the library in the page session
-        page.session.set("user_library", user_library)
         page.go("/word-library")
 
     # Create the bottom navigation bar

@@ -2,6 +2,7 @@ import flet as ft
 import json
 import os
 from bkt_engine import update_bkt, get_all_p_masteries
+from supermemo_engine import get_user_proficiency
 import pymongo
 import threading
 import subprocess
@@ -40,7 +41,7 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
 
     # 4. Run LSTM in subprocess
     result = subprocess.run(
-        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", prof_history_path],
+        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", prof_history_path, str(user_id)],
         capture_output=True, text=True
     )
     if result.stdout:
@@ -235,17 +236,36 @@ def levels_page(page: ft.Page, image_urls: list):
         completion_time = updated["total_response_time"]
         grade_percentage = updated["grade"]
 
-        print("DEBUG (levels.py) correct_answers:", correct_answers)
-        print("DEBUG (levels.py) incorrect_answers:", incorrect_answers)
-        print("DEBUG (levels.py) correct_answers keys:", list(correct_answers.keys()))
-        print("DEBUG (levels.py) incorrect_answers keys:", list(incorrect_answers.keys()))
-        print("DEBUG (levels.py) correct_answers values:", list(correct_answers.values()))
-        print("DEBUG (levels.py) incorrect_answers values:", list(incorrect_answers.values()))
-
         page.session.set("correct_answers", correct_answers)
         page.session.set("incorrect_answers", incorrect_answers)
 
+        user_id = page.session.get("user_id")
+        user_library = page.session.get("user_library", [])
+
+        if updated["questions"]:
+            # Collect new vocabulary words
+            new_vocabs = []
+            for question in updated["questions"]:
+                if hasattr(question, "vocabulary") and question.vocabulary:
+                    vocab = question.vocabulary
+                    # Check if vocabulary already exists in library
+                    if vocab not in user_library and vocab not in new_vocabs:
+                        new_vocabs.append(vocab)
+            
+            # Add new vocabulary words to the library
+            if new_vocabs:
+                print(f"[DEBUG] Adding {len(new_vocabs)} new vocabulary words to library")
+                user_library.extend(new_vocabs)
+                page.session.set("user_library", user_library)
+                cache_library_to_temp(user_library)
+
         threading.Thread(target=run_bkt_and_lstm, args=(page, completion, user_id, correct_answers, incorrect_answers)).start()
+    
+    def cache_library_to_temp(library):
+        """Cache the user's vocabulary library to a temporary file"""
+        with open("temp_library.json", "w") as f:
+            json.dump(library, f)
+        print(f"[DEBUG] Cached library with {len(library)} vocabulary items to temp file")
 
     def go_back(e):
         """Navigate back to the main menu"""
@@ -279,30 +299,23 @@ def levels_page(page: ft.Page, image_urls: list):
         level_index = int(level_num) - 1
         level_data = selected_module_levels[level_index]
 
-        # Debug print initial data
-        print(f"[DEBUG] Starting level_select for level {level_num}")
-        print(f"[DEBUG] Level data: {level_data}")
-
         # Prerequisite and completion checks...
         prerequisite_levels = selected_module_levels[:level_index]
         all_prerequisites_completed = all(level.completed for level in prerequisite_levels)
 
         if not all_prerequisites_completed:
-            print("[DEBUG] Prerequisites not completed")
             page.open(ft.SnackBar(ft.Text("You must complete previous levels first."), bgcolor="#FF0000"))
             page.update()
             return
 
         # Prevent re-entering a finished level
         if level_data.completed:
-            print("[DEBUG] Level already completed")
             page.open(ft.SnackBar(ft.Text("Level already completed!"), bgcolor="#FF0000"))
             page.update()
             return
 
         # Fetch current proficiency
         user_id = page.session.get("user_id")
-        from supermemo_engine import get_user_proficiency
         proficiency = get_user_proficiency(user_id)
         print(f"[DEBUG] User proficiency: {proficiency}")
 
@@ -336,13 +349,12 @@ def levels_page(page: ft.Page, image_urls: list):
             
             if proficiency < 40:
                 practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 2]
-                print(f"[DEBUG] Found {len(practice_q)} practice questions (diff <= 2) for vocab '{vocab}' (proficiency < 40)")
+            
             elif proficiency < 70:
                 practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 3]
-                print(f"[DEBUG] Found {len(practice_q)} practice questions (diff <= 3) for vocab '{vocab}' (40 <= proficiency < 70)")
+            
             else:
                 practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson"]
-                print(f"[DEBUG] Found {len(practice_q)} practice questions (any diff) for vocab '{vocab}' (proficiency >= 70)")
                 
             practice_q.sort(key=lambda q: getattr(q, "difficulty", 1))
             
@@ -365,7 +377,6 @@ def levels_page(page: ft.Page, image_urls: list):
             questions.extend(vocab_questions)
 
         # Debug final question set
-        print(f"[DEBUG] Final question count: {len(questions)}")
         for i, q in enumerate(questions):
             print(f"[DEBUG] Question {i+1}: type={getattr(q, 'type', 'unknown')}, "
                 f"vocab={getattr(q, 'vocabulary', 'unknown')}, "
