@@ -16,6 +16,159 @@ bkt_data = []
 bkt_thread = None
 bkt_thread_lock = threading.Lock()
 
+# Add to bkt_engine.py
+def get_vocab_mastery(vocab, default_for_new=0.4):
+    """Get current mastery level with better handling for new vocabulary items"""
+    state = load_temp_state()
+    predictions = state.get("predictions", {})
+    
+    # Default mastery for new vocabulary is slightly lower than neutral
+    # This encourages starting with easier questions for new vocab
+    if vocab.lower() in predictions:
+        return float(predictions[vocab.lower()].get("p_mastery", 0.5))
+    return default_for_new  # Default mastery if not found
+
+def select_adaptive_questions(all_questions, batch_size=10, min_questions_per_vocab=2):
+    """Select questions adaptively based on current BKT mastery levels"""
+    print("[BKT] Selecting adaptive question batch...")
+    
+    # Group questions by vocabulary
+    vocab_groups = {}
+    for q in all_questions:
+        vocab = getattr(q, "vocabulary", "").lower()
+        if vocab and vocab not in vocab_groups:
+            vocab_groups[vocab] = []
+        if vocab:
+            vocab_groups[vocab].append(q)
+    
+    # Get current mastery levels for each vocabulary
+    vocab_masteries = {vocab: get_vocab_mastery(vocab) for vocab in vocab_groups.keys()}
+    
+    # Sort vocabularies by mastery level (focus on lower mastery first)
+    sorted_vocabs = sorted(vocab_masteries.items(), key=lambda x: x[1])
+    
+    # Create adaptive batch
+    batch = []
+    for vocab, mastery in sorted_vocabs:
+        if len(batch) >= batch_size:
+            break
+            
+        # Choose appropriate difficulty based on mastery
+        if mastery < 0.3:
+            difficulty_range = (1, 2)  # Easy to medium
+            print(f"[BKT] Vocab '{vocab}' has low mastery ({mastery:.2f}): selecting easy-medium questions")
+        elif mastery < 0.7:
+            difficulty_range = (2, 3)  # Medium to hard
+            print(f"[BKT] Vocab '{vocab}' has medium mastery ({mastery:.2f}): selecting medium-hard questions")
+        else:
+            difficulty_range = (3, 4)  # Hard
+            print(f"[BKT] Vocab '{vocab}' has high mastery ({mastery:.2f}): selecting hard questions")
+            
+        # First select lesson questions (always include)
+        lesson_qs = [q for q in vocab_groups[vocab] 
+                   if getattr(q, "type", "") == "Lesson" and not getattr(q, "used", False)]
+        
+        if lesson_qs:
+            lesson_qs[0].predicted_mastery = mastery  # Store the mastery prediction
+            batch.append(lesson_qs[0])
+            lesson_qs[0].used = True
+            print(f"[BKT] Added lesson question for '{vocab}'")
+        
+        # Then select practice questions with appropriate difficulty
+        # Fix: Safely handle None values in difficulty comparison
+        matching_qs = []
+        for q in vocab_groups[vocab]:
+            q_difficulty = getattr(q, "difficulty", 2)  # Default to 2 if not specified
+            # Convert to numeric type if it's not None, otherwise use default
+            if q_difficulty is None:
+                q_difficulty = 2  # Default difficulty
+            
+            # Make sure it's a number
+            try:
+                q_difficulty = float(q_difficulty)
+            except (ValueError, TypeError):
+                q_difficulty = 2  # Default if conversion fails
+                
+            # Now do the comparison safely
+            if (difficulty_range[0] <= q_difficulty <= difficulty_range[1] and 
+                not getattr(q, "used", False) and
+                getattr(q, "type", "") != "Lesson"):
+                matching_qs.append(q)
+        
+        # Sort by difficulty
+        matching_qs.sort(key=lambda q: getattr(q, "difficulty", 2) or 2)  # Safe sorting
+        
+        # Add questions up to the minimum per vocabulary
+        questions_to_add = min(min_questions_per_vocab, len(matching_qs))
+        for i in range(questions_to_add):
+            if len(batch) >= batch_size:
+                break
+            if i < len(matching_qs):
+                matching_qs[i].predicted_mastery = mastery  # Store the mastery prediction
+                batch.append(matching_qs[i])
+                matching_qs[i].used = True
+                print(f"[BKT] Added {getattr(matching_qs[i], 'type', 'unknown')} question for '{vocab}' (difficulty: {getattr(matching_qs[i], 'difficulty', '?')})")
+    
+    # Fill remaining slots with diverse questions if needed
+    if len(batch) < batch_size:
+        remaining = [q for q in all_questions if not getattr(q, "used", False)]
+        # Safe sorting with default value
+        remaining.sort(key=lambda q: getattr(q, "difficulty", 2) or 2)
+        
+        for q in remaining:
+            if len(batch) >= batch_size:
+                break
+            vocab = getattr(q, "vocabulary", "").lower()
+            mastery = vocab_masteries.get(vocab, 0.5)
+            q.predicted_mastery = mastery
+            batch.append(q)
+            q.used = True
+            print(f"[BKT] Added extra question for '{vocab}' to fill batch")
+    
+    # Tag this as a BKT-generated batch
+    for q in batch:
+        q.batch_id = time.time()
+        
+    print(f"[BKT] Selected {len(batch)} questions adaptively")
+    return batch[:batch_size]
+
+def should_rebatch(performance_data, threshold=0.3):
+    """
+    Determine if we need to rebatch questions based on performance changes
+    
+    Args:
+        performance_data: Dictionary mapping vocabulary to lists of correct/incorrect answers
+        threshold: Threshold for rebatching (difference between expected and actual accuracy)
+    
+    Returns:
+        Boolean indicating if rebatching is needed and the vocabulary that triggered it
+    """
+    state = load_temp_state()
+    predictions = state.get("predictions", {})
+    
+    for vocab, data in performance_data.items():
+        if not data["answers"]:
+            continue  # Skip if no answers for this vocabulary
+            
+        # Calculate actual accuracy
+        actual_accuracy = sum(data["answers"]) / len(data["answers"])
+        
+        # Get predicted mastery and expected accuracy
+        mastery = get_vocab_mastery(vocab)
+        # Expected accuracy from BKT (using mastery, guess and slip)
+        vocab_pred = predictions.get(vocab.lower(), {})
+        guess = float(vocab_pred.get("guess", 0.2))
+        slip = float(vocab_pred.get("slip", 0.1))
+        expected_accuracy = mastery * (1 - slip) + (1 - mastery) * guess
+        
+        # Compare actual vs expected
+        if abs(actual_accuracy - expected_accuracy) > threshold:
+            print(f"[BKT] Performance for '{vocab}' differs significantly from prediction")
+            print(f"[BKT] Expected: {expected_accuracy:.2f}, Actual: {actual_accuracy:.2f}")
+            return True, vocab
+            
+    return False, None
+
 def threaded_update_bkt(user_id, correct_answers, incorrect_answers):
     """
     Runs update_bkt in a thread, waiting for any previous thread to finish.

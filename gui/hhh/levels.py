@@ -164,6 +164,12 @@ def levels_page(page: ft.Page, image_urls: list):
     level_rows = []
     row = []
 
+    def cache_library_to_temp(library):
+        """Cache the user's vocabulary library to a temporary file"""
+        with open("temp_library.json", "w") as f:
+            json.dump(library, f)
+        print(f"[DEBUG] Cached library with {len(library)} vocabulary items to temp file")
+
     updated = get_updated_data(page)
 
     if updated and updated["questions"]:
@@ -240,7 +246,9 @@ def levels_page(page: ft.Page, image_urls: list):
         page.session.set("incorrect_answers", incorrect_answers)
 
         user_id = page.session.get("user_id")
-        user_library = page.session.get("user_library", [])
+        user_library = page.session.get("user_library")
+        if not user_library:
+            user_library = None
 
         if updated["questions"]:
             # Collect new vocabulary words
@@ -260,12 +268,6 @@ def levels_page(page: ft.Page, image_urls: list):
                 cache_library_to_temp(user_library)
 
         threading.Thread(target=run_bkt_and_lstm, args=(page, completion, user_id, correct_answers, incorrect_answers)).start()
-    
-    def cache_library_to_temp(library):
-        """Cache the user's vocabulary library to a temporary file"""
-        with open("temp_library.json", "w") as f:
-            json.dump(library, f)
-        print(f"[DEBUG] Cached library with {len(library)} vocabulary items to temp file")
 
     def go_back(e):
         """Navigate back to the main menu"""

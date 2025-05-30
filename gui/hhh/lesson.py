@@ -11,6 +11,8 @@ import base64  # Import for encoding visualization images
 from voice_recognition.audio_processing import is_valid_audio, extract_features
 from voice_recognition.speech_recognition_utils import SpeechProcessor, capture_audio  # Import the more complete module
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from bkt_engine import should_rebatch, select_adaptive_questions, get_vocab_mastery
+import threading
 
 correct_answers = {}
 incorrect_answers = {}
@@ -1901,6 +1903,8 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
 def lesson_page(page: ft.Page, image_urls: list):
     page.title = "Arami - Lesson"
     page.padding = 0
+    performance_tracker = {}  # Track performance during lesson
+    rebatching_needed = False
 
     # EXIT ALERT
     dlg_modal = ft.AlertDialog(
@@ -1962,6 +1966,12 @@ def lesson_page(page: ft.Page, image_urls: list):
     def render_current_question(progress_value):
         page.views.clear()  # Optional: clear previous view
         question = questions[current_question_index["value"]]
+        
+        # Initialize performance tracking for this vocabulary
+        vocab = getattr(question, "vocabulary", "").lower()
+        if vocab and vocab not in performance_tracker:
+            performance_tracker[vocab] = {"answers": [], "predicted_mastery": getattr(question, "predicted_mastery", 0.5)}
+            
         content = render_question_layout(
             page = page,
             question_data=question,
@@ -1984,6 +1994,24 @@ def lesson_page(page: ft.Page, image_urls: list):
     # global weighted_questions, correct_answers, incorrect_answers, total_response_time
     
     # Instead, use the outer scope variables directly
+
+        # Get the current question
+        current_question = questions[current_question_index["value"]]
+        
+        # Track performance for this vocabulary
+        vocab = getattr(current_question, "vocabulary", "").lower()
+        if vocab and vocab in performance_tracker:
+            # Check if the question was answered correctly
+            is_correct = current_question.question in correct_answers
+            performance_tracker[vocab]["answers"].append(1 if is_correct else 0)
+            
+            # Check if we need to rebatch after every 2 questions for a vocabulary
+            if len(performance_tracker[vocab]["answers"]) >= 2:
+                # Check in background thread to avoid UI lag
+                threading.Thread(
+                    target=check_rebatch_need, 
+                    args=(vocab, current_question_index["value"])
+                ).start()
 
         current_question_index["value"] += 1
         progress_value = (current_question_index["value"] + 1) / total_questions
@@ -2035,6 +2063,35 @@ def lesson_page(page: ft.Page, image_urls: list):
             update_user_library()
             lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)
             reset_var()
+
+    def check_rebatch_need(vocab, current_index):
+        nonlocal rebatching_needed
+        
+        # Skip if we already decided to rebatch
+        if rebatching_needed:
+            return
+            
+        # Check if rebatching is needed
+        should_rebatch_result, trigger_vocab = should_rebatch({
+            vocab: performance_tracker[vocab]
+        })
+        
+        if should_rebatch_result:
+            print(f"[BKT] Rebatching needed due to performance for '{trigger_vocab}'")
+            rebatching_needed = True
+            
+            # Get remaining questions (those not yet seen)
+            remaining_questions = questions[current_index+1:]
+            if not remaining_questions:
+                print("[BKT] No remaining questions to rebatch")
+                return
+                
+            # Re-select questions for the remainder of the lesson
+            new_batch = select_adaptive_questions(remaining_questions)
+            
+            # Replace remaining questions with new batch
+            questions[current_index+1:] = new_batch
+            print(f"[BKT] Rebatched {len(new_batch)} questions")
 
     def reset_var():
         current_question_index["value"] = 0

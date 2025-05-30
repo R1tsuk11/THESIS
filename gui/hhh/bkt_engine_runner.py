@@ -9,71 +9,74 @@ INPUT_CSV = "bkt_input.csv"
 OUTPUT_JSON = "bkt_predictions.json"
 MODEL_FILE = "bkt_model.pkl"
 
-def run_bkt_model(fit=True):
-    if not os.path.exists(INPUT_CSV):
-        print(f"[bkt_model_runner] Input file '{INPUT_CSV}' not found.")
-        return
+# Modify in bkt_engine_runner.py
+def run_bkt_model(mode="predict"):
+    """Run the BKT model with the given mode (fit or predict)"""
+    print(f"[bkt_model_runner] Loaded input data: {len(df)} rows")
 
-    # Load data
-    df = pd.read_csv(INPUT_CSV)
-    print(f"[bkt_model_runner] Loaded input data: {df.shape[0]} rows")
-
-    # Fit model
-    model = Model()
-
-    if not fit:
-        if not os.path.exists(MODEL_FILE):
-            print("[bkt_model_runner] No fitted model found. Forcing fit.")
-            fit = True
-            
-    if fit:
+    if os.path.exists('bkt_model.pkl'):
+        with open('bkt_model.pkl', 'rb') as f:
+            model = pickle.load(f)
+            print("[bkt_model_runner] Loaded model from disk.")
+    else:
+        model = Model()
+        print("[bkt_model_runner] Created new model.")
+        mode = "fit"  # Force fit for new model
+        
+    if mode == "fit":
         try:
             model.fit(data=df)
-            print("[bkt_model_runner] Model fitted successfully.")
-            with open(MODEL_FILE, "wb") as mf:
-                pickle.dump(model, mf)
+            with open('bkt_model.pkl', 'wb') as f:
+                pickle.dump(model, f)
+            print("[bkt_model_runner] Model fitted and saved to disk.")
         except Exception as e:
-            print(f"[bkt_model_runner] Error fitting model: {e}")
-            return
-        
-    else:
-        if os.path.exists(MODEL_FILE):
-            with open(MODEL_FILE, "rb") as mf:
-                model = pickle.load(mf)
-            print("[bkt_model_runner] Loaded model from disk.")
-        else:
-            print("[bkt_model_runner] No fitted model found. Cannot predict.")
-            return
- 
-    # Predict
+            print(f"[bkt_model_runner] Error during fit: {e}")
+            
+    # Make predictions
     try:
-        pred_df = model.predict(data=df)
-        pred_df['confidence'] = 1 - pred_df['guess'] - pred_df['slip']
-
-        result = {}
-        for vocab in pred_df['skill_name'].unique():
-            last_row = pred_df[pred_df['skill_name'] == vocab].iloc[-1]
-            result[vocab] = {
-                'user_id': int(last_row['user_id']),
-                'vocabulary': vocab,
-                'correct': int(last_row['correct']),
-                'p_mastery': float(last_row['state_predictions']),
-                'guess': float(last_row['guess']),
-                'slip': float(last_row['slip']),
-                'confidence': float(last_row['confidence'])
-            }
-
-        with open(OUTPUT_JSON, "w") as f:
-            json.dump(result, f, indent=4)
-
-        # Delete the prediction DataFrame CSV file if it exists
-        if os.path.exists(INPUT_CSV):
-            os.remove(INPUT_CSV)
-            print(f"[bkt_model_runner] Deleted existing '{INPUT_CSV}'.")
-
-        print(f"[bkt_model_runner] Predictions saved to '{OUTPUT_JSON}'.")
+        if len(df) > 0:
+            prediction_df = model.predict(data=df)
+            
+            # Build predictions dictionary
+            predictions = {}
+            for skill in df['skill_name'].unique():
+                skill_data = df[df['skill_name'] == skill]
+                if len(skill_data) > 0:
+                    # Get the last row for this skill
+                    last_row = skill_data.iloc[-1]
+                    
+                    # Calculate mastery increase for first-time learning
+                    # Make mastery more responsive in early learning
+                    mastery = last_row.get('state_predictions', 0.5)
+                    
+                    # If mastery is still at default but answers are correct, boost it
+                    if abs(mastery - 0.5) < 0.01 and all(skill_data['correct'] == 1):
+                        correct_count = len(skill_data)
+                        # More aggressive update for consistent correct answers
+                        mastery = min(0.85, 0.5 + (0.1 * correct_count))
+                        print(f"[bkt_model_runner] Boosted mastery for '{skill}' to {mastery:.2f} based on {correct_count} correct answers")
+                    
+                    predictions[skill.lower()] = {
+                        'p_mastery': float(mastery),
+                        'guess': float(last_row.get('guess', 0.2)),
+                        'slip': float(last_row.get('slip', 0.1)),
+                        'confidence': 1.0 - float(last_row.get('guess', 0.2)) - float(last_row.get('slip', 0.1)),
+                        'correct': int(last_row.get('correct', 0))
+                    }
+                    
+            # Save predictions to file
+            with open('bkt_predictions.json', 'w') as f:
+                json.dump(predictions, f, indent=2)
+            print("[bkt_model_runner] Predictions saved to 'bkt_predictions.json'.")
+        else:
+            print("[bkt_model_runner] No data to make predictions.")
     except Exception as e:
         print(f"[bkt_model_runner] Error during prediction: {e}")
+        
+    # Clean up input file
+    if os.path.exists("bkt_input.csv"):
+        os.remove("bkt_input.csv")
+        print("[bkt_model_runner] Deleted existing 'bkt_input.csv'.")
 
 if __name__ == "__main__":
     fit = True
