@@ -148,13 +148,49 @@ class Module:  # Module class
                     })
             usercol.update_one({"user_id": self.user_id}, {"$set": {"modules": user["modules"]}})
 
-    def create_chapter_test(self):  # Create chapter test
+    def create_chapter_test(self):
+        """Creates a chapter test using dedicated chapter test questions instead of random selection"""
+        # Define mapping of module IDs to their dedicated chapter test dictionaries
+        chapter_test_mapping = {
+            "module_1": "chapterTest_mod1",
+            "module_2": "chapterTest_mod2",
+            "module_3": "chapterTest_mod3",
+            "module_4": "chapterTest_mod4",
+            "module_5": "chapterTest_mod5"
+        }
+        
+        # Try to get dedicated chapter test questions
+        try:
+            # Import the dedicated chapter test dictionaries
+            from qbank import chapterTest_mod1, chapterTest_mod2, chapterTest_mod3, chapterTest_mod4, chapterTest_mod5
+            
+            # Map module ID to the appropriate chapter test dictionary
+            test_dict_name = chapter_test_mapping.get(self.id, None)
+            if test_dict_name and test_dict_name in globals():
+                # Get the dedicated test questions
+                test_questions = globals()[test_dict_name]
+                
+                # Convert to dictionary with unique IDs as keys
+                questions_dict = {}
+                for question in test_questions:
+                    question_key = str(question.get("id", hash(str(question))))
+                    questions_dict[question_key] = question
+                    
+                print(f"Using dedicated chapter test for {self.id} with {len(questions_dict)} questions")
+                return ChapterTest(questions_dict, self.id)
+                
+        except (ImportError, AttributeError) as e:
+            print(f"Dedicated chapter test not found for {self.id}: {e}. Using fallback method.")
+        
+        # Fallback to the old method if dedicated tests aren't available
         all_questions = {}
         for level in self.levels:
             for question in level.questions_answers:
                 # Only include questions that have a correct answer and aren't lesson type
                 if "correct_answer" in question and question.get("type", "") != "Lesson":
-                    all_questions[question["question"]] = question
+                    # Use id as a unique key instead of question text
+                    question_key = str(question.get("id", hash(str(question))))
+                    all_questions[question_key] = question
         
         # Limit to 20 questions if we have more
         if len(all_questions) > 20:

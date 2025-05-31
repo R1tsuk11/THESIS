@@ -17,19 +17,48 @@ bkt_thread = None
 bkt_thread_lock = threading.Lock()
 
 # Add to bkt_engine.py
-def get_vocab_mastery(vocab, default_for_new=0.4):
-    """Get current mastery level with better handling for new vocabulary items"""
+def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None):
+    """Get current mastery level with better handling for new vocabulary items
+    
+    Args:
+        vocab: The vocabulary word to get mastery for
+        default_for_new: Default mastery for new words (0.4 is slightly lower than neutral 0.5)
+        user_performance: Optional dict of user performance data to adapt default for new words
+    """
     state = load_temp_state()
     predictions = state.get("predictions", {})
     
-    # Default mastery for new vocabulary is slightly lower than neutral
-    # This encourages starting with easier questions for new vocab
+    # If the vocab exists in predictions, return its mastery
     if vocab.lower() in predictions:
         return float(predictions[vocab.lower()].get("p_mastery", 0.5))
-    return default_for_new  # Default mastery if not found
+    
+    # For new vocabulary words, adjust default based on recent performance
+    if user_performance and isinstance(user_performance, dict):
+        # Calculate average mastery across all known vocabularies
+        known_masteries = [float(pred.get("p_mastery", 0.5)) for pred in predictions.values()]
+        if known_masteries:
+            avg_known_mastery = sum(known_masteries) / len(known_masteries)
+            
+            # Calculate user's recent accuracy across all words
+            all_answers = []
+            for data in user_performance.values():
+                all_answers.extend(data.get("answers", []))
+            
+            # If user has consistently high accuracy, increase starting mastery
+            if all_answers:
+                recent_accuracy = sum(all_answers) / len(all_answers)
+                # Scale default based on both existing masteries and recent accuracy
+                default_adjustment = (avg_known_mastery * 0.5) + (recent_accuracy * 0.5)
+                
+                # Cap the adjustment to avoid too steep difficulty increases
+                adjusted_default = min(0.65, default_for_new + (default_adjustment - 0.5))
+                print(f"[BKT] Adjusting default mastery for '{vocab}' from {default_for_new} to {adjusted_default:.2f} based on performance")
+                return adjusted_default
+    
+    return default_for_new
 
-def select_adaptive_questions(all_questions, batch_size=10, min_questions_per_vocab=2):
-    """Select questions adaptively based on current BKT mastery levels"""
+def select_adaptive_questions(all_questions, batch_size=10, min_questions_per_vocab=2, user_performance=None):
+    """Select questions adaptively based on current BKT mastery levels and user performance"""
     print("[BKT] Selecting adaptive question batch...")
     
     # Group questions by vocabulary
@@ -41,8 +70,9 @@ def select_adaptive_questions(all_questions, batch_size=10, min_questions_per_vo
         if vocab:
             vocab_groups[vocab].append(q)
     
-    # Get current mastery levels for each vocabulary
-    vocab_masteries = {vocab: get_vocab_mastery(vocab) for vocab in vocab_groups.keys()}
+    # Get current mastery levels for each vocabulary, passing user performance data
+    vocab_masteries = {vocab: get_vocab_mastery(vocab, user_performance=user_performance) 
+                      for vocab in vocab_groups.keys()}
     
     # Sort vocabularies by mastery level (focus on lower mastery first)
     sorted_vocabs = sorted(vocab_masteries.items(), key=lambda x: x[1])
@@ -63,7 +93,6 @@ def select_adaptive_questions(all_questions, batch_size=10, min_questions_per_vo
         else:
             difficulty_range = (3, 4)  # Hard
             print(f"[BKT] Vocab '{vocab}' has high mastery ({mastery:.2f}): selecting hard questions")
-            
         # First select lesson questions (always include)
         lesson_qs = [q for q in vocab_groups[vocab] 
                    if getattr(q, "type", "") == "Lesson" and not getattr(q, "used", False)]

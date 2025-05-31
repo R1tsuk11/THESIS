@@ -18,6 +18,37 @@ def connect_to_mongoDB():
         print(f"Failed to connect to MongoDB: {e}")
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
+def has_review_questions(user_id):
+    """Check if the user has any vocabulary items scheduled for review today"""
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    today = datetime.now().date()
+    
+    if not user or "supermemo" not in user:
+        return False
+        
+    # Check needs_practice vocabulary
+    for vocab, state in user["supermemo"].get("needs_practice", {}).items():
+        if "next_review" in state:
+            try:
+                review_date = datetime.fromisoformat(state["next_review"]).date()
+                if review_date <= today:
+                    return True
+            except (ValueError, TypeError):
+                continue
+
+    # Check mastered vocabulary
+    for vocab, state in user["supermemo"].get("mastered", {}).items():
+        if "next_review" in state:
+            try:
+                review_date = datetime.fromisoformat(state["next_review"]).date()
+                if review_date <= today:
+                    return True
+            except (ValueError, TypeError):
+                continue
+        
+    return False
+
 def get_user_proficiency(user_id):
     """
     Fetches the user's proficiency from the database.
@@ -204,7 +235,16 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
 def prepare_daily_review(user_id, threshold=0.85, max_questions=15):
     print(f"[DEBUG] Preparing daily review for user: {user_id}")
     predictions = get_all_bkt_predictions(user_id)
+    # If there are no predictions, return empty list immediately
+    if not predictions:
+        print("[DEBUG] No BKT predictions found. Skipping review preparation.")
+        return []
+    
     needs_practice, mastered = prioritize_vocabularies(predictions, threshold=threshold)
+    # If there are no vocabularies that need practice or are mastered, return empty list
+    if not (needs_practice or mastered):
+        print("[DEBUG] No vocabulary words to review.")
+        return []
     save_supermemo_schedule(user_id, needs_practice, mastered)
 
     usercol = connect_to_mongoDB()

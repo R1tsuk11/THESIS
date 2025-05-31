@@ -247,10 +247,15 @@ def levels_page(page: ft.Page, image_urls: list):
 
         user_id = page.session.get("user_id")
         user_library = page.session.get("user_library")
-        if not user_library:
-            user_library = None
+        if user_library is None:
+            user_library = []
+            # Also set it in the session so it's available for future use
+            page.session.set("user_library", user_library)
+            # Cache the empty library
+            cache_library_to_temp(user_library)
+            print("[DEBUG] Initialized empty user library")
 
-        if updated["questions"]:
+        if updated and updated["questions"]:
             # Collect new vocabulary words
             new_vocabs = []
             for question in updated["questions"]:

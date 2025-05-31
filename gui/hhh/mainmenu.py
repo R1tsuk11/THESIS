@@ -158,6 +158,7 @@ def clear_all_temp_files():
         "lstm_counter.json",                # LSTM counter
         "bkt_predictions.json",             # BKT predictions
         "bkt_input.csv",                    # BKT input data
+        "temp_lstm_input.json",             # Temporary LSTM input data        
     ]
     
     print("[Cleanup] Clearing all temporary files...")

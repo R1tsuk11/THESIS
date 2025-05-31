@@ -6,7 +6,7 @@ import json
 import sys
 from reviewScore import lesson_score
 import asyncio
-from supermemo_engine import update_supermemo_state, connect_to_mongoDB
+from supermemo_engine import has_review_questions, update_supermemo_state, connect_to_mongoDB
 import threading
 import matplotlib.pyplot as plt  # Import for visualization
 import base64  # Import for encoding visualization images
@@ -1442,6 +1442,79 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
         return ft.Text("Unknown question type.")
 
 def review_session(page, image_urls: list):
+
+        # Check if user has any vocabulary scheduled for review
+    user_id = page.session.get("user_id")
+    if not has_review_questions(user_id):
+        # Show message and offer to return to main menu
+        page.views.clear()
+        page.add(
+            ft.View(
+                "/review",
+                [
+                    ft.AppBar(
+                        title=ft.Text("Daily Review"),
+                        bgcolor="#0078D7",
+                        center_title=True,
+                        color="white",
+                    ),
+                    ft.Column(
+                        [
+                            ft.Container(
+                                content=ft.Icon(
+                                    name=ft.icons.CHECK_CIRCLE_ROUNDED,
+                                    color="#4CAF50",
+                                    size=80,
+                                ),
+                                margin=ft.margin.only(top=40, bottom=20),
+                                alignment=ft.alignment.center
+                            ),
+                            ft.Container(
+                                content=ft.Text(
+                                    "You're all caught up!",
+                                    size=24,
+                                    weight=ft.FontWeight.BOLD,
+                                    color="#0078D7",
+                                    text_align=ft.TextAlign.CENTER
+                                ),
+                                margin=ft.margin.only(bottom=10),
+                                alignment=ft.alignment.center
+                            ),
+                            ft.Container(
+                                content=ft.Text(
+                                    "No vocabulary words are scheduled for review today.",
+                                    size=16,
+                                    color="black",
+                                    text_align=ft.TextAlign.CENTER
+                                ),
+                                margin=ft.margin.only(bottom=40),
+                                alignment=ft.alignment.center
+                            ),
+                            ft.Container(
+                                content=ft.ElevatedButton(
+                                    content=ft.Text("Return to Main Menu", color="white", weight=ft.FontWeight.BOLD, size=16),
+                                    style=ft.ButtonStyle(
+                                        bgcolor={"": "#0078D7"},
+                                        shape=ft.RoundedRectangleBorder(radius=30),
+                                    ),
+                                    width=250,
+                                    height=50,
+                                    on_click=lambda _: page.go("/main-menu")
+                                ),
+                                alignment=ft.alignment.center
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        expand=True
+                    )
+                ],
+                padding=10
+            )
+        )
+        page.update()
+        return
+
     # EXIT ALERT
     dlg_modal = ft.AlertDialog(
         modal=True,
@@ -1518,7 +1591,12 @@ def review_session(page, image_urls: list):
     
     def next_question(e=None):
         current_question_index["value"] += 1
-        progress_value = (current_question_index["value"] + 1) / total_questions
+        # When calculating progress_value, add a safety check:
+        if total_questions > 0:
+            progress_value = (current_question_index["value"] + 1) / total_questions
+        else:
+            progress_value = 1.0  # Default to 100% if no questions
+            
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:

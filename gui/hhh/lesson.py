@@ -424,7 +424,6 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
    # Define image variables
     img1 = None
     img2 = None
-    img3 = None
     
     # Try to get image URLs based on the indices in choices
     try:
@@ -434,10 +433,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                 # Try cloudinary URLs first
                 img1 = m_one_image[int(question_data.choices[0])]
                 img2 = m_one_image[int(question_data.choices[1])]
-                if len(question_data.choices) > 2:
-                    img3 = m_one_image[int(question_data.choices[2])]
-                else:
-                    img3 = None
+
                 print("Using cloudinary URLs for images")
             except (ValueError, IndexError) as e:
                 print(f"Cloudinary URL error: {e}")
@@ -446,7 +442,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             # Fall back to direct URLs in choices
             img1 = question_data.choices[0]
             img2 = question_data.choices[1]
-            img3 = question_data.choices[2] if len(question_data.choices) > 2 else None
+            
     except Exception as e:
         print(f"Error loading images: {e}")
         # Fallback to local files
@@ -476,12 +472,9 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             
         img1 = find_image(question_data.choices[0])
         img2 = find_image(question_data.choices[1])
-        img3 = find_image(question_data.choices[2]) if len(question_data.choices) > 2 else None
         
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
-    if img3:
-        print("Image 3 src:", img3)
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
@@ -502,8 +495,6 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             print("User selected Choice 1")
         elif selected_option["value"] == 1:
             print("User selected Choice 2")
-        elif selected_option["value"] == 2:
-            print("User selected Choice 3")
         else:
             print("User did not select any image")
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
@@ -586,22 +577,6 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         on_click=lambda e: on_option_click(e, 1)
     )
 
-    image_option3 = ft.Container(
-        content=ft.Image(
-            src=img3,
-            width=320,
-            height=180,
-            fit=ft.ImageFit.COVER,
-            border_radius=ft.border_radius.all(10),
-        ),
-        width=320,
-        height=180,
-        border=ft.border.all(1, "#E0E0E0"),
-        border_radius=ft.border_radius.all(10),
-        margin=ft.margin.only(bottom=15),
-        on_click=lambda e: on_option_click(e, 2)
-    )
-
     # Create content for scrollable area
     scrollable_content = ft.Column(
         [
@@ -639,7 +614,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             # Image choices
             ft.Container(
                 content=ft.Column(
-                    [image_option1, image_option2, image_option3],
+                    [image_option1, image_option2],
                     spacing=0
                 )
             ),
@@ -1509,7 +1484,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
     # Set the actual word to recognize
     recognition_target = target_word
     print(f"Will recognize pronunciation for: '{recognition_target}'")
-    accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.75)
+    accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.6)
     
     # Remove the incorrect Page._current reference
     # Instead, we'll use the page reference from the update function context
@@ -2087,7 +2062,8 @@ def lesson_page(page: ft.Page, image_urls: list):
                 return
                 
             # Re-select questions for the remainder of the lesson
-            new_batch = select_adaptive_questions(remaining_questions)
+            # Pass the performance_tracker to adapt difficulty for new vocabs too
+            new_batch = select_adaptive_questions(remaining_questions, user_performance=performance_tracker)
             
             # Replace remaining questions with new batch
             questions[current_index+1:] = new_batch

@@ -12,6 +12,11 @@ MODEL_FILE = "bkt_model.pkl"
 # Modify in bkt_engine_runner.py
 def run_bkt_model(mode="predict"):
     """Run the BKT model with the given mode (fit or predict)"""
+    # Load input data
+    if os.path.exists(INPUT_CSV):
+        df = pd.read_csv(INPUT_CSV)
+    else:
+        df = pd.DataFrame()
     print(f"[bkt_model_runner] Loaded input data: {len(df)} rows")
 
     if os.path.exists('bkt_model.pkl'):
