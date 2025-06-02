@@ -75,77 +75,7 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
     # Dynamic image selection based on vocabulary
     vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
-    
-    # First try to find a matching image in assets folder
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    ASSETS_PATH = os.path.join(BASE_DIR, "assets")
-    
-    # Try multiple file naming patterns for multi-word vocabularies
-    possible_image_paths = []
-    
-    # Clean vocabulary for filenames - strip special chars like ?, !, etc.
-    clean_vocab = re.sub(r'[^\w\s]', '', vocabulary)
-    
-    # First add exact match with different extensions
-    possible_image_paths.extend([
-        os.path.join(ASSETS_PATH, f"{vocabulary}.png"),
-        os.path.join(ASSETS_PATH, f"{vocabulary}.jpg"),
-        # Add cleaned version without special chars
-        os.path.join(ASSETS_PATH, f"{clean_vocab}.png"),
-        os.path.join(ASSETS_PATH, f"{clean_vocab}.jpg"),
-    ])
-    
-    # Add underscore version
-    possible_image_paths.extend([
-        os.path.join(ASSETS_PATH, f"{vocabulary.replace(' ', '_')}.png"),
-        os.path.join(ASSETS_PATH, f"{vocabulary.replace(' ', '_')}.jpg"),
-        # Add cleaned version with underscores
-        os.path.join(ASSETS_PATH, f"{clean_vocab.replace(' ', '_')}.png"),
-        os.path.join(ASSETS_PATH, f"{clean_vocab.replace(' ', '_')}.jpg"),
-    ])
-    
-    # Handle multi-word vocabularies by trying progressive words
-    if ' ' in vocabulary:
-        words = vocabulary.split()
-        # Try first word only
-        possible_image_paths.extend([
-            os.path.join(ASSETS_PATH, f"{words[0]}.png"),
-            os.path.join(ASSETS_PATH, f"{words[0]}.jpg"),
-        ])
-        
-        # Try progressive combinations (e.g., "maupay", "maupay_nga", "maupay_nga_aga")
-        for i in range(2, len(words) + 1):
-            partial_vocab = '_'.join(words[:i])
-            possible_image_paths.extend([
-                os.path.join(ASSETS_PATH, f"{partial_vocab}.png"),
-                os.path.join(ASSETS_PATH, f"{partial_vocab}.jpg"),
-            ])
-            
-            # Also try without special chars for each progressive combination
-            clean_partial = '_'.join([re.sub(r'[^\w\s]', '', w) for w in words[:i]])
-            if clean_partial != partial_vocab:
-                possible_image_paths.extend([
-                    os.path.join(ASSETS_PATH, f"{clean_partial}.png"),
-                    os.path.join(ASSETS_PATH, f"{clean_partial}.jpg"),
-                ])
-    
-    # Add the module vocabulary format as fallback
-    possible_image_paths.append(os.path.join(ASSETS_PATH, f"M1V{question_data.lesson_id}.png"))
-    
-    # Find the first existing image path
-    lessonImg = None
-    for img_path in possible_image_paths:
-        if os.path.exists(img_path):
-            lessonImg = img_path
-            print(f"Found image for '{vocabulary}' at: {img_path}")
-            break
-    
-    # Fallback to default image if none found
-    if not lessonImg:
-        lessonImg = os.path.join(ASSETS_PATH, "default_vocab.png")
-        # If even the default doesn't exist, use a placeholder
-        if not os.path.exists(lessonImg):
-            lessonImg = "THESIS-main/THESIS/gui/hhh/assets/M1V1.png"
+    lessonImg = question_data.image if hasattr(question_data, 'image') else None
     
     print(f"Selected image for '{vocabulary}': {lessonImg}")
     
@@ -395,7 +325,7 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def build_imgpicker_question(page, question_data, progress_value, on_next, on_back):
+def build_imgpicker_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
     m_one_image = [
@@ -479,7 +409,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
 
-        for i, option in enumerate([image_option1, image_option2, image_option3]):
+        for i, option in enumerate([image_option1, image_option2]):
             if i == selected_option["value"]:
                 option.border = ft.border.all(3, "#0078D7")  # Blue border for selected
             else:
@@ -517,7 +447,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            correct_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
@@ -534,7 +465,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            incorrect_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
 
@@ -597,6 +529,17 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                     alignment=ft.MainAxisAlignment.END
                 ),
                 padding=ft.padding.only(top=10, right=10)
+            ),
+
+            ft.Container(
+                content=ft.Text(
+                    "Which image best represents the word?",
+                    color="#0078D7",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER
+                ),
+                margin=ft.margin.only(top=20, bottom=15)
             ),
 
             # Instruction text
@@ -688,7 +631,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             expand=True
         )
 
-def build_wordselect_question(page, question_data, progress_value, on_next, on_back):
+def build_wordselect_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
     options = question_data.choices
     word_to_translate = question_data.word_to_translate
@@ -736,7 +679,8 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            correct_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
@@ -753,7 +697,8 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            incorrect_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
 
@@ -908,7 +853,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         expand=True
     )
 
-def build_tf_question(page, question_data, progress_value, on_next, on_back):
+def build_tf_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
     selected_option = {"value": None}
     correct_answer = question_data.correct_answer
@@ -951,7 +896,8 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            correct_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
@@ -968,9 +914,10 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data  
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            incorrect_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
-                user_library.append(question_data.vocabulary)  
+                user_library.append(question_data.vocabulary)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -1244,7 +1191,7 @@ def build_trivia_question(question_data, progress_value, on_next, on_back):
         expand=True
     )
 
-def build_translate_sentence_question(page, question_data, progress_value, on_next, on_back):
+def build_translate_sentence_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
     options = question_data.choices
     word_to_translate = question_data.question
@@ -1291,7 +1238,8 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            correct_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
         else:
@@ -1308,7 +1256,8 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            incorrect_answers[unique_key] = question_data
             if question_data.vocabulary not in user_library:
                 user_library.append(question_data.vocabulary)
 
@@ -1463,11 +1412,12 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
         expand=True
     )
 
-def build_pronounce_question(question_data, progress_value, on_next, on_back):
+def build_pronounce_question(question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
     question_text = question_data.question
     vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
-    
+    attempts = {"count": 0, "max": 3, "best_accuracy": 0.0}
+
     # Check if the question is specifically asking for a subword (like "aga" from "Maupay nga aga")
     # This is often in the question text: "How do you pronounce 'aga'?"
     target_word = vocabulary
@@ -1524,7 +1474,12 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
     import threading
 
     def start_recording(e):
+        if attempts["count"] >= attempts["max"]:
+            # Don't allow more attempts
+            return
+        attempts["count"] += 1
         button_mic.disabled = True
+        attempts_text.value = f"Attempt {attempts['count']}/{attempts['max']}"
         txt_transcription.value = "Listening..."
         txt_accuracy.value = ""
         pronunciation_tips.visible = False
@@ -1576,6 +1531,24 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             
             # Compare with the specific target word not the full vocabulary
             if predicted_word:
+
+                if predicted_word:
+                    # Track the best accuracy attempt
+                    current_accuracy = confidence if confidence else 0.0
+                if current_accuracy > attempts["best_accuracy"]:
+                    attempts["best_accuracy"] = current_accuracy
+                    
+                # Show attempts remaining
+                remaining = attempts["max"] - attempts["count"]
+                if remaining <= 0:
+                    txt_attempts_remaining.value = "No attempts remaining"
+                    txt_attempts_remaining.color = "red"
+                    # Auto-submit after delay if last attempt
+                    threading.Timer(2.0, lambda: auto_submit_after_attempts(page)).start()
+                else:
+                    txt_attempts_remaining.value = f"{remaining} attempts remaining"
+                    txt_attempts_remaining.color = "gray"
+
                 txt_transcription.value = f"You said: {predicted_word}"
                 
                 # Get any pronunciation errors from the NLTK analysis that was performed
@@ -1665,6 +1638,9 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             
         finally:
             button_mic.disabled = False
+            if attempts["count"] >= attempts["max"]:
+                button_mic.disabled = True
+                button_mic.bgcolor = "grey"
             page.update()
             
             # Clean up temp file
@@ -1673,6 +1649,17 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                     os.remove(recording["file_path"])
             except Exception:
                 pass
+    
+    def auto_submit_after_attempts(page):
+        if attempts["count"] >= attempts["max"]:
+            # Use the best accuracy achieved in any attempt
+            question_data.accuracy = attempts["best_accuracy"]
+            # Highlight the next button to draw attention
+            next_button.style = ft.ButtonStyle(
+                bgcolor={"": "#ff9800"},  # Change to orange to draw attention
+                shape=ft.RoundedRectangleBorder(radius=30),
+            )
+            page.update()
 
     def handle_next(e):
         response_time = time.time() - start_time
@@ -1685,14 +1672,34 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             
         if question_data.accuracy >= accuracy_threshold:
             print(f"Pronunciation accepted with accuracy: {question_data.accuracy:.2f}")
-            correct_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            correct_answers[unique_key] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
         else:
             print(f"Pronunciation below threshold: {question_data.accuracy:.2f}")
-            incorrect_answers[question_data.question] = question_data
+            unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
+            incorrect_answers[unique_key] = question_data
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
             
         if on_next:
             on_next(e)
+
+    attempts_text = ft.Text(f"Attempt 0/{attempts['max']}", size=14, color="grey")
+    txt_attempts_remaining = ft.Text(f"{attempts['max']} attempts remaining", size=14, color="grey")
     
+    next_button = ft.ElevatedButton(
+        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+        style=ft.ButtonStyle(
+            bgcolor={"": "#0078D7"},
+            shape=ft.RoundedRectangleBorder(radius=30),
+        ),
+        width=200,
+        height=50,
+        on_click=handle_next
+    )
+
     # Create the main UI layout
     card_content = ft.Container(
         content=ft.Column(
@@ -1713,6 +1720,15 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                         question_text,
                         text_align=ft.TextAlign.CENTER,
                         size=16,
+                        weight=ft.FontWeight.W_500
+                    ),
+                    margin=ft.margin.only(bottom=10, top=10)
+                ),
+                ft.Container(
+                    ft.Text(
+                        attempts_text,
+                        text_align=ft.TextAlign.CENTER,
+                        size=12,
                         weight=ft.FontWeight.W_500
                     ),
                     margin=ft.margin.only(bottom=10, top=10)
@@ -1752,6 +1768,11 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                     alignment=ft.alignment.center,
                     margin=ft.margin.only(bottom=20)
                 ),
+                ft.Container(
+                    txt_attempts_remaining,
+                    alignment=ft.alignment.center,
+                    margin=ft.margin.only(bottom=20)
+                ),
             ],
             alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1785,16 +1806,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                 ),
                 ft.Container(width=10),
                 ft.Container(
-                    content=ft.ElevatedButton(
-                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
-                        style=ft.ButtonStyle(
-                            bgcolor={"": "#0078D7"},
-                            shape=ft.RoundedRectangleBorder(radius=30),
-                        ),
-                        width=200,
-                        height=50,
-                        on_click=handle_next
-                    )
+                    content= next_button,
                 )
             ],
             alignment=ft.MainAxisAlignment.CENTER
@@ -1855,23 +1867,23 @@ def visualize_pronunciation_feedback(word, phoneme_confidence):
     
     return buf  # Return buffer for display in GUI
 
-def render_question_layout(page, question_data, progress_value, on_next, on_back):
+def render_question_layout(page, question_data, progress_value, on_next, on_back, current_index):
     question_type = question_data.type
     
     if question_type == "Lesson":
         return build_lesson_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Image Picker":
-        return build_imgpicker_question(page, question_data, progress_value, on_next, on_back)
+        return build_imgpicker_question(page, question_data, progress_value, on_next, on_back, current_index)
     elif question_type == "Word Select":
-        return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
+        return build_wordselect_question(page, question_data, progress_value, on_next, on_back, current_index)
     elif question_type == "True or False":
-        return build_tf_question(page, question_data, progress_value, on_next, on_back)
+        return build_tf_question(page, question_data, progress_value, on_next, on_back, current_index)
     elif question_type == "Cultural Trivia":
         return build_trivia_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Pronunciation":
-        return build_pronounce_question(question_data, progress_value, on_next, on_back)
+        return build_pronounce_question(question_data, progress_value, on_next, on_back, current_index)
     elif question_type == "Translate Sentence":
-        return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back)
+        return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back, current_index)
     else:
         return ft.Text("Unknown question type.")
 
@@ -1952,7 +1964,8 @@ def lesson_page(page: ft.Page, image_urls: list):
             question_data=question,
             progress_value=progress_value,
             on_next=next_question,
-            on_back=go_back
+            on_back=go_back,
+            current_index = current_question_index
         )
 
         page.views.append(
@@ -2005,26 +2018,27 @@ def lesson_page(page: ft.Page, image_urls: list):
                 question_types[q_type] = question_types.get(q_type, 0) + 1
             print(f"Questions by type: {question_types}")
             
-            # Fix the weighted questions count to include Pronunciation questions
-            # Use a different variable name to avoid scoping issues
-            corrected_weighted = [q for q in questions if (
-                getattr(q, 'correct_answer', None) is not None or
-                q.type == "Pronunciation"
-            )]
-            
-            print(f"Corrected weighted questions count: {len(corrected_weighted)}")
-            
-            # Show what's been answered
+            # IMPORTANT: Calculate how many questions were actually presented to the user
+            # This accounts for BKT rebatching
+            # Calculate the ideal question count (excluding lessons)
+            total_vocabs = len(set(getattr(q, "vocabulary", "").lower() for q in questions))
+            expected_weighted_count = total_vocabs * 3  # 3 practice questions per vocab
+
+            # Count the actual graded questions presented
+            actually_presented = current_question_index["value"]
+            actually_weighted_count = len([q for q in questions[:actually_presented] if (
+                getattr(q, 'type', "") != "Lesson" and 
+                (getattr(q, 'correct_answer', None) is not None or q.type == "Pronunciation")
+            )])
+
+            print(f"Expected weighted questions count: {expected_weighted_count}")
+            print(f"Actually weighted questions presented: {actually_weighted_count}")
             print(f"Correct answers: {len(correct_answers)}")
             print(f"Incorrect answers: {len(incorrect_answers)}")
-            
-            # Calculate the grade properly using corrected_weighted instead
-            total_answered = len(correct_answers) + len(incorrect_answers)
-            total_weighted = len(corrected_weighted)
-            
-            if total_weighted > 0:
-                grade_percentage = round((len(correct_answers) / total_weighted) * 100, 2)
-                # Ensure grade doesn't exceed 100%
+
+            # Calculate grade based on how many questions were correctly answered out of those presented
+            if actually_weighted_count > 0:
+                grade_percentage = round((len(correct_answers) / actually_weighted_count) * 100, 2)
                 grade_percentage = min(grade_percentage, 100)
             else:
                 grade_percentage = 0
@@ -2061,13 +2075,29 @@ def lesson_page(page: ft.Page, image_urls: list):
                 print("[BKT] No remaining questions to rebatch")
                 return
                 
-            # Re-select questions for the remainder of the lesson
-            # Pass the performance_tracker to adapt difficulty for new vocabs too
-            new_batch = select_adaptive_questions(remaining_questions, user_performance=performance_tracker)
-            
+            # Group questions by vocabulary to preserve structure
+            vocab_groups = {}
+            for q in remaining_questions:
+                q_vocab = getattr(q, "vocabulary", "").lower()
+                if q_vocab not in vocab_groups:
+                    vocab_groups[q_vocab] = []
+                vocab_groups[q_vocab].append(q)
+                
+            # Re-select questions for each vocabulary group
+            new_batch = []
+            for vocab_name, vocab_questions in vocab_groups.items():
+                # Pass relevant performance data for this vocab
+                vocab_performance = {
+                    vocab_name: performance_tracker.get(vocab_name, {"answers": [], "predicted_mastery": 0.4})
+                }
+                
+                # Select adaptive questions for this vocabulary group
+                rebatched_group = select_adaptive_questions(vocab_questions, vocab_performance)
+                new_batch.extend(rebatched_group)
+                
             # Replace remaining questions with new batch
             questions[current_index+1:] = new_batch
-            print(f"[BKT] Rebatched {len(new_batch)} questions")
+            print(f"[BKT] Rebatched {len(new_batch)} questions while preserving lesson structure")
 
     def reset_var():
         current_question_index["value"] = 0

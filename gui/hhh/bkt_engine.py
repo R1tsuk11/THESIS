@@ -11,21 +11,16 @@ import pickle
 
 executor = ThreadPoolExecutor(max_workers=2)
 TEMP_FILE = "temp_bkt_data.json"
+PREDICTION_FILE = "bkt_predictions.json"
 bkt_model = Model()
 bkt_data = []
 bkt_thread = None
 bkt_thread_lock = threading.Lock()
 
 # Add to bkt_engine.py
-def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None):
-    """Get current mastery level with better handling for new vocabulary items
-    
-    Args:
-        vocab: The vocabulary word to get mastery for
-        default_for_new: Default mastery for new words (0.4 is slightly lower than neutral 0.5)
-        user_performance: Optional dict of user performance data to adapt default for new words
-    """
-    state = load_temp_state()
+def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None, user_id=None):
+    """Get current mastery level with better handling for new vocabulary items"""
+    state = load_temp_state(user_id)
     predictions = state.get("predictions", {})
     
     # If the vocab exists in predictions, return its mastery
@@ -57,109 +52,109 @@ def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None):
     
     return default_for_new
 
-def select_adaptive_questions(all_questions, batch_size=10, min_questions_per_vocab=2, user_performance=None):
-    """Select questions adaptively based on current BKT mastery levels and user performance"""
-    print("[BKT] Selecting adaptive question batch...")
-    
-    # Group questions by vocabulary
-    vocab_groups = {}
-    for q in all_questions:
-        vocab = getattr(q, "vocabulary", "").lower()
-        if vocab and vocab not in vocab_groups:
-            vocab_groups[vocab] = []
-        if vocab:
-            vocab_groups[vocab].append(q)
-    
-    # Get current mastery levels for each vocabulary, passing user performance data
-    vocab_masteries = {vocab: get_vocab_mastery(vocab, user_performance=user_performance) 
-                      for vocab in vocab_groups.keys()}
-    
-    # Sort vocabularies by mastery level (focus on lower mastery first)
-    sorted_vocabs = sorted(vocab_masteries.items(), key=lambda x: x[1])
-    
-    # Create adaptive batch
-    batch = []
-    for vocab, mastery in sorted_vocabs:
-        if len(batch) >= batch_size:
-            break
-            
-        # Choose appropriate difficulty based on mastery
-        if mastery < 0.3:
-            difficulty_range = (1, 2)  # Easy to medium
-            print(f"[BKT] Vocab '{vocab}' has low mastery ({mastery:.2f}): selecting easy-medium questions")
-        elif mastery < 0.7:
-            difficulty_range = (2, 3)  # Medium to hard
-            print(f"[BKT] Vocab '{vocab}' has medium mastery ({mastery:.2f}): selecting medium-hard questions")
-        else:
-            difficulty_range = (3, 4)  # Hard
-            print(f"[BKT] Vocab '{vocab}' has high mastery ({mastery:.2f}): selecting hard questions")
-        # First select lesson questions (always include)
-        lesson_qs = [q for q in vocab_groups[vocab] 
-                   if getattr(q, "type", "") == "Lesson" and not getattr(q, "used", False)]
+def select_adaptive_questions(questions_pool, user_performance=None):
+    """
+    Select questions adaptively while preserving lesson structure.
+    Each vocabulary gets 1 lesson + 3 practice questions.
+    Pronunciation questions are always included.
+    """
+    if not questions_pool:
+        return []
         
-        if lesson_qs:
-            lesson_qs[0].predicted_mastery = mastery  # Store the mastery prediction
-            batch.append(lesson_qs[0])
-            lesson_qs[0].used = True
+    # Group questions by vocabulary
+    vocab_questions = {}
+    for q in questions_pool:
+        vocab = getattr(q, "vocabulary", "").lower()
+        if vocab not in vocab_questions:
+            vocab_questions[vocab] = {"lesson": [], "pronunciation": [], "practice": []}
+            
+        if q.type == "Lesson":
+            vocab_questions[vocab]["lesson"].append(q)
+        elif q.type == "Pronunciation":
+            vocab_questions[vocab]["pronunciation"].append(q)
+        else:
+            vocab_questions[vocab]["practice"].append(q)
+    
+    # Build the new batch preserving structure
+    selected_questions = []
+    
+    for vocab, q_sets in vocab_questions.items():
+        # Get mastery for this vocabulary
+        mastery = 0.4  # Default medium mastery
+        if user_performance and vocab in user_performance:
+            actual_performance = user_performance[vocab]
+            # Use predicted mastery or calculate from answers if available
+            if "predicted_mastery" in actual_performance:
+                mastery = actual_performance["predicted_mastery"]
+            elif actual_performance["answers"]:
+                mastery = sum(actual_performance["answers"]) / len(actual_performance["answers"])
+        
+        print(f"[BKT] Vocab '{vocab}' has mastery {mastery:.2f}")
+        
+        # 1. Always add the lesson question
+        if q_sets["lesson"]:
+            selected_questions.append(q_sets["lesson"][0])
             print(f"[BKT] Added lesson question for '{vocab}'")
         
-        # Then select practice questions with appropriate difficulty
-        # Fix: Safely handle None values in difficulty comparison
-        matching_qs = []
-        for q in vocab_groups[vocab]:
-            q_difficulty = getattr(q, "difficulty", 2)  # Default to 2 if not specified
-            # Convert to numeric type if it's not None, otherwise use default
-            if q_difficulty is None:
-                q_difficulty = 2  # Default difficulty
+        # 2. Always add pronunciation question if available
+        if q_sets["pronunciation"]:
+            selected_questions.append(q_sets["pronunciation"][0])
+            print(f"[BKT] Added pronunciation question for '{vocab}'")
+        
+        # 3. Select practice questions based on difficulty and mastery
+        remaining_slots = 3 - (1 if q_sets["pronunciation"] else 0)  # After lesson & pronunciation
+        practice_questions = select_by_difficulty(q_sets["practice"], mastery, remaining_slots)
+        selected_questions.extend(practice_questions)
+        
+        for q in practice_questions:
+            print(f"[BKT] Added {q.type} question for '{vocab}' (difficulty: {getattr(q, 'difficulty', 'N/A')})")
+    
+    print(f"[BKT] Selected {len(selected_questions)} questions adaptively while preserving structure")
+    return selected_questions
+
+def select_by_difficulty(questions, mastery, count):
+    """Select questions with appropriate difficulty based on mastery level."""
+    if not questions or count <= 0:
+        return []
+    
+    # Sort questions by difficulty
+    questions_by_difficulty = {}
+    for q in questions:
+        difficulty = getattr(q, "difficulty", 1)
+        if difficulty not in questions_by_difficulty:
+            questions_by_difficulty[difficulty] = []
+        questions_by_difficulty[difficulty].append(q)
+    
+    # Define target difficulties based on mastery
+    if mastery < 0.3:
+        # Low mastery: select easier questions
+        target_difficulties = [1, 1, 2]
+    elif mastery > 0.7:
+        # High mastery: select harder questions
+        target_difficulties = [2, 3, 3]
+    else:
+        # Medium mastery: select mixed questions
+        target_difficulties = [1, 2, 3]
+    
+    # Select questions with desired difficulties
+    selected = []
+    for difficulty in target_difficulties[:count]:
+        candidates = questions_by_difficulty.get(difficulty, [])
+        if not candidates:  # Fall back to any difficulty if necessary
+            all_questions = [q for difficulty_group in questions_by_difficulty.values() for q in difficulty_group]
+            candidates = all_questions if all_questions else questions
+        
+        if candidates:
+            # Try not to repeat question types
+            question_types = [q.type for q in selected]
+            unique_type_questions = [q for q in candidates if q.type not in question_types]
             
-            # Make sure it's a number
-            try:
-                q_difficulty = float(q_difficulty)
-            except (ValueError, TypeError):
-                q_difficulty = 2  # Default if conversion fails
-                
-            # Now do the comparison safely
-            if (difficulty_range[0] <= q_difficulty <= difficulty_range[1] and 
-                not getattr(q, "used", False) and
-                getattr(q, "type", "") != "Lesson"):
-                matching_qs.append(q)
-        
-        # Sort by difficulty
-        matching_qs.sort(key=lambda q: getattr(q, "difficulty", 2) or 2)  # Safe sorting
-        
-        # Add questions up to the minimum per vocabulary
-        questions_to_add = min(min_questions_per_vocab, len(matching_qs))
-        for i in range(questions_to_add):
-            if len(batch) >= batch_size:
-                break
-            if i < len(matching_qs):
-                matching_qs[i].predicted_mastery = mastery  # Store the mastery prediction
-                batch.append(matching_qs[i])
-                matching_qs[i].used = True
-                print(f"[BKT] Added {getattr(matching_qs[i], 'type', 'unknown')} question for '{vocab}' (difficulty: {getattr(matching_qs[i], 'difficulty', '?')})")
+            if unique_type_questions:
+                selected.append(unique_type_questions[0])
+            else:
+                selected.append(candidates[0])
     
-    # Fill remaining slots with diverse questions if needed
-    if len(batch) < batch_size:
-        remaining = [q for q in all_questions if not getattr(q, "used", False)]
-        # Safe sorting with default value
-        remaining.sort(key=lambda q: getattr(q, "difficulty", 2) or 2)
-        
-        for q in remaining:
-            if len(batch) >= batch_size:
-                break
-            vocab = getattr(q, "vocabulary", "").lower()
-            mastery = vocab_masteries.get(vocab, 0.5)
-            q.predicted_mastery = mastery
-            batch.append(q)
-            q.used = True
-            print(f"[BKT] Added extra question for '{vocab}' to fill batch")
-    
-    # Tag this as a BKT-generated batch
-    for q in batch:
-        q.batch_id = time.time()
-        
-    print(f"[BKT] Selected {len(batch)} questions adaptively")
-    return batch[:batch_size]
+    return selected[:count]
 
 def should_rebatch(performance_data, threshold=0.3):
     """
@@ -219,7 +214,16 @@ def get_user_library():
         print("Temp library cache not found.")
         return None
 
-def load_temp_state():
+# Update at the top of bkt_engine.py
+def get_user_temp_file(user_id=None):
+    """Get user-specific temp file path"""
+    if user_id and str(user_id).lower() != "none":
+        return f"temp_bkt_data_{user_id}.json"
+    return "temp_bkt_data.json"
+
+# Update load_temp_state function
+def load_temp_state(user_id=None):
+    TEMP_FILE = get_user_temp_file(user_id)
     if os.path.exists(TEMP_FILE):
         with open(TEMP_FILE, "r") as f:
             return json.load(f)
@@ -232,12 +236,18 @@ def load_temp_state():
         "slip": 0.1
     }
 
-def get_all_p_masteries():
+# Update save_temp_state function
+def save_temp_state(state, user_id=None):
+    TEMP_FILE = get_user_temp_file(user_id)
+    with open(TEMP_FILE, "w") as f:
+        json.dump(state, f, indent=4)
+
+def get_all_p_masteries(user_id=None):
     """
     Returns a list of p_mastery values (floats) for each vocabulary/skill
     from the latest BKT predictions.
     """
-    state = load_temp_state()
+    state = load_temp_state(user_id)
     predictions = state.get("predictions", {})
     p_masteries = []
     for vocab, pred in predictions.items():
@@ -356,8 +366,9 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
     fit_flag = "fit" if (not fitted or refit_counter >= refit_threshold) else "predict"
             
     try:
-        print("[update_bkt] Launching external BKT model runner...")
-        result = subprocess.run(["python", "bkt_engine_runner.py", fit_flag], capture_output=True, text=True)
+        print(f"[update_bkt] Launching external BKT model runner for user {user_id}...")
+        result = subprocess.run(["python", "bkt_engine_runner.py", fit_flag, str(user_id)], 
+                               capture_output=True, text=True)
         print("[update_bkt] Model runner output:\n", result.stdout)
         if result.stderr:
             print("[update_bkt] Model runner errors:\n", result.stderr)
@@ -367,20 +378,16 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
             refit_counter = 0
     except Exception as e:
         print(f"[update_bkt] Failed to run external model: {e}")
-    except subprocess.TimeoutExpired:
-        print("[update_bkt] ERROR: Model runner timed out.")
-    except Exception as e:
-        print(f"[update_bkt] ERROR: Failed to run BKT model runner: {e}")
-
-    PREDICTION_FILE = "bkt_predictions.json"
+    
+    # Update to use user-specific prediction file
 
     if os.path.exists(PREDICTION_FILE):
         with open(PREDICTION_FILE, "r") as f:
             new_predictions = json.load(f)
-            print("[update_bkt] Predictions loaded from external model.")
+            print(f"[update_bkt] Predictions loaded from external model for user {user_id}.")
             state['predictions'].update(new_predictions)
     else:
-        print("[update_bkt] Prediction file not found after model run.")
+        print(f"[update_bkt] Prediction file {PREDICTION_FILE} not found after model run.")
 
     # Always save the updated state
     state['fitted'] = fitted

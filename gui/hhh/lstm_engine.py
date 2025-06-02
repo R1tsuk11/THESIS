@@ -118,7 +118,7 @@ def predict_proficiency(bkt_sequence):
     return float(pred[0][0])
 
 # At the end of overall_proficiency function
-def overall_proficiency(bkt_sequence, completion_percentage, proficiency_history, user_id=None):
+def overall_proficiency(bkt_sequence, completion_percentage, user_id=None):
     # Your existing code
     
     try:

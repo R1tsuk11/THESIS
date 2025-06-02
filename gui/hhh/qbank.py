@@ -196,7 +196,7 @@ module_1 = {
     {
         "id": 19,
         "type": "Lesson",
-        "question": "Kamusta ka? means 'How are you?' in English, and it is exactly the same as in Filipino.",
+        "question": "'Kamusta ka?' means 'How are you?' in English, and it is exactly the same as in Filipino.",
         "audio_file": "kamusta_ka.mp3",
         "image": "M1V3.png",
         "answer": None,
@@ -390,7 +390,7 @@ module_1 = {
     {
         "id": 37,
         "type": "Lesson",
-        "question": "'Okay la ako' means 'I'm just okay.' 'La' is the Waray word for 'just' or 'only,' same as 'lang' in Filipino.",
+        "question": "'Okay la ako' means 'I am just okay.' 'La' is the Waray word for 'just' or 'only,' same as 'lang' in Filipino.",
         "audio_file": "okay_la_ako.mp3",
         "image": "M1V5.png",
         "answer": None,
@@ -579,7 +579,7 @@ module_1 = {
     {
         "id": 55,
         "type": "Lesson",
-        "question": "Diri / Oo\nDiri means no or not, while Oo means yes.",
+        "question": "'Diri' means 'no' or 'not'.",
         "audio_file": "diri_oo.mp3",
         "image": "M1V7.png",
         "answer": None,
@@ -773,7 +773,7 @@ module_1 = {
     {
         "id": 73,
         "type": "Lesson",
-        "question": "Gab-i means night and is pronounced as 'gab-EE,' with emphasis on the I.",
+        "question": "'Gab-i' means 'night' and is pronounced as 'gab-EE,' with emphasis on the I.",
         "audio_file": "gab-i.mp3",
         "image": "M1V9.png",
         "answer": None,
@@ -965,7 +965,7 @@ module_1 = {
     {
         "id": 91,
         "type": "Lesson",
-        "question": "Ako hi (name) means 'I am (name)' in English. 'Hi' is like 'si' in Filipino and is pronounced 'hee.'",
+        "question": "'Ako hi' (name) means 'I am (name)' in English. 'Hi' is like 'si' in Filipino and is pronounced 'hee.'",
         "audio_file": "ako_hi.mp3",
         "image": "M1V11.png",
         "answer": None,
@@ -1065,7 +1065,7 @@ module_1 = {
     {
         "id": 100,
         "type": "Lesson",
-        "question": "Damo nga salamat means 'Thank you very much!' in English. 'Damo' means 'a lot' or 'many', and 'salamat' means 'thanks'.",
+        "question": "'Damo nga salamat' means 'Thank you very much!' in English. 'Damo' means 'a lot' or 'many', and 'salamat' means 'thanks'.",
         "audio_file": "damo_nga_salamat.mp3",
         "image": "M1V12.png",
         "answer": None,
@@ -1244,7 +1244,7 @@ module_1 = {
     {
         "id": 118,
         "type": "Lesson",
-        "question": "Pasaylo-a ako means 'I'm sorry' or 'Forgive me' in English — 'pasaylo-a' means 'forgive'.",
+        "question": "'Pasaylo-a ako' means 'I am sorry' or 'Forgive me' in English — 'pasaylo-a' means 'forgive'.",
         "audio_file": "pasaylo-a_ako.mp3",
         "image": "M1V14.png",
         "answer": None,
@@ -1344,7 +1344,7 @@ module_1 = {
     {
         "id": 127,
         "type": "Lesson",
-        "question": "Maaram ka mag-English? means 'Do you know how to speak English?' in English. 'Maaram' means 'to know,' used similar to 'Marunong' in Filipino.",
+        "question": "'Maaram ka mag-English?' means 'Do you know how to speak English?' in English. 'Maaram' means 'to know,' used similar to 'Marunong' in Filipino.",
         "audio_file": "maaram_ka_mag-english.mp3",
         "image": "M1V15.png",
         "answer": None,
@@ -1435,7 +1435,7 @@ module_1 = {
     {
         "id": 136,
         "type": "Lesson",
-        "question": "Diri ako makarit ha Waray means 'I'm not good at Waray.' Say this when you're struggling to understand Waray or need to explain your limited ability.",
+        "question": "'Diri ako makarit ha Waray' means 'I am not good at Waray.' Say this when you're struggling to understand Waray or need to explain your limited ability.",
         "audio_file": "diri_ako_makarit_ha_waray.mp3",
         "image": "M1V16.png",
         "answer": None,
@@ -1529,7 +1529,7 @@ module_1 = {
     {
         "id": 145,
         "type": "Lesson",
-        "question": "Ambot means 'I don't know' in Waray, the same as 'ewan' in Filipino. Use it when you're uncertain or don't have an answer.",
+        "question": "'Ambot' means 'I don't know' in Waray, the same as 'ewan' in Filipino. Use it when you're uncertain or don't have an answer.",
         "audio_file": "ambot.mp3",
         "image": "M1V17.png",
         "answer": None,
@@ -1633,7 +1633,7 @@ module_2 = {
     {
         "id": 154,
         "type": "Lesson",
-        "question": "Hain ka? means 'Where are you?' in English. It's used when asking someone where they are. 'Hain' means 'where.'",
+        "question": "'Hain ka?' means 'Where are you?' in English. It's used when asking someone where they are. 'Hain' means 'where.'",
         "audio_file": "hain_ka.mp3",
         "image": "M2V1.png",
         "answer": None,
@@ -1727,7 +1727,7 @@ module_2 = {
     {
         "id": 163,
         "type": "Lesson",
-        "question": "Makain ka? means 'Where are you going?' in English. It's used to ask where someone is headed.",
+        "question": "'Makain ka?' means 'Where are you going?' in English. It's used to ask where someone is headed.",
         "audio_file": "makain_ka.mp3",
         "image": "M2V2.png",
         "answer": None,
@@ -2394,7 +2394,7 @@ module_2 = {
     {
         "id": 226,
         "type": "Lesson",
-        "question": "Hirani means 'near' or 'close' in English, describing something nearby, similar to 'malapit' in Filipino.",
+        "question": "'Hirani' means 'near' or 'close' in English, describing something nearby, similar to 'malapit' in Filipino.",
         "audio_file": "hirani.mp3",
         "image": "M2V9.png",
         "answer": None,
@@ -2587,7 +2587,7 @@ module_2 = {
     {
         "id": 244,
         "type": "Lesson",
-        "question": "Yana means 'now' or 'today' in English. Use it when talking about current time or asking about present schedules.",
+        "question": "'Yana' means 'now' or 'today' in English. Use it when talking about current time or asking about present schedules.",
         "audio_file": "yana.mp3",
         "image": "M2V11.png",
         "answer": None,
@@ -4026,11 +4026,11 @@ module_3 = {
     {
         "id": 379, 
         "type": "Lesson", 
-        "question": "Bayad / Sukli: 'Bayad' means payment and 'sukli' means change.", 
+        "question": "'Bayad / Sukli': 'Bayad' means payment and 'sukli' means change.", 
         "audio_file": "bayad_sukli.mp3", 
         "image": "M3V12.png", 
         "answer": None, 
-        "vocabulary": "Bayad / Sukli", 
+        "vocabulary": "Bayad", 
         "difficulty": None, 
         "response_time": None,
         "english_translation": "Payment / Change"
@@ -4041,7 +4041,7 @@ module_3 = {
         "question": "'Bayad' and 'Sukli' means payment and change respectively.",
         "choices": ["True", "False"],
         "correct_answer": "True",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 1,
         "response_time": 0
     },
@@ -4051,7 +4051,7 @@ module_3 = {
         "question": "Translate this: Here is my payment.",
         "choices": ["Adi it akon bayad.", "Maupay it akon bayad."],
         "correct_answer": "Adi it akon bayad.",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 2,
         "response_time": 0
     },
@@ -4061,7 +4061,7 @@ module_3 = {
         "question": "Sukli translates to 'payment' in English",
         "choices": ["True", "False"],
         "correct_answer": "False",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 2,
         "response_time": 0
     },
@@ -4071,7 +4071,7 @@ module_3 = {
         "question": "You want to give your payment to the vendor. How would you say it?",
         "choices": ["Waray it akon bayad.", "Adi it akon bayad."],
         "correct_answer": "Adi it akon bayad.",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 3,
         "response_time": 0
     },
@@ -4081,7 +4081,7 @@ module_3 = {
         "question": "Bayad translates to 'change' in English",
         "choices": ["True", "False"],
         "correct_answer": "False",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 3,
         "response_time": 0
     },
@@ -4091,7 +4091,7 @@ module_3 = {
         "question": "You have not been given your change. How would you ask the vendor?",
         "choices": ["Hino it akon sukli?", "Hain it akon sukli?"],
         "correct_answer": "Hain it akon sukli?",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 4,
         "response_time": 0
     },
@@ -4101,7 +4101,7 @@ module_3 = {
         "question": "You want to pay for your fare in a public utility transport. How would you say it?",
         "choices": ["Alayon, adi it akon bayad", "Ighatag it akon kwarta"],
         "correct_answer": "Alayon, adi it akon bayad",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 4,
         "response_time": 0
     },
@@ -4111,7 +4111,7 @@ module_3 = {
         "question": "Lino: Tagpira ini?\nVendor: 50 pesos.\nLino: Adi it akon bayad.\n\nLino has been waiting for 2 minutes for his change. How would he ask his change from the vendor?",
         "choices": ["Hain it akon sukli?", "Adi it akon sukli."],
         "correct_answer": "Hain it akon sukli?",
-        "vocabulary": "Bayad / Sukli",
+        "vocabulary": "Bayad",
         "difficulty": 5,
         "response_time": 0
     },
@@ -4921,18 +4921,6 @@ module_4 = {
         "english_translation": "delicious or tasty"
     },
     {
-        "id": 462,
-        "type": "Lesson",
-        "question": "Marasa means delicious or tasty in Waray. Similar to 'masarap' in Filipino, you use it to describe food you really like.",
-        "audio_file": None,
-        "image": None,
-        "answer": None,
-        "vocabulary": "Marasa",
-        "difficulty": None,
-        "response_time": None,
-        "english_translation": "delicious / tasty"
-    },
-    {
         "id": 463,
         "type": "True or False",
         "question": "You say 'marasa' when you feel sleepy.",
@@ -5024,7 +5012,7 @@ module_4 = {
     {
         "id": 471, 
         "type": "Lesson", 
-        "question": "Gusto ko ini tilawon means 'I want to try this'. 'Tilawon' is to try or taste food.", 
+        "question": "'Gusto ko ini tilawon' means 'I want to try this'. 'Tilawon' is to try or taste food.", 
         "audio_file": "gusto_tilawon.mp3", 
         "image": "M4V7.png", 
         "answer": None, 
@@ -5498,7 +5486,7 @@ module_4 = {
     {
         "id": 516, 
         "type": "Lesson", 
-        "question": "'Busog na ak' means 'I'm full already,' similar to 'Busog na ako' in Filipino. It is used to express that you've had enough food.", 
+        "question": "'Busog na ak' means 'I am full already,' similar to 'Busog na ako' in Filipino. It is used to express that you've had enough food.", 
         "audio_file": "busog_na_ak.mp3", 
         "image": "M4V12.png", 
         "answer": None, 
@@ -6365,7 +6353,7 @@ module_5 = {
     {
         "id": 597, 
         "type": "Lesson", 
-        "question": "Mahubya means 'lazy' in English. It describes someone who doesn't want to work or put in effort.", 
+        "question": "'Mahubya' means 'lazy' in English. It describes someone who doesn't want to work or put in effort.", 
         "audio_file": "mahubya.mp3", 
         "image": "M5V6.png", 
         "answer": None, 
@@ -7232,7 +7220,8 @@ pretest_data = [
     {
         "id": 673,
         "type": "Word Select",
-        "question": "Translate to Waray: I'm sorry.",
+        "question": "Translate to Waray",
+        "word_to_translate": "I'm sorry.",
         "choices": ["Waray sapayan.", "Pasaylo-a ako.", "Kalu-oyi ako."],
         "correct_answer": "Pasaylo-a ako.",
         "vocabulary": "pasaylo-a ako",
@@ -7242,7 +7231,8 @@ pretest_data = [
     {
         "id": 674,
         "type": "Word Select",
-        "question": "Translate to Waray: Why?",
+        "question": "Translate to Waray",
+        "word_to_translate": "Why?",
         "choices": ["Kakano?", "Kay ano?", "Paano?"],
         "correct_answer": "Kay ano?",
         "vocabulary": "kay ano",
@@ -7888,6 +7878,7 @@ module_bank = {
     2: module_2,
     3: module_3,
     4: module_4,
+    5: module_5,
 }
 
 achievement_bank = {
@@ -7989,7 +7980,6 @@ word_library = {
     "Ayaw nala": "Nevermind",
     "Adi": "here (when handing)",
     "Bayad": "payment",
-    "Sukli": "change (money)",
     "Mayda": "there is/have",
     "Amo la": "That's all",
     "Pwede tumawad": "Can I ask for a discount?",

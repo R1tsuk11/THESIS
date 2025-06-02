@@ -192,6 +192,7 @@ class Question:
         self.difficulty = question_data.get("difficulty")
         self.response_time = question_data.get("response_time")
         self.word_to_translate = question_data.get("word_to_translate")
+        self.image = question_data.get("image", None) 
 
     def to_dict(self):
         return {
@@ -203,7 +204,8 @@ class Question:
             "correct_answer": self.correct_answer,
             "difficulty": self.difficulty,
             "response_time": self.response_time,
-            "word_to_translate": self.word_to_translate
+            "word_to_translate": self.word_to_translate,
+            "image": self.image
         }
 
 class Level:  # Level class

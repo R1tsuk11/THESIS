@@ -12,19 +12,106 @@ uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answers):
     update_bkt(user_id, correct_answers, incorrect_answers)
 
-    # 1. Gather bkt_sequence and completion_percentage
-    bkt_sequence = get_all_p_masteries()  # List of floats
-    print("[DEBUG] get_all_p_masteries() returns:", bkt_sequence)
-    completion = compute_completion(page)  # Float (0-100 or 0-1)
-
-    # 2. Save bkt_sequence and completion to temp file
+    # 1. Gather current bkt mastery values
+    current_bkt_sequence = get_all_p_masteries()  # Current mastery values as list
+    print(f"[DEBUG] Current BKT mastery sequence: {current_bkt_sequence}")
+    
+    # 2. Connect to database and get historical BKT data
+    historical_mastery_values = []
+    try:
+        arami = pymongo.MongoClient(uri)["arami"]
+        users_col = arami["users"]
+        
+        # Get user document
+        user_doc = users_col.find_one({"user_id": int(user_id)})
+        
+        if user_doc and "bkt_data" in user_doc:
+            print(f"[DEBUG] Found bkt_data in user document")
+            
+            # Extract predictions from bkt_data
+            bkt_data = user_doc["bkt_data"]
+            
+            # If bkt_data is a dictionary with predictions key
+            if isinstance(bkt_data, dict) and "predictions" in bkt_data:
+                predictions = bkt_data["predictions"]
+                print(f"[DEBUG] Found {len(predictions)} vocabulary predictions")
+                
+                # Extract p_mastery values from each vocabulary's prediction
+                # Sort by vocabulary name to ensure consistent order
+                sorted_vocabs = sorted(predictions.keys())
+                historical_mastery_sequence = [float(predictions[vocab].get("p_mastery", 0.5)) 
+                                             for vocab in sorted_vocabs 
+                                             if "p_mastery" in predictions[vocab]]
+                
+                if historical_mastery_sequence:
+                    historical_mastery_values.append(historical_mastery_sequence)
+                    print(f"[DEBUG] Extracted mastery sequence: {historical_mastery_sequence}")
+            
+            # If bkt_data is a list of historical prediction objects
+            elif isinstance(bkt_data, list):
+                for historical_data in bkt_data:
+                    if isinstance(historical_data, dict) and "predictions" in historical_data:
+                        predictions = historical_data["predictions"]
+                        
+                        # Extract mastery values, maintaining vocabulary order
+                        sorted_vocabs = sorted(predictions.keys())
+                        mastery_sequence = [float(predictions[vocab].get("p_mastery", 0.5)) 
+                                         for vocab in sorted_vocabs 
+                                         if "p_mastery" in predictions[vocab]]
+                        
+                        if mastery_sequence:
+                            historical_mastery_values.append(mastery_sequence)
+                    
+                    # If the historical data itself is just a list of mastery values
+                    elif isinstance(historical_data, list) and all(isinstance(x, (int, float)) for x in historical_data):
+                        historical_mastery_values.append(historical_data)
+            
+            print(f"[DEBUG] Found {len(historical_mastery_values)} historical mastery sequences")
+    except Exception as e:
+        print(f"[DEBUG] Error retrieving historical BKT data: {e}")
+    
+    # 3. Save all BKT data to the temp file for LSTM processing
     with open("temp_lstm_input.json", "w") as f:
         json.dump({
-            "bkt_sequence": bkt_sequence,
+            "bkt_sequence": current_bkt_sequence,
+            "historical_sequences": historical_mastery_values,
             "completion_percentage": completion
         }, f)
+    
+    # 4. Also save current BKT sequence back to user document
+    try:
+        if current_bkt_sequence:
+            arami = pymongo.MongoClient(uri)["arami"]
+            users_col = arami["users"]
+            
+            # Get current predictions from bkt_predictions.json
+            with open('bkt_predictions.json', 'r') as f:
+                current_predictions = json.load(f)
+            
+            # Update user document with latest BKT predictions
+            user_doc = users_col.find_one({"user_id": int(user_id)})
+            if user_doc:
+                # Create bkt_data structure if it doesn't exist
+                if "bkt_data" not in user_doc:
+                    user_doc["bkt_data"] = {}
+                
+                # Set the predictions
+                if isinstance(user_doc["bkt_data"], dict):
+                    user_doc["bkt_data"]["predictions"] = current_predictions
+                else:
+                    # If bkt_data is not a dict, reset it
+                    user_doc["bkt_data"] = {"predictions": current_predictions}
+                
+                # Update the document in the database
+                users_col.update_one(
+                    {"user_id": int(user_id)},
+                    {"$set": {"bkt_data": user_doc["bkt_data"]}}
+                )
+                print("[DEBUG] Updated BKT predictions in user document")
+    except Exception as e:
+        print(f"[DEBUG] Error saving BKT predictions to user document: {e}")
 
-    # 3. Ensure proficiency history file exists
+    # 5. Ensure proficiency history file exists
     prof_history_path = "temp_prof_history.json"
     if not os.path.exists(prof_history_path):
         arami = pymongo.MongoClient(uri)["arami"]
@@ -39,7 +126,7 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
             with open(prof_history_path, "w") as f:
                 json.dump([{"proficiency": proficiency}], f)
 
-    # 4. Run LSTM in subprocess
+    # 6. Run LSTM in subprocess
     result = subprocess.run(
         ["python", "lstm_engine_runner.py", "temp_lstm_input.json", prof_history_path, str(user_id)],
         capture_output=True, text=True

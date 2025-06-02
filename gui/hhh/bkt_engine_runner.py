@@ -7,11 +7,24 @@ import sys
 
 INPUT_CSV = "bkt_input.csv"
 OUTPUT_JSON = "bkt_predictions.json"
-MODEL_FILE = "bkt_model.pkl"
+MODEL_FILE = "bkt_model.pkl"  # Default model path
 
-# Modify in bkt_engine_runner.py
-def run_bkt_model(mode="predict"):
-    """Run the BKT model with the given mode (fit or predict)"""
+# Add function to get user-specific model path
+def get_user_bkt_model_path(user_id=None):
+    """Get user-specific BKT model path"""
+    if user_id and str(user_id).lower() != "none":
+        return f"bkt_model_{user_id}.pkl"
+    return "bkt_model.pkl"
+
+# Modify run_bkt_model to accept user_id
+def run_bkt_model(mode="predict", user_id=None):
+    """Run the BKT model with the given mode (fit or predict) for specific user"""
+    # Set user-specific model and prediction paths
+    global MODEL_FILE
+    MODEL_FILE = get_user_bkt_model_path(user_id)
+    
+    print(f"[bkt_model_runner] Running for user_id: {user_id} with model path: {MODEL_FILE}")
+    
     # Load input data
     if os.path.exists(INPUT_CSV):
         df = pd.read_csv(INPUT_CSV)
@@ -19,21 +32,21 @@ def run_bkt_model(mode="predict"):
         df = pd.DataFrame()
     print(f"[bkt_model_runner] Loaded input data: {len(df)} rows")
 
-    if os.path.exists('bkt_model.pkl'):
-        with open('bkt_model.pkl', 'rb') as f:
+    if os.path.exists(MODEL_FILE):
+        with open(MODEL_FILE, 'rb') as f:
             model = pickle.load(f)
-            print("[bkt_model_runner] Loaded model from disk.")
+            print(f"[bkt_model_runner] Loaded model from {MODEL_FILE}")
     else:
         model = Model()
-        print("[bkt_model_runner] Created new model.")
+        print(f"[bkt_model_runner] Created new model for user {user_id}")
         mode = "fit"  # Force fit for new model
         
     if mode == "fit":
         try:
             model.fit(data=df)
-            with open('bkt_model.pkl', 'wb') as f:
+            with open(MODEL_FILE, 'wb') as f:
                 pickle.dump(model, f)
-            print("[bkt_model_runner] Model fitted and saved to disk.")
+            print(f"[bkt_model_runner] Model fitted and saved to {MODEL_FILE}")
         except Exception as e:
             print(f"[bkt_model_runner] Error during fit: {e}")
             
@@ -69,22 +82,30 @@ def run_bkt_model(mode="predict"):
                         'correct': int(last_row.get('correct', 0))
                     }
                     
-            # Save predictions to file
-            with open('bkt_predictions.json', 'w') as f:
+            # Save predictions to user-specific file
+            with open(OUTPUT_JSON, 'w') as f:
                 json.dump(predictions, f, indent=2)
-            print("[bkt_model_runner] Predictions saved to 'bkt_predictions.json'.")
+            print(f"[bkt_model_runner] Predictions saved to '{OUTPUT_JSON}'")
         else:
-            print("[bkt_model_runner] No data to make predictions.")
+            print(f"[bkt_model_runner] No data to make predictions for user {user_id}")
     except Exception as e:
         print(f"[bkt_model_runner] Error during prediction: {e}")
         
     # Clean up input file
-    if os.path.exists("bkt_input.csv"):
-        os.remove("bkt_input.csv")
-        print("[bkt_model_runner] Deleted existing 'bkt_input.csv'.")
+    if os.path.exists(INPUT_CSV):
+        os.remove(INPUT_CSV)
+        print(f"[bkt_model_runner] Deleted existing '{INPUT_CSV}'")
 
 if __name__ == "__main__":
-    fit = True
-    if len(sys.argv) > 1 and sys.argv[1] == "predict":
-        fit = False
-    run_bkt_model(fit)
+    # Parse command line arguments
+    mode = "predict"
+    user_id = None
+    
+    if len(sys.argv) > 1:
+        mode = sys.argv[1]
+    
+    if len(sys.argv) > 2:
+        user_id = sys.argv[2]
+        
+    print(f"[bkt_model_runner] Running in {mode} mode for user {user_id}")
+    run_bkt_model(mode == "fit", user_id)
