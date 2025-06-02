@@ -55,6 +55,11 @@ def extract_vocabulary_from_qbank():
     
     # Process all modules
     all_modules = [module_1, module_2, module_3, module_4, module_5]
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--small":
+        # Just use 5 vocabulary items for a quick test
+        all_modules = [module_1]  # Just use first module
+        print("USING MINIMAL DATASET FOR TESTING")
     
     # Create progress bar for module processing
     module_pbar = tqdm(enumerate(all_modules, 1), total=len(all_modules),
@@ -120,7 +125,7 @@ def create_synthetic_data_from_qbank():
         correct_prob = 1.0 - (difficulty * 0.5)  # Harder items have lower probability
         
         # Generate attempts with a learning curve
-        attempts = 10  # Number of synthetic attempts per vocab
+        attempts = 5  # Number of synthetic attempts per vocab
         for i in range(attempts):
             # Learning curve: probability increases as student "learns"
             learning_curve = min(1.0, correct_prob + (i * 0.08))
@@ -155,8 +160,7 @@ def create_base_bkt_model():
     """Create a pre-trained BKT model based on qbank vocabulary"""
     try:
         import time
-        import numpy as np
-        from datetime import datetime, timedelta
+        import threading
         
         # Generate synthetic data from qbank
         synthetic_data = create_synthetic_data_from_qbank()
@@ -165,6 +169,22 @@ def create_base_bkt_model():
         print("Creating training DataFrame...")
         df = pd.DataFrame(synthetic_data)
         
+        # IMPORTANT: Reduce dataset size to prevent hanging
+        print(f"Original dataset size: {len(df)} rows")
+        
+        # Sample fewer examples per vocabulary item
+        skills = df['skill_name'].unique()
+        sampled_df = pd.DataFrame()
+        for skill in tqdm(skills, desc="Sampling data", ncols=100):
+            skill_df = df[df['skill_name'] == skill]
+            # Take at most 5 examples per skill, ensuring a mix of correct/incorrect
+            correct_samples = skill_df[skill_df['correct'] == 1].sample(min(3, sum(skill_df['correct'])))
+            incorrect_samples = skill_df[skill_df['correct'] == 0].sample(min(2, sum(skill_df['correct'] == 0)))
+            sampled_df = pd.concat([sampled_df, correct_samples, incorrect_samples])
+            
+        df = sampled_df
+        print(f"Reduced dataset size: {len(df)} rows")
+        
         # Preprocess the data
         df = preprocess_training_data(df)
         
@@ -172,24 +192,81 @@ def create_base_bkt_model():
         print("Training BKT model with synthetic data...")
         base_model = Model()
         
-        # Record start time for estimation
-        start_time = time.time()
+        # Set timeout parameters
+        max_fitting_time = 300  # seconds
+        fitting_complete = threading.Event()
+        fitting_error = [None]  # Use list to store error from thread
         
-        # Create a progress indicator with time estimation
-        total_steps = 20  # Simulated steps for visualization
-        print("Fitting model:")
+        # Thread for model fitting
+        def fit_model():
+            try:
+                base_model.fit(data=df)
+                fitting_complete.set()
+            except Exception as e:
+                fitting_error[0] = e
+                fitting_complete.set()
         
-        # Display initial progress
-        print("0% complete | Estimated time: calculating...")
+        # Thread for progress display
+        def show_progress():
+            start_time = time.time()
+            progress_chars = "|/-\\"
+            i = 0
+            
+            print(f"Starting model fitting with {max_fitting_time}s timeout...")
+            
+            while not fitting_complete.is_set():
+                elapsed = time.time() - start_time
+                if elapsed > max_fitting_time:
+                    print("\nFitting timeout reached after", int(elapsed), "seconds")
+                    return
+                    
+                print(f"\rFitting model: {progress_chars[i % 4]} (elapsed: {int(elapsed)}s)", end="", flush=True)
+                time.sleep(0.5)
+                i += 1
+                
+            # Show final time when complete
+            print(f"\rFitting model: Complete! Total time: {time.time() - start_time:.1f}s")
         
-        # Perform the actual model fitting (only happens once)
-        base_model.fit(data=df)
+        # Start the threads
+        fit_thread = threading.Thread(target=fit_model)
+        fit_thread.daemon = True
+        fit_thread.start()
         
-        # Calculate actual training time
-        training_time = time.time() - start_time
+        progress_thread = threading.Thread(target=show_progress)
+        progress_thread.daemon = True
+        progress_thread.start()
         
-        # Show completed progress with total time
-        print(f"100% complete | Total time: {training_time:.1f} seconds")
+        # Wait for fitting to complete or timeout
+        fit_thread.join(max_fitting_time)
+        
+        # Handle timeout or completion
+        if fit_thread.is_alive():
+            print("\nModel fitting is taking too long. Trying with a smaller dataset...")
+            
+            # Try again with an even smaller dataset
+            small_df = pd.DataFrame()
+            for skill in df['skill_name'].unique():
+                # Just take 2 examples per skill
+                skill_samples = df[df['skill_name'] == skill].sample(min(2, sum(df['skill_name'] == skill)))
+                small_df = pd.concat([small_df, skill_samples])
+            
+            df = small_df
+            print(f"Emergency reduced dataset: {len(df)} rows")
+            
+            # Try fitting again (with basic progress display)
+            start_time = time.time()
+            print("Restarting fit with smaller dataset...")
+            base_model.fit(data=df)
+            print(f"Completed in {time.time() - start_time:.1f}s")
+        else:
+            # Check if there was an error
+            if fitting_error[0] is not None:
+                raise fitting_error[0]
+        
+        # Wait for progress thread to finish
+        fitting_complete.set()
+        if progress_thread.is_alive():
+            progress_thread.join(2)
         
         # Save the model
         print("Saving model and data files...")
@@ -206,33 +283,7 @@ def create_base_bkt_model():
         unique_vocabs = df['skill_name'].unique()
         test_vocabs = random.sample(list(unique_vocabs), min(5, len(unique_vocabs)))
         
-        # Add time estimation to prediction testing
-        pred_start_time = time.time()
-        total_tests = len(test_vocabs)
-        
-        for i, vocab in enumerate(test_vocabs):
-            # Calculate prediction progress and time estimation
-            progress_pct = (i / total_tests) * 100
-            elapsed = time.time() - pred_start_time
-            if i > 0:
-                estimated_total = elapsed / i * total_tests
-                remaining = estimated_total - elapsed
-                eta = datetime.now() + timedelta(seconds=remaining)
-                time_str = f"ETA: {eta.strftime('%H:%M:%S')}"
-            else:
-                time_str = "Calculating ETA..."
-                
-            # Display progress
-            print(f"\rTesting: {progress_pct:.1f}% | {time_str}", end="")
-            
-            # Make prediction
-            test_data = df[df['skill_name'] == vocab].iloc[-1:].copy()
-            prediction = base_model.predict(test_data)
-            mastery = float(prediction.iloc[-1].get('state_predictions', 0.5))
-        
-        # Final output
-        print("\nPrediction results:")
-        for i, vocab in enumerate(test_vocabs):
+        for vocab in test_vocabs:
             test_data = df[df['skill_name'] == vocab].iloc[-1:].copy()
             prediction = base_model.predict(test_data)
             mastery = float(prediction.iloc[-1].get('state_predictions', 0.5))
@@ -241,7 +292,7 @@ def create_base_bkt_model():
         return base_model
         
     except Exception as e:
-        print(f"Error during model training: {str(e)}")
+        print(f"\nError during model training: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
