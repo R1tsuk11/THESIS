@@ -47,7 +47,7 @@ def check_user(username):
 def goto_proficiency(page, user_id):
     """Navigates to the proficiency setup page with username as a route parameter."""
     page.session.set("user_id", user_id)  # Store user ID in session
-    route = "/setup-proficiency"
+    route = "/pretest-intro"
     page.go(route)
     page.update()
     
