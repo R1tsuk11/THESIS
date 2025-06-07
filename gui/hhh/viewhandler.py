@@ -2,7 +2,7 @@ import flet as ft
 import asyncio
 from login import login_page
 from register import register_page
-from setUpProficiency import set_up_proficiency_page
+from setUpProficiency import set_up_proficiency_page, pretest_landing_page, pretest_score
 from setUpTime import set_up_time_page
 from mainmenu import main_menu_page
 from levels import levels_page
@@ -203,6 +203,10 @@ async def main(page: ft.Page):
             acknowledgements_page(page)
         elif page.route == "/achievements":
             achievement_page(page, image_urls)
+        elif page.route == "/pretest-intro":
+            pretest_landing_page(page, image_urls)
+        elif page.route == "/pretest-score":
+            pretest_score(page, image_urls)
         else:
             login_page(page, image_urls)  # Default to login page
 
