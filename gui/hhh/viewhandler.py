@@ -14,6 +14,84 @@ from settings import settings_page, about_page, acknowledgements_page
 from achievements import achievement_page
 from flet import Theme, PageTransitionsTheme, PageTransitionTheme
 
+class CustomBKTPredictor:
+    """Custom BKT predictor that directly uses the vocabulary parameters"""
+    
+    def __init__(self, vocab_parameters):
+        """Initialize with vocabulary parameters"""
+        self.vocab_parameters = vocab_parameters
+    
+    def predict(self, vocab, correct_history=None):
+        """
+        Predict knowledge state using BKT algorithm
+        
+        Parameters:
+        - vocab: The vocabulary item to predict mastery for
+        - correct_history: List of 1s and 0s representing correct/incorrect responses
+                          (if None, returns prior probability)
+        
+        Returns:
+        - Mastery probability (0-1)
+        """
+        if vocab not in self.vocab_parameters:
+            return 0.5  # Default for unknown vocab
+        
+        params = self.vocab_parameters[vocab]
+        learn = params.get('learn', 0.15)    # Learning probability
+        guess = params.get('guess', 0.25)    # Guess probability
+        slip = params.get('slip', 0.1)       # Slip probability
+        prior = params.get('prior', 0.5)     # Prior probability of mastery
+        
+        # If no history provided, return prior
+        if correct_history is None or len(correct_history) == 0:
+            return prior
+            
+        # Start with prior probability
+        mastery = prior
+        
+        # Update for each observation in history
+        for is_correct in correct_history:
+            # Step 1: Update based on observation
+            if is_correct:
+                # P(mastered | correct)
+                mastery = (mastery * (1 - slip)) / (mastery * (1 - slip) + (1 - mastery) * guess)
+            else:
+                # P(mastered | incorrect)
+                mastery = (mastery * slip) / (mastery * slip + (1 - mastery) * (1 - guess))
+                
+            # Step 2: Account for learning
+            mastery = mastery + (1 - mastery) * learn
+            
+        return mastery
+    
+    def predict_from_df(self, df):
+        """
+        Make predictions from a pandas DataFrame (similar to PyBKT interface)
+        
+        Parameters:
+        - df: DataFrame with 'skill_name' and 'correct' columns
+        
+        Returns:
+        - DataFrame with predictions added
+        """
+        result_df = df.copy()
+        result_df['state_predictions'] = 0.0
+        
+        # Group by skill and user
+        groups = df.groupby(['skill_name', 'user_id'])
+        
+        for (vocab, user), group in groups:
+            # Get history of correct/incorrect for this user and skill
+            history = group['correct'].astype(int).tolist()
+            
+            # Calculate probability for increasing prefixes of history
+            for i in range(len(history)):
+                prefix = history[:i+1]
+                prob = self.predict(vocab, prefix)
+                result_df.loc[group.index[i], 'state_predictions'] = prob
+                
+        return result_df
+
 async def main(page: ft.Page):
     page.title = "User Authentication"
     page.bgcolor = "#FFFFFF"

@@ -1,0 +1,96 @@
+user_id,skill_name,correct,guess,slip,prior
+synthetic,maupay nga aga,1,0.2,0.1,0.5
+synthetic,maupay nga aga,1,0.2,0.1,0.5
+synthetic,maupay nga aga,1,0.2,0.1,0.5
+synthetic,maupay nga aga,1,0.2,0.1,0.5
+synthetic,maupay nga aga,1,0.2,0.1,0.5
+synthetic,gihapon,1,0.2,0.1,0.5
+synthetic,gihapon,1,0.2,0.1,0.5
+synthetic,gihapon,1,0.2,0.1,0.5
+synthetic,gihapon,1,0.2,0.1,0.5
+synthetic,gihapon,1,0.2,0.1,0.5
+synthetic,kamusta ka,1,0.2,0.1,0.5
+synthetic,kamusta ka,1,0.2,0.1,0.5
+synthetic,kamusta ka,1,0.2,0.1,0.5
+synthetic,kamusta ka,1,0.2,0.1,0.5
+synthetic,kamusta ka,1,0.2,0.1,0.5
+synthetic,ikaw,1,0.2,0.1,0.5
+synthetic,ikaw,1,0.2,0.1,0.5
+synthetic,ikaw,1,0.2,0.1,0.5
+synthetic,ikaw,1,0.2,0.1,0.5
+synthetic,ikaw,1,0.2,0.1,0.5
+synthetic,okay la ako,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,okay la ako,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,okay la ako,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,okay la ako,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,okay la ako,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,maupay nga kulop,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,maupay nga kulop,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,maupay nga kulop,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,maupay nga kulop,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,maupay nga kulop,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,kulop,1,0.26,0.13,0.5
+synthetic,kulop,1,0.26,0.13,0.5
+synthetic,kulop,1,0.26,0.13,0.5
+synthetic,kulop,1,0.26,0.13,0.5
+synthetic,kulop,1,0.26,0.13,0.5
+synthetic,diri,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,diri,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,diri,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,diri,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,diri,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,it,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,it,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,it,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,it,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,it,1,0.21000000000000002,0.10500000000000001,0.5
+synthetic,gab-i,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,gab-i,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,gab-i,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,gab-i,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,gab-i,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ano it imo ngaran?,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ano it imo ngaran?,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ano it imo ngaran?,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ano it imo ngaran?,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ano it imo ngaran?,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,imo ngaran,0,0.28,0.14,0.5
+synthetic,imo ngaran,0,0.28,0.14,0.5
+synthetic,imo ngaran,1,0.28,0.14,0.5
+synthetic,imo ngaran,1,0.28,0.14,0.5
+synthetic,imo ngaran,1,0.28,0.14,0.5
+synthetic,ako hi,0,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ako hi,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ako hi,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ako hi,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,ako hi,1,0.22000000000000003,0.11000000000000001,0.5
+synthetic,damo nga salamat,1,0.23,0.115,0.5
+synthetic,damo nga salamat,1,0.23,0.115,0.5
+synthetic,damo nga salamat,1,0.23,0.115,0.5
+synthetic,damo nga salamat,1,0.23,0.115,0.5
+synthetic,damo nga salamat,1,0.23,0.115,0.5
+synthetic,waray sapayan,1,0.23,0.115,0.5
+synthetic,waray sapayan,1,0.23,0.115,0.5
+synthetic,waray sapayan,1,0.23,0.115,0.5
+synthetic,waray sapayan,1,0.23,0.115,0.5
+synthetic,waray sapayan,1,0.23,0.115,0.5
+synthetic,pasaylo-a ako,1,0.23,0.115,0.5
+synthetic,pasaylo-a ako,1,0.23,0.115,0.5
+synthetic,pasaylo-a ako,1,0.23,0.115,0.5
+synthetic,pasaylo-a ako,1,0.23,0.115,0.5
+synthetic,pasaylo-a ako,1,0.23,0.115,0.5
+synthetic,maaram ka mag-english,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,maaram ka mag-english,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,maaram ka mag-english,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,maaram ka mag-english,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,maaram ka mag-english,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,diri ako makarit ha waray,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,diri ako makarit ha waray,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,diri ako makarit ha waray,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,diri ako makarit ha waray,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,diri ako makarit ha waray,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,ambot,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,ambot,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,ambot,0,0.24000000000000002,0.12000000000000001,0.5
+synthetic,ambot,1,0.24000000000000002,0.12000000000000001,0.5
+synthetic,ambot,1,0.24000000000000002,0.12000000000000001,0.5

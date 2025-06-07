@@ -9,6 +9,8 @@ import time
 import subprocess
 import pickle
 
+from mainmenu import connect_to_mongoDB
+
 executor = ThreadPoolExecutor(max_workers=2)
 TEMP_FILE = "temp_bkt_data.json"
 PREDICTION_FILE = "bkt_predictions.json"
@@ -17,9 +19,167 @@ bkt_data = []
 bkt_thread = None
 bkt_thread_lock = threading.Lock()
 
+class CustomBKTPredictor:
+    """Custom BKT predictor that directly uses the vocabulary parameters"""
+    
+    def __init__(self, vocab_parameters):
+        """Initialize with vocabulary parameters"""
+        self.vocab_parameters = vocab_parameters
+    
+    def predict(self, vocab, correct_history=None):
+        """
+        Predict knowledge state using BKT algorithm
+        
+        Parameters:
+        - vocab: The vocabulary item to predict mastery for
+        - correct_history: List of 1s and 0s representing correct/incorrect responses
+                          (if None, returns prior probability)
+        
+        Returns:
+        - Mastery probability (0-1)
+        """
+        if vocab not in self.vocab_parameters:
+            return 0.5  # Default for unknown vocab
+        
+        params = self.vocab_parameters[vocab]
+        learn = params.get('learn', 0.15)    # Learning probability
+        guess = params.get('guess', 0.25)    # Guess probability
+        slip = params.get('slip', 0.1)       # Slip probability
+        prior = params.get('prior', 0.5)     # Prior probability of mastery
+        
+        # If no history provided, return prior
+        if correct_history is None or len(correct_history) == 0:
+            return prior
+            
+        # Start with prior probability
+        mastery = prior
+        
+        # Update for each observation in history
+        for is_correct in correct_history:
+            # Step 1: Update based on observation
+            if is_correct:
+                # P(mastered | correct)
+                mastery = (mastery * (1 - slip)) / (mastery * (1 - slip) + (1 - mastery) * guess)
+            else:
+                # P(mastered | incorrect)
+                mastery = (mastery * slip) / (mastery * slip + (1 - mastery) * (1 - guess))
+                
+            # Step 2: Account for learning
+            mastery = mastery + (1 - mastery) * learn
+            
+        return mastery
+    
+    def predict_from_df(self, df):
+        """
+        Make predictions from a pandas DataFrame (similar to PyBKT interface)
+        
+        Parameters:
+        - df: DataFrame with 'skill_name' and 'correct' columns
+        
+        Returns:
+        - DataFrame with predictions added
+        """
+        result_df = df.copy()
+        result_df['state_predictions'] = 0.0
+        
+        # Group by skill and user
+        groups = df.groupby(['skill_name', 'user_id'])
+        
+        for (vocab, user), group in groups:
+            # Get history of correct/incorrect for this user and skill
+            history = group['correct'].astype(int).tolist()
+            
+            # Calculate probability for increasing prefixes of history
+            for i in range(len(history)):
+                prefix = history[:i+1]
+                prob = self.predict(vocab, prefix)
+                result_df.loc[group.index[i], 'state_predictions'] = prob
+                
+        return result_df
+
+def get_custom_bkt_path(user_id=None):
+    """Get path for user-specific custom BKT predictor"""
+    if user_id and str(user_id).lower() != "none":
+        return f"custom_bkt_predictor_{user_id}.pkl"
+    return "custom_bkt_predictor.pkl"
+
+def load_custom_bkt(user_id=None):
+    """Load the custom BKT predictor for a specific user"""
+    model_path = get_custom_bkt_path(user_id)
+    try:
+        if os.path.exists(model_path):
+            print(f"[BKT] Loading custom predictor for user {user_id}")
+            
+            # Fix the pickle issue by loading the parameters and creating a new object
+            with open(model_path, "rb") as f:
+                try:
+                    # Try normal loading first
+                    return pickle.load(f)
+                except AttributeError:
+                    # If that fails, load raw data and recreate object
+                    f.seek(0)  # Go back to start of file
+                    raw_data = pickle.load(f)
+                    
+                    # Extract parameters if possible
+                    if hasattr(raw_data, 'vocab_parameters'):
+                        vocab_params = raw_data.vocab_parameters
+                        # Create a new CustomBKTPredictor with those parameters
+                        return CustomBKTPredictor(vocab_params)
+                    else:
+                        print("[BKT] Could not extract parameters from predictor")
+                        return None
+        else:
+            print(f"[BKT] No custom predictor found for user {user_id}, checking default")
+            # Try to load the default model
+            if os.path.exists("custom_bkt_predictor.pkl"):
+                with open("custom_bkt_predictor.pkl", "rb") as f:
+                    predictor = pickle.load(f)
+                    # Save as user-specific model
+                    save_custom_bkt(predictor, user_id)
+                    return predictor
+    except Exception as e:
+        print(f"[BKT] Error loading custom BKT predictor: {e}")
+    
+    return None
+
+def save_custom_bkt(predictor, user_id=None):
+    """Save the custom BKT predictor for a specific user"""
+    model_path = get_custom_bkt_path(user_id)
+    try:
+        with open(model_path, "wb") as f:
+            pickle.dump(predictor, f)
+        print(f"[BKT] Saved custom predictor for user {user_id}")
+        return True
+    except Exception as e:
+        print(f"[BKT] Error saving custom BKT predictor: {e}")
+        return False
+
+def create_user_bkt_predictor(user_id):
+    """Create a user-specific BKT predictor by cloning the base model"""
+    try:
+        # First try to load the base custom predictor
+        if os.path.exists("custom_bkt_predictor.pkl"):
+            with open("custom_bkt_predictor.pkl", "rb") as f:
+                base_predictor = pickle.load(f)
+                
+                # Clone the predictor (copy parameters)
+                user_predictor = CustomBKTPredictor(base_predictor.vocab_parameters.copy())
+                
+                # Save the user-specific predictor
+                save_custom_bkt(user_predictor, user_id)
+                print(f"[BKT] Created user-specific predictor for {user_id}")
+                return user_predictor
+        else:
+            print("[BKT] Base custom predictor not found")
+            return None
+    except Exception as e:
+        print(f"[BKT] Error creating user BKT predictor: {e}")
+        return None
+
 # Add to bkt_engine.py
 def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None, user_id=None):
-    """Get current mastery level with better handling for new vocabulary items"""
+    """Get current mastery level with custom BKT predictor"""
+    # First try to use the state (for backward compatibility)
     state = load_temp_state(user_id)
     predictions = state.get("predictions", {})
     
@@ -27,7 +187,19 @@ def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None, user_id
     if vocab.lower() in predictions:
         return float(predictions[vocab.lower()].get("p_mastery", 0.5))
     
-    # For new vocabulary words, adjust default based on recent performance
+    # Try using the custom predictor
+    custom_bkt = load_custom_bkt(user_id)
+    if custom_bkt and vocab.lower() in custom_bkt.vocab_parameters:
+        # Get this user's history with this vocabulary
+        history = []
+        if user_performance and vocab in user_performance:
+            history = user_performance[vocab].get("answers", [])
+        
+        # Predict mastery using custom BKT
+        mastery = custom_bkt.predict(vocab.lower(), history)
+        return mastery
+    
+    # Fallback to default with adjustment based on performance
     if user_performance and isinstance(user_performance, dict):
         # Calculate average mastery across all known vocabularies
         known_masteries = [float(pred.get("p_mastery", 0.5)) for pred in predictions.values()]
@@ -262,21 +434,32 @@ def save_temp_state(state):
 
 def update_bkt(user_id, correct_answers, incorrect_answers):
     print(f"[update_bkt] Starting BKT update for user {user_id}...")
+    
+    # Load or create custom BKT predictor
+    custom_bkt = load_custom_bkt(user_id)
+    if custom_bkt is None:
+        print(f"[update_bkt] No custom BKT predictor found. Creating for user {user_id}")
+        custom_bkt = create_user_bkt_predictor(user_id)
+        if custom_bkt is None:
+            print("[update_bkt] Failed to create custom BKT predictor")
+            return
 
-    global bkt_model, bkt_data
-    MAX_HISTORY = 10
-    bkt_data = []  # clear previous data
-    filtered_data = []
-
-    # Load existing session state
-    print("[update_bkt] Loading temp state...")
-    state = load_temp_state()
-
-    fitted = state.get('fitted', False)
-    refit_counter = state.get('refit_counter', 0)
-    base_prior = state.get('p_mastery', 0.5)
-    base_guess = state.get('guess', 0.2)
-    base_slip = state.get('slip', 0.1)
+    # FIRST CHANGE: Load user's complete answer history from database
+    usercol = connect_to_mongoDB()
+    user_data = usercol.find_one({"user_id": user_id})
+    if not user_data:
+        print(f"[update_bkt] User {user_id} not found in database")
+        return
+        
+    # Get user's complete history from database
+    all_correct_answers = user_data.get("questions_correct", {})
+    all_incorrect_answers = user_data.get("questions_incorrect", {})
+    
+    # Merge with new answers (if any)
+    if correct_answers:
+        all_correct_answers.update(correct_answers)
+    if incorrect_answers:
+        all_incorrect_answers.update(incorrect_answers)
 
     print("[update_bkt] Getting user library...")
     library = get_user_library()
@@ -284,116 +467,86 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
         print("[update_bkt] No user library found.")
         return
 
-    print(f"[update_bkt] Library loaded: {library}")
+    # Group answers by vocabulary using COMPLETE history
     grouped = {vocab: {'corrects': [], 'incorrects': []} for vocab in library}
 
-    print("[update_bkt] Grouping correct answers...")
-    for entry in correct_answers.values():
+    print("[update_bkt] Grouping correct answers from complete history...")
+    for entry in all_correct_answers.values():
         vocab = entry.get('vocabulary')
         if vocab in grouped:
             grouped[vocab]['corrects'].append(entry.copy())
         else:
             print(f"[update_bkt] Skipping unrecognized vocab in correct answers: {vocab}")
 
-    print("[update_bkt] Grouping incorrect answers...")
-    for entry in incorrect_answers.values():
+    print("[update_bkt] Grouping incorrect answers from complete history...")
+    for entry in all_incorrect_answers.values():
         vocab = entry.get('vocabulary')
         if vocab in grouped:
             grouped[vocab]['incorrects'].append(entry.copy())
         else:
-            print(f"[update_bkt] Skipping unrecognized vocab in correct answers: {vocab}")
-
-    print("[update_bkt] Preparing BKT data...")
-    for vocab_entry in library:
-        vocab = vocab_entry
+            print(f"[update_bkt] Skipping unrecognized vocab in incorrect answers: {vocab}")
+    
+    # Load existing state (for backward compatibility)
+    state = load_temp_state(user_id)
+    predictions = state.get("predictions", {})
+    
+    # Update predictions using custom BKT
+    for vocab in library:
         history = grouped.get(vocab, {'corrects': [], 'incorrects': []})
-        print(f"[update_bkt] Processing vocab: {vocab}")
-
         total_attempts = len(history['corrects']) + len(history['incorrects'])
+        
         if total_attempts == 0:
             print(f"[update_bkt] Skipping vocab '{vocab}' — no attempts recorded.")
             continue
+        
+        # Convert to sequence of correct/incorrect
+        sequence = []
+        all_attempts = []
 
-        for correctness, entries in [('correct', history['corrects']), ('incorrect', history['incorrects'])]:
-            print(f"[update_bkt]   Handling {correctness} entries: {len(entries)}")
-            for entry in entries:
-                print(f"[update_bkt]     Entry: {entry}")
-                rt = entry.get('response_time', 0)
-                df = entry.get('difficulty', 1)
+        # Combine corrects and incorrects with timestamps
+        for entry in history['corrects']:
+            all_attempts.append((entry.get('timestamp', 0), 1))  # 1 for correct
+        for entry in history['incorrects']:
+            all_attempts.append((entry.get('timestamp', 0), 0))  # 0 for incorrect
 
-                adjusted_guess = min(0.4, max(0.1, base_guess + 0.1 * df))
-                adjusted_slip = min(0.3, max(0.05,
-                    base_slip +
-                    (0.05 if rt > 5.0 else 0)
-                ))
+        # Sort by timestamp
+        all_attempts.sort(key=lambda x: x[0])
 
-                bkt_data.append({
-                    "user_id": user_id,
-                    "skill_name": vocab,
-                    "correct": 1 if correctness == 'correct' else 0,
-                    "guess": adjusted_guess,
-                    "slip": adjusted_slip,
-                    "prior": base_prior
-                })
-
-    if not bkt_data:
-        print("[update_bkt] No BKT data to process.")
-        return
-
-    print(f"[update_bkt] Fitting BKT model. Refit count: {refit_counter}")
-    df = pd.DataFrame(bkt_data)
-    refit_threshold = 5
-    refit_counter += 1
-
-    print(f"[update_bkt] DataFrame shape: {df.shape}")
-    print(df.head())
-    print(df['skill_name'].value_counts())
-
-    print("[DEBUG] Input to model.fit():")
-    print(df.to_string(index=False))
-    print("[DEBUG] Unique skills:", df['skill_name'].unique())
-    print("[DEBUG] Data types:\n", df.dtypes)
-
-    for skill in df['skill_name'].unique():
-        skill_data = df[df['skill_name'] == skill]
-        filtered_data.append(skill_data.tail(MAX_HISTORY))
-
-    df = pd.concat(filtered_data)
-
-    df.to_csv("bkt_input.csv", index=False)
-    print("[update_bkt] BKT input data saved to 'bkt_input.csv'.")
-
-    fit_flag = "fit" if (not fitted or refit_counter >= refit_threshold) else "predict"
-            
-    try:
-        print(f"[update_bkt] Launching external BKT model runner for user {user_id}...")
-        result = subprocess.run(["python", "bkt_engine_runner.py", fit_flag, str(user_id)], 
-                               capture_output=True, text=True)
-        print("[update_bkt] Model runner output:\n", result.stdout)
-        if result.stderr:
-            print("[update_bkt] Model runner errors:\n", result.stderr)
-        # After fitting, reset refit_counter and set fitted=True
-        if fit_flag == "fit":
-            fitted = True
-            refit_counter = 0
-    except Exception as e:
-        print(f"[update_bkt] Failed to run external model: {e}")
+        # Extract just the correctness values in chronological order
+        sequence = [attempt[1] for attempt in all_attempts]
+        
+        # Get parameters for this vocabulary
+        params = custom_bkt.vocab_parameters.get(vocab.lower(), {})
+        if not params:
+            print(f"[update_bkt] No parameters found for '{vocab}'. Using defaults.")
+            params = {
+                'learn': 0.15,
+                'guess': 0.25,
+                'slip': 0.1,
+                'prior': 0.5
+            }
+            custom_bkt.vocab_parameters[vocab.lower()] = params
+        
+        # Calculate mastery with custom BKT
+        mastery = custom_bkt.predict(vocab.lower(), sequence)
+        
+        # Update predictions dictionary (for backward compatibility)
+        predictions[vocab.lower()] = {
+            'p_mastery': float(mastery),
+            'guess': float(params.get('guess', 0.25)),
+            'slip': float(params.get('slip', 0.1)),
+            'confidence': 1.0 - float(params.get('guess', 0.25)) - float(params.get('slip', 0.1)),
+            'correct': 1 if sequence and sequence[-1] == 1 else 0
+        }
     
-    # Update to use user-specific prediction file
-
-    if os.path.exists(PREDICTION_FILE):
-        with open(PREDICTION_FILE, "r") as f:
-            new_predictions = json.load(f)
-            print(f"[update_bkt] Predictions loaded from external model for user {user_id}.")
-            state['predictions'].update(new_predictions)
-    else:
-        print(f"[update_bkt] Prediction file {PREDICTION_FILE} not found after model run.")
-
-    # Always save the updated state
-    state['fitted'] = fitted
-    state['refit_counter'] = refit_counter
+    # Save updated custom BKT
+    save_custom_bkt(custom_bkt, user_id)
+    
+    # Save updated state (for backward compatibility)
+    state['predictions'] = predictions
+    state['fitted'] = True
     save_temp_state(state)
-
+    
     print("\nDisplaying BKT predictions after update:")
     display_bkt_predictions(user_id)
 
