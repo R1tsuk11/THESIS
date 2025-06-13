@@ -2,81 +2,204 @@ import sys
 import json
 import os
 import traceback
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-from lstm_engine import average_proficiency, overall_proficiency
+import time
+import numpy as np
 
-if __name__ == "__main__":
-    # Arguments: <input_json_path> <proficiency_history_path>
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
+
+def get_path(base_dir, filename, user_id=None):
+    """Get path for a file, creating directory if needed"""
+    os.makedirs(base_dir, exist_ok=True)
+    if user_id and str(user_id).lower() != "none":
+        return os.path.join(base_dir, f"{filename}_{user_id}.json")
+    return os.path.join(base_dir, f"{filename}.json")
+
+def get_history_path(user_id=None):
+    """Get path for user's history file"""
+    return get_path("lstm_history", "temp_prof_history", user_id)
+
+def get_counter_path(user_id=None):
+    """Get path for user's counter file"""
+    return get_path("lstm_counters", "lstm_counter", user_id)
+
+def get_model_path(user_id=None):
+    """Get path for user's model file"""
+    os.makedirs("lstm_models", exist_ok=True)
+    if user_id and str(user_id).lower() != "none":
+        return os.path.join("lstm_models", f"lstm_proficiency_model_{user_id}.keras")
+    return os.path.join("lstm_models", "lstm_proficiency_model.keras")
+    
+def simple_proficiency_calculation(bkt_sequence, completion, user_id):
+    """Simple and reliable proficiency calculation that won't hang"""
+    log(f"Starting proficiency calculation for user {user_id}")
+    
+    # Get appropriate paths
+    history_path = get_history_path(user_id)
+    model_path = get_model_path(user_id)
+    
+    # Create user model if needed
+    setup_user_model(user_id)
+    
+    # Calculate basic average as fallback
+    avg = sum(bkt_sequence) / len(bkt_sequence) if bkt_sequence else 0
+    result = avg * completion / 100.0  # Assuming completion is in percent
+    
+    # Attempt LSTM prediction if model exists
+    prediction = result
+    confidence = 0.5
+    method = "average"
+    error = None
+    
     try:
-        input_json = sys.argv[1]
-        prof_history_path = sys.argv[2]
-        user_id = sys.argv[3] if len(sys.argv) > 3 else None
+        # Only try to use the model if it exists
+        if os.path.exists(model_path):
+            from tensorflow.keras.models import load_model
+            from tensorflow.keras.preprocessing.sequence import pad_sequences
+            
+            log(f"Loading model from {model_path}")
+            model = load_model(model_path)
+            
+            # Prepare input
+            X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
+            X = np.expand_dims(X, -1)  # Add feature dimension
+            
+            # Make prediction
+            log("Making prediction with model")
+            pred = model.predict(X, verbose=0)
+            prediction = float(pred[0][0])
+            
+            # Calculate loss/confidence
+            y_true = np.array([prediction])  # Use prediction as target
+            loss = float(model.evaluate(X, y_true, verbose=0)[0])
+            confidence = max(0.3, min(0.95, np.exp(-loss)))
+            
+            log(f"Model prediction: {prediction}, loss: {loss}, confidence: {confidence}")
+            method = "lstm"
+            
+            # Apply completion percentage
+            prediction = prediction * completion / 100.0
+    except Exception as e:
+        log(f"Error using LSTM model: {str(e)}")
+        traceback.print_exc(file=sys.stderr)
+        error = str(e)
+        # Fall back to average method
+    
+    # Update history with this prediction
+    try:
+        update_history(history_path, prediction)
+    except Exception as e:
+        log(f"Error updating history: {str(e)}")
+    
+    # Return result
+    return {
+        "proficiency": prediction,
+        "confidence": confidence,
+        "method": method,
+        "error": error
+    }
 
-        with open(input_json, "r") as f:
-            data = json.load(f)
-            bkt_sequence = data["bkt_sequence"]
-            historical_sequences = data.get("historical_sequences", [])
-            completion = data["completion_percentage"]
-
-            print(f"[LSTM subprocess] Current bkt_sequence: {bkt_sequence}", file=sys.stderr)
-            print(f"[LSTM subprocess] Found {len(historical_sequences)} historical sequences", file=sys.stderr)
-            print(f"[LSTM subprocess] completion: {completion}", file=sys.stderr)
-
-            # Merge historical_sequences before bkt_sequence
-            if historical_sequences:
-                merged_sequence = []
-                for seq in historical_sequences:
-                    merged_sequence.extend(seq)
-                merged_sequence.extend(bkt_sequence)
-                bkt_sequence = merged_sequence
-                print(f"[LSTM subprocess] Merged sequence (historical first): {bkt_sequence}", file=sys.stderr)
-
-        with open(prof_history_path, "r") as f:
-            proficiency_history = json.load(f)
-        print(f"[LSTM subprocess] proficiency_history: {proficiency_history}", file=sys.stderr)
+def setup_user_model(user_id):
+    """Set up a user model if it doesn't exist"""
+    if not user_id:
+        return
         
-        # Pass this to the overall_proficiency function
-        output = overall_proficiency(
-            merged_sequence, completion, user_id
-        )
-        
-        # Validate JSON before returning it
+    user_model_path = get_model_path(user_id)
+    base_model_path = get_model_path()
+    
+    # Copy base model to user model if it doesn't exist
+    if not os.path.exists(user_model_path) and os.path.exists(base_model_path):
+        log(f"Creating user model for {user_id}")
         try:
-            # Check if output is already a string
-            if isinstance(output, (int, float, dict)):
-                # Convert to proper JSON structure and then to string
-                output_json = json.dumps({
-                    "proficiency": float(output) if isinstance(output, (int, float)) else output.get("proficiency", 0.0),
-                    "method": "lstm" if not isinstance(output, dict) else output.get("method", "fallback"),
-                    "error": None if not isinstance(output, dict) else output.get("error", None),
-                    "confidence": 0.8 if not isinstance(output, dict) else output.get("confidence", 0.0)
-                })
-            else:
-                output_json = output
-                
-            # Validate it's proper JSON
-            json.loads(output_json)
-            print(output_json)  # Output the JSON result
-        except (json.JSONDecodeError, TypeError) as json_err:
-            print(f"[LSTM subprocess] Generated invalid JSON: {json_err}", file=sys.stderr)
-            # Return a fallback valid JSON
-            fallback = json.dumps({
-                "error": "Invalid JSON generated",
-                "method": "fallback",
-                "proficiency": average_proficiency(bkt_sequence) * completion,
-                "confidence": 50.0
-            })
-            print(fallback)
+            import shutil
+            shutil.copy(base_model_path, user_model_path)
+            log(f"Copied base model to {user_model_path}")
+        except Exception as e:
+            log(f"Error copying model: {str(e)}")
+
+def update_history(history_path, prediction):
+    """Update the history file with new prediction"""
+    log(f"Updating history at {history_path}")
+    
+    try:
+        # Read existing history or create new
+        if os.path.exists(history_path):
+            with open(history_path, "r") as f:
+                history = json.load(f)
+                # Handle different formats
+                if isinstance(history, dict) and "values" in history:
+                    history = history["values"]
+                elif isinstance(history, list) and history and isinstance(history[0], dict):
+                    history = [item["proficiency"] for item in history if "proficiency" in item]
+        else:
+            history = []
+            
+        # Add new prediction
+        history.append(prediction)
+        log(f"History now has {len(history)} entries")
+        
+        # Save updated history
+        os.makedirs(os.path.dirname(history_path) or '.', exist_ok=True)
+        with open(history_path, "w") as f:
+            json.dump(history, f)
             
     except Exception as e:
-        print(f"[LSTM subprocess] Exception: {str(e)}", file=sys.stderr)
+        log(f"Error processing history: {str(e)}")
+
+def log(message):
+    """Helper to print debug logs"""
+    print(f"[LSTM Runner] {message}", file=sys.stderr)
+
+if __name__ == "__main__":
+    start_time = time.time()
+    log("LSTM Runner starting")
+    
+    try:
+        # Parse command line arguments
+        if len(sys.argv) < 3:
+            log("Error: Missing arguments")
+            print(json.dumps({
+                "error": "Missing arguments",
+                "method": "error",
+                "proficiency": 0.0,
+                "confidence": 0.0
+            }))
+            sys.exit(1)
+            
+        input_json_path = sys.argv[1]
+        user_id = sys.argv[2] if len(sys.argv) > 2 else None
+        
+        # Load input data
+        log(f"Reading input from {input_json_path}")
+        with open(input_json_path, "r") as f:
+            input_data = json.load(f)
+            
+        bkt_sequence = input_data.get("bkt_sequence", [])
+        completion_percentage = input_data.get("completion_percentage", 100)
+        
+        log(f"Processing for user {user_id}, sequence length: {len(bkt_sequence)}, completion: {completion_percentage}%")
+        
+        # Calculate proficiency
+        result = simple_proficiency_calculation(bkt_sequence, completion_percentage, user_id)
+        
+        # Output result as JSON
+        output = {
+            "proficiency": result["proficiency"],
+            "method": result["method"],
+            "confidence": result["confidence"],
+            "error": result["error"],
+            "runtime_ms": int((time.time() - start_time) * 1000)
+        }
+        
+        log(f"Calculation complete. Result: {result['proficiency']:.4f}, confidence: {result['confidence']:.2f}")
+        print(json.dumps(output))
+        
+    except Exception as e:
+        log(f"Global error: {str(e)}")
         traceback.print_exc(file=sys.stderr)
-        # Return valid JSON even in case of error
-        error_json = json.dumps({
+        print(json.dumps({
             "error": str(e),
             "method": "error",
             "proficiency": 0.0,
-            "confidence": 0.0
-        })
-        print(error_json)
-        sys.exit(1)
+            "confidence": 0.0,
+            "runtime_ms": int((time.time() - start_time) * 1000)
+        }))

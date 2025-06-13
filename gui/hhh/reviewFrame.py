@@ -66,12 +66,16 @@ def batch_update_supermemo(user_id, correct_answers, incorrect_answers):
                 break
 
 class AttrDict(dict):
-    """Allows attribute access to dict keys."""
+    """Allows attribute access to dict keys with better error handling."""
     def __getattr__(self, item):
         try:
             return self[item]
         except KeyError:
-            raise AttributeError(item)
+            # Improved debugging - show available keys
+            available = list(self.keys())
+            print(f"[ERROR] Missing key '{item}' in AttrDict. Available keys: {available}")
+            return None  # Return None instead of raising exception
+            
     def __setattr__(self, key, value):
         self[key] = value
 
@@ -1443,8 +1447,61 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
 
 def review_session(page, image_urls: list):
 
-        # Check if user has any vocabulary scheduled for review
+    print("[DEBUG] Starting review session")
+    
+    # Check if user has any vocabulary scheduled for review
     user_id = page.session.get("user_id")
+    print(f"[DEBUG] User ID: {user_id}")
+    
+    if not has_review_questions(user_id):
+        print("[DEBUG] No review questions for user")
+        # Your existing code for no questions case
+        return
+    
+    # Load review questions directly - avoid using get_review_questions wrapper
+    try:
+        print("[DEBUG] Getting questions from session")
+        raw_questions = page.session.get("daily_review_questions")
+        print(f"[DEBUG] Raw questions type: {type(raw_questions)}, count: {len(raw_questions) if raw_questions else 0}")
+        
+        # Convert to AttrDict with error handling
+        questions = []
+        for q in raw_questions:
+            try:
+                questions.append(AttrDict(q))
+            except Exception as e:
+                print(f"[ERROR] Failed to convert question to AttrDict: {str(e)}")
+                print(f"Question data: {q}")
+        
+        print(f"[DEBUG] Converted {len(questions)} questions to AttrDict objects")
+        
+        # If no questions were successfully converted, show debug view
+        if not questions:
+            print("[ERROR] No questions could be converted to AttrDict")
+            show_debug_review(page, raw_questions)
+            return
+            
+    except Exception as e:
+        print(f"[ERROR] Error loading questions: {str(e)}")
+        # Show error message
+        page.views.clear()
+        page.views.append(
+            ft.View(
+                "/review-error",
+                [
+                    ft.Column([
+                        ft.Text("Error loading review questions", size=20, color="red"),
+                        ft.Text(f"Details: {str(e)}", size=16),
+                        ft.ElevatedButton("Return to Main Menu", 
+                                        on_click=lambda _: page.go("/main-menu"))
+                    ], alignment=ft.MainAxisAlignment.CENTER)
+                ],
+                padding=10
+            )
+        )
+        page.update()
+        return
+    
     if not has_review_questions(user_id):
         # Show message and offer to return to main menu
         page.views.clear()
@@ -1570,8 +1627,12 @@ def review_session(page, image_urls: list):
         return
 
     def render_current_question(progress_value):
+        try:
+            print("[DEBUG] Starting to render question")
             page.views.clear()  # Optional: clear previous view
             question = questions[current_question_index["value"]]
+            print(f"[DEBUG] Rendering question {current_question_index['value'] + 1}: {question.type} - {question.vocabulary}")
+            
             content = render_question_layout(
                 page = page,
                 question_data=question,
@@ -1579,12 +1640,33 @@ def review_session(page, image_urls: list):
                 on_next=next_question,
                 on_back=go_back
             )
+            print("[DEBUG] Question layout rendered successfully")
 
             page.views.append(
                 ft.View(
-                    "/lesson",
+                    "/daily-review",
                     [ft.Stack([background, content], expand=True)],
                     padding=0
+                )
+            )
+            print("[DEBUG] View appended to page")
+            page.update()
+            print("[DEBUG] Page updated")
+        except Exception as e:
+            print(f"[ERROR] Error rendering question: {str(e)}")
+            # Show error on screen instead of blank page
+            page.views.append(
+                ft.View(
+                    "/daily-review-error",
+                    [
+                        ft.Column([
+                            ft.Text("Error rendering review", size=20, color="red"),
+                            ft.Text(f"Details: {str(e)}", size=16),
+                            ft.ElevatedButton("Return to Main Menu", 
+                                            on_click=lambda _: page.go("/main-menu"))
+                        ], alignment=ft.MainAxisAlignment.CENTER)
+                    ],
+                    padding=10
                 )
             )
             page.update()
@@ -1626,5 +1708,91 @@ def review_session(page, image_urls: list):
         grade_percentage = 0 
         correct_answers.clear()
         incorrect_answers.clear()
+    
+    print(f"[DEBUG] About to render first question of {total_questions}")
+    render_current_question(progress_value)  # This should now be called
 
-    render_current_question(progress_value)
+def daily_review_page(page: ft.Page, image_urls):
+    """Main entry point for daily review"""
+    page.title = "Arami - Daily Review"
+    
+    # Get review questions directly from session or prepare them
+    # FIX: Use try/except instead of 'in' operator
+    try:
+        questions = page.session.get("daily_review_questions")
+        if not questions:  # Check if None or empty list
+            return ft.Column(
+                [
+                    ft.Text("No review questions found.", size=18),
+                    ft.ElevatedButton("Return to Main Menu", 
+                                    on_click=lambda _: page.go("/main-menu"))
+                ],
+                alignment=ft.MainAxisAlignment.CENTER
+            )
+    except:
+        # If there's any error accessing the questions
+        return ft.Column(
+            [
+                ft.Text("Error loading review questions.", size=18),
+                ft.ElevatedButton("Return to Main Menu", 
+                                on_click=lambda _: page.go("/main-menu"))
+            ],
+            alignment=ft.MainAxisAlignment.CENTER
+        )
+    
+    # De-duplicate questions by ID
+    unique_questions = []
+    used_ids = set()
+    
+    for q in questions:
+        q_id = q.get("id")
+        if q_id not in used_ids:
+            unique_questions.append(q)
+            used_ids.add(q_id)
+        else:
+            print(f"[WARNING] Skipping duplicate question with ID {q_id}")
+    
+    # Save the de-duplicated questions back to session
+    page.session.set("daily_review_questions", unique_questions)
+    
+    # Start the review with the clean question list
+    review_session(page, image_urls)
+
+def show_debug_review(page, questions_list):
+    """Show basic review questions for troubleshooting"""
+    page.views.clear()
+    
+    debug_controls = [
+        ft.Text("Debug Review", size=24, weight="bold"),
+        ft.Text(f"Found {len(questions_list)} questions", size=18)
+    ]
+    
+    for i, q in enumerate(questions_list):
+        q_container = ft.Container(
+            content=ft.Column([
+                ft.Text(f"Question {i+1}", weight="bold"),
+                ft.Text(f"Type: {q.get('type', 'unknown')}"),
+                ft.Text(f"Text: {q.get('question', 'unknown')}"),
+                ft.Text(f"Vocabulary: {q.get('vocabulary', 'unknown')}"),
+            ]),
+            padding=10,
+            bgcolor="#f0f0f0" if i % 2 == 0 else "#ffffff",
+            border=ft.border.all(1, "#cccccc"),
+            border_radius=8,
+            margin=5
+        )
+        debug_controls.append(q_container)
+    
+    debug_controls.append(
+        ft.ElevatedButton("Return to Main Menu", 
+                         on_click=lambda e: page.go("/main-menu"))
+    )
+    
+    page.views.append(
+        ft.View(
+            "/debug-review",
+            [ft.Column(debug_controls, scroll=ft.ScrollMode.AUTO)],
+            padding=10
+        )
+    )
+    page.update()

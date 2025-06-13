@@ -5,6 +5,7 @@ from pymongo.errors import ConfigurationError
 import sys
 from datetime import datetime, timedelta
 from qbank import module_bank
+from bkt_engine import get_vocab_mastery
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -19,34 +20,41 @@ def connect_to_mongoDB():
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
 def has_review_questions(user_id):
-    """Check if the user has any vocabulary items scheduled for review today"""
+    """Check if user has any vocabulary scheduled for review"""
+    # Connect to the database
     usercol = connect_to_mongoDB()
     user = usercol.find_one({"user_id": user_id})
-    today = datetime.now().date()
-    
-    if not user or "supermemo" not in user:
+    if not user:
+        print(f"[DEBUG] User {user_id} not found in database")
         return False
         
-    # Check needs_practice vocabulary
-    for vocab, state in user["supermemo"].get("needs_practice", {}).items():
-        if "next_review" in state:
-            try:
-                review_date = datetime.fromisoformat(state["next_review"]).date()
-                if review_date <= today:
-                    return True
-            except (ValueError, TypeError):
-                continue
-
-    # Check mastered vocabulary
-    for vocab, state in user["supermemo"].get("mastered", {}).items():
-        if "next_review" in state:
-            try:
-                review_date = datetime.fromisoformat(state["next_review"]).date()
-                if review_date <= today:
-                    return True
-            except (ValueError, TypeError):
-                continue
+    # Check if user has supermemo data
+    if "supermemo" not in user:
+        print(f"[DEBUG] User {user_id} has no supermemo data")
+        return False
         
+    supermemo_data = user["supermemo"]
+    
+    # Check both needs_practice and mastered for due items
+    for category in ["needs_practice", "mastered"]:
+        if category not in supermemo_data:
+            continue
+            
+        for vocab, state in supermemo_data[category].items():
+            # Debug what we're checking
+            print(f"[DEBUG] Checking {vocab} in {category}: {state}")
+            
+            # Parse dates with error handling
+            try:
+                next_review = datetime.strptime(state["next_review"], "%Y-%m-%d").date()
+                today = datetime.now().date()
+                
+                if next_review <= today:
+                    print(f"[DEBUG] Found due vocab: {vocab}, due on {next_review}")
+                    return True
+            except (KeyError, ValueError) as e:
+                print(f"[DEBUG] Error checking dates for {vocab}: {e}")
+                
     return False
 
 def get_user_proficiency(user_id):
@@ -59,6 +67,223 @@ def get_user_proficiency(user_id):
     if user and "proficiency" in user:
         return user["proficiency"]
     return 0  # Default proficiency if not found
+
+def schedule_pending_vocabulary(user_id, session_data=None, force=False):
+    """
+    Schedule any newly learned vocabulary that hasn't been scheduled yet
+    
+    Args:
+        user_id: The user ID
+        session_data: Optional session data containing correct_answers
+        force: If True, ignore the "already scheduled today" check
+    """
+    print(f"[SuperMemo] Scheduling pending vocabulary for user {user_id}")
+    
+    # Get user data
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    if not user:
+        print(f"[SuperMemo] User {user_id} not found")
+        return False
+    
+    # Get user's vocabulary learning history from DB
+    correct_answers = user.get("questions_correct", {})
+    
+    # If session data is provided, merge it with the DB data
+    if session_data and "correct_answers" in session_data:
+        session_correct = session_data.get("correct_answers", {})
+        print(f"[SuperMemo] Adding {len(session_correct)} items from session")
+        # Merge session data with DB data
+        for q_id, q_data in session_correct.items():
+            if q_id not in correct_answers:
+                correct_answers[q_id] = q_data
+    
+    # Get current SuperMemo data with proper initialization
+    supermemo_data = user.get("supermemo", {})
+    
+    # Ensure the required structure exists
+    if "needs_practice" not in supermemo_data:
+        supermemo_data["needs_practice"] = {}
+    
+    if "mastered" not in supermemo_data:
+        supermemo_data["mastered"] = {}
+    
+    # Track how many items were scheduled
+    scheduled_count = 0
+    
+    # Look for vocabulary in correct answers that aren't yet in SuperMemo
+    for question_id, question_data in correct_answers.items():
+        vocab = question_data.get('vocabulary')
+        if not vocab:
+            continue
+            
+        # Check if this vocab is already in SuperMemo
+        in_needs_practice = vocab in supermemo_data["needs_practice"]
+        in_mastered = vocab in supermemo_data["mastered"]
+        
+        # If vocab isn't scheduled yet, add it
+        if not in_needs_practice and not in_mastered:
+            print(f"[SuperMemo] Scheduling new vocabulary: {vocab}")
+            mastery = get_vocab_mastery(vocab, user_id=user_id)
+            
+            # Create initial SuperMemo state
+            today = datetime.now().date()
+            tomorrow = today + timedelta(days=1)  # Schedule for tomorrow
+            
+            state = {
+                "interval": 1,              # Start with 1-day interval
+                "repetition": 0,            # No repetitions yet
+                "efactor": 2.5,             # Default easiness factor
+                "last_review": str(today),  # Mark as "reviewed" today
+                "next_review": str(tomorrow)  # Schedule for tomorrow
+            }
+            
+            # Decide whether it goes to needs_practice or mastered
+            if mastery >= 0.7:  # If decent mastery, consider it "mastered"
+                supermemo_data["mastered"][vocab] = state
+            else:  # Otherwise needs more practice
+                supermemo_data["needs_practice"][vocab] = state
+                
+            scheduled_count += 1
+    
+    # Save updated SuperMemo data if any changes were made
+    if scheduled_count > 0:
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": {"supermemo": supermemo_data}}
+        )
+        print(f"[SuperMemo] Scheduled {scheduled_count} new vocabulary items for user {user_id}")
+        return True
+    else:
+        print(f"[SuperMemo] No new vocabulary items to schedule for user {user_id}")
+        return False
+
+def register_new_vocabulary(user_id, vocabulary_item):
+    """Register a newly learned vocabulary immediately after a lesson"""
+    print(f"[SuperMemo] Registering new vocabulary: {vocabulary_item}")
+    
+    # Get user data
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    if not user:
+        print(f"[SuperMemo] User {user_id} not found")
+        return False
+    
+    # Get current SuperMemo data with proper initialization
+    supermemo_data = user.get("supermemo", {})
+    
+    # Ensure the required structure exists
+    if "needs_practice" not in supermemo_data:
+        supermemo_data["needs_practice"] = {}
+    
+    if "mastered" not in supermemo_data:
+        supermemo_data["mastered"] = {}
+    
+    # Check if this vocab is already in SuperMemo
+    if vocabulary_item in supermemo_data["needs_practice"] or vocabulary_item in supermemo_data["mastered"]:
+        print(f"[SuperMemo] Vocabulary '{vocabulary_item}' already scheduled")
+        return False
+        
+    # Get basic BKT prediction to determine initial placement
+    mastery = get_vocab_mastery(vocabulary_item, user_id=user_id)
+    
+    # Create initial SuperMemo state
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)  # Schedule for tomorrow
+    
+    state = {
+        "interval": 1,              # Start with 1-day interval
+        "repetition": 0,            # No repetitions yet
+        "efactor": 2.5,             # Default easiness factor
+        "last_review": str(today),  # Mark as "reviewed" today
+        "next_review": str(tomorrow)  # Schedule for tomorrow
+    }
+    
+    # Decide whether it goes to needs_practice or mastered
+    if mastery >= 0.7:  # If decent mastery, consider it "mastered"
+        supermemo_data["mastered"][vocabulary_item] = state
+    else:  # Otherwise needs more practice
+        supermemo_data["needs_practice"][vocabulary_item] = state
+    
+    # Save updated SuperMemo data
+    usercol.update_one(
+        {"user_id": user_id},
+        {"$set": {"supermemo": supermemo_data}}
+    )
+    
+    print(f"[SuperMemo] Registered vocabulary '{vocabulary_item}' for user {user_id}")
+    return True
+
+def register_new_vocabulary_batch(user_id, vocabulary_items):
+    """Register multiple vocabulary items at once for efficiency"""
+    if not vocabulary_items:
+        return
+        
+    print(f"[SuperMemo] Batch registering {len(vocabulary_items)} vocabulary items")
+    
+    # Get user data
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    if not user:
+        print(f"[SuperMemo] User {user_id} not found")
+        return False
+    
+    # Get current SuperMemo data with proper initialization
+    supermemo_data = user.get("supermemo", {})
+    
+    # Ensure the required structure exists
+    if "needs_practice" not in supermemo_data:
+        supermemo_data["needs_practice"] = {}
+    
+    if "mastered" not in supermemo_data:
+        supermemo_data["mastered"] = {}
+        
+    # Process each vocabulary item
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    updates_made = False
+    
+    for vocab in vocabulary_items:
+        # Skip if already scheduled
+        if vocab in supermemo_data["needs_practice"] or vocab in supermemo_data["mastered"]:
+            print(f"[SuperMemo] Vocabulary '{vocab}' already scheduled")
+            continue
+            
+        # Get mastery level
+        try:
+            # Use cached BKT predictor to avoid reloading for each word
+            mastery = get_vocab_mastery(vocab, user_id=user_id)
+        
+            # Create initial SuperMemo state
+            state = {
+                "interval": 1,
+                "repetition": 0,
+                "efactor": 2.5,
+                "last_review": str(today),
+                "next_review": str(tomorrow)
+            }
+            
+            # Add to appropriate category
+            if mastery >= 0.7:
+                supermemo_data["mastered"][vocab] = state
+            else:
+                supermemo_data["needs_practice"][vocab] = state
+                
+            updates_made = True
+            print(f"[SuperMemo] Registered vocabulary '{vocab}' for user {user_id}")
+            
+        except Exception as e:
+            print(f"[SuperMemo] Error registering vocabulary '{vocab}': {e}")
+    
+    # Save updated data if changes were made
+    if updates_made:
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": {"supermemo": supermemo_data}}
+        )
+    
+    print(f"[SuperMemo] Batch registration complete")
+    return updates_made
 
 def get_questions_for_vocab_list(vocab_list, module_ids=None):
     """
@@ -87,12 +312,21 @@ def get_review_questions_for_user(user_id, vocab_list, proficiency):
     # Filter out None values from vocab_list
     vocab_list = [vocab for vocab in vocab_list if vocab is not None]
     
-    # For each vocab, select up to 4 questions
+    # For each vocab, select ONLY ONE question
     review_questions = []
+    used_ids = set()  # Track used question IDs to avoid duplicates
+    
     for vocab in vocab_list:
-        review_questions.extend(
-            select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=4, include_lesson=False)
-        )
+        questions = select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=1, include_lesson=False)
+        for question in questions:
+            # Skip questions with duplicate IDs
+            if question.get('id') in used_ids:
+                print(f"[WARNING] Skipping duplicate question ID: {question.get('id')} for vocab: {vocab}")
+                continue
+                
+            review_questions.append(question)
+            used_ids.add(question.get('id'))
+    
     return review_questions
 
 def select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=4, include_lesson=False):
@@ -206,6 +440,12 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
     user = usercol.find_one({"user_id": user_id})
     supermemo_data = user.get("supermemo", {})
 
+    if "needs_practice" not in supermemo_data:
+        supermemo_data["needs_practice"] = {}
+    
+    if "mastered" not in supermemo_data:
+        supermemo_data["mastered"] = {}
+
     needs_practice_states = supermemo_data.get("needs_practice", {})
     for vocab in needs_practice:
         if vocab not in needs_practice_states:
@@ -232,62 +472,203 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
     display_supermemo_schedule(user_id)
     print("=========================\n")
 
-def prepare_daily_review(user_id, threshold=0.85, max_questions=15):
+def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
+    """Prepare daily review with improved selection algorithm"""
     print(f"[DEBUG] Preparing daily review for user: {user_id}")
-    predictions = get_all_bkt_predictions(user_id)
-    # If there are no predictions, return empty list immediately
-    if not predictions:
-        print("[DEBUG] No BKT predictions found. Skipping review preparation.")
-        return []
     
-    needs_practice, mastered = prioritize_vocabularies(predictions, threshold=threshold)
-    # If there are no vocabularies that need practice or are mastered, return empty list
-    if not (needs_practice or mastered):
-        print("[DEBUG] No vocabulary words to review.")
-        return []
-    save_supermemo_schedule(user_id, needs_practice, mastered)
-
+    # Get user data
     usercol = connect_to_mongoDB()
     user = usercol.find_one({"user_id": user_id})
     supermemo_data = user.get("supermemo", {})
     needs_practice_states = supermemo_data.get("needs_practice", {})
     mastered_states = supermemo_data.get("mastered", {})
+    
+    if "needs_practice" not in supermemo_data:
+        supermemo_data["needs_practice"] = {}
+    
+    if "mastered" not in supermemo_data:
+        supermemo_data["mastered"] = {}
 
-    print(f"[DEBUG] Loaded needs_practice_states from DB: {needs_practice_states}")
-    print(f"[DEBUG] Loaded mastered_states from DB: {mastered_states}")
-
+    # Get the "last reviewed" tracking data
+    review_history = user.get("review_history", {})
+    
+    # Today's date
     today = datetime.now().date()
-    review_items = []
-
-    if not any(state.get("last_review") for state in {**needs_practice_states, **mastered_states}.values()):
-        all_vocab = list(needs_practice_states.items()) + list(mastered_states.items())
-        print(f"[DEBUG] All vocabularies for first review: {all_vocab}")
-        review_items = all_vocab[:max_questions]
-    else:
-        for vocab, state in {**needs_practice_states, **mastered_states}.items():
-            if vocab and state and "next_review" in state:  # Safety check
+    
+    # Gather all vocabulary items that need review
+    review_candidates = []
+    
+    for vocab_type, states in [("needs_practice", needs_practice_states), 
+                              ("mastered", mastered_states)]:
+        for vocab, state in states.items():
+            if vocab and state and "next_review" in state:
                 try:
                     review_date = datetime.fromisoformat(state["next_review"]).date()
-                    if review_date <= today:
-                        review_items.append((vocab, state))
-                except (ValueError, TypeError):
-                    print(f"[WARNING] Invalid next_review date for {vocab}: {state.get('next_review')}")
-        print(f"[DEBUG] Vocabularies due for review: {review_items}")
-        review_items = review_items[:max_questions]
-
-    print(f"[DEBUG] Final review_items to return: {review_items}")
+                    
+                    # Calculate days overdue (negative if not due yet)
+                    days_overdue = (today - review_date).days
+                    
+                    # Get days since last reviewed (default to 100 if never reviewed)
+                    last_reviewed = review_history.get(vocab, {}).get("last_reviewed")
+                    if last_reviewed:
+                        days_since_last_review = (today - datetime.fromisoformat(last_reviewed).date()).days
+                    else:
+                        days_since_last_review = 100  # High number for never reviewed
+                    
+                    # Get number of times this item was skipped
+                    times_skipped = review_history.get(vocab, {}).get("times_skipped", 0)
+                    
+                    # Calculate priority score
+                    # Higher priority for:
+                    # 1. Items that are more days overdue
+                    # 2. Items that haven't been reviewed in a long time
+                    # 3. Items that have been skipped multiple times
+                    # 4. Items that need practice (vs. mastered items)
+                    priority_score = (
+                        max(0, days_overdue) * 10 +  # Overdue days (if any)
+                        days_since_last_review * 2 +  # Days since last review
+                        times_skipped * 5 +           # Skip penalty
+                        (20 if vocab_type == "needs_practice" else 0)  # Needs practice bonus
+                    )
+                    
+                    review_candidates.append({
+                        "vocab": vocab,
+                        "state": state,
+                        "priority_score": priority_score,
+                        "days_overdue": days_overdue,
+                        "vocab_type": vocab_type
+                    })
+                    
+                except (ValueError, TypeError) as e:
+                    print(f"[WARNING] Error processing {vocab}: {e}")
+                    
+    # Sort candidates by priority score
+    review_candidates.sort(key=lambda x: x["priority_score"], reverse=True)
     
-    # Filter out any None values safely
-    vocab_list = [vocab for vocab, state in review_items if vocab is not None]
+    # Select candidates for today's review
+    selected_candidates = review_candidates[:max_questions]
     
-    # If vocab_list is empty, return empty list
+    # Update skip counter for items that were due but not selected
+    unselected_due = [item for item in review_candidates[max_questions:] 
+                     if item["days_overdue"] >= 0]
+    
+    # Update the review history
+    for item in unselected_due:
+        vocab = item["vocab"]
+        if vocab not in review_history:
+            review_history[vocab] = {"times_skipped": 1}
+        else:
+            review_history[vocab]["times_skipped"] = review_history[vocab].get("times_skipped", 0) + 1
+    
+    # Update review history for selected items
+    for item in selected_candidates:
+        vocab = item["vocab"]
+        if vocab not in review_history:
+            review_history[vocab] = {}
+        review_history[vocab]["times_skipped"] = 0  # Reset skip counter
+    
+    # Save updated review history
+    usercol.update_one(
+        {"user_id": user_id},
+        {"$set": {"review_history": review_history}}
+    )
+    
+    # Get vocabulary list from selected candidates
+    vocab_list = [item["vocab"] for item in selected_candidates]
+    
+    # Generate questions
     if not vocab_list:
-        print("[WARNING] No vocabulary items are ready for review")
+        print("[WARNING] No vocabulary items ready for review")
         return []
-        
+    
     proficiency = get_user_proficiency(user_id)
     review_questions = get_review_questions_for_user(user_id, vocab_list, proficiency)
+    
+    print(f"[DEBUG] Selected {len(selected_candidates)} items for review")
+    print(f"[DEBUG] {len(unselected_due)} due items couldn't be included today")
+    
     return review_questions
+
+def mark_vocabulary_reviewed(user_id, vocab, performance_quality):
+    """
+    Mark a vocabulary item as reviewed with its quality rating
+    
+    Args:
+        user_id: The user who completed the review
+        vocab: The vocabulary word that was reviewed
+        performance_quality: Quality rating (0-5) of recall, where 5 is perfect recall
+    """
+    print(f"[SuperMemo] Marking '{vocab}' as reviewed with quality {performance_quality}")
+    
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    
+    if not user:
+        print(f"[ERROR] User {user_id} not found in database")
+        return False
+        
+    # Get review history
+    review_history = user.get("review_history", {})
+    if vocab not in review_history:
+        review_history[vocab] = {}
+    
+    # Update last reviewed date
+    today = datetime.now().date()
+    review_history[vocab]["last_reviewed"] = str(today)
+    
+    # Track performance quality
+    review_history[vocab]["last_quality"] = performance_quality
+    
+    # Reset skip counter since item was reviewed
+    review_history[vocab]["times_skipped"] = 0
+    
+    # Update in database
+    usercol.update_one(
+        {"user_id": user_id},
+        {"$set": {"review_history": review_history}}
+    )
+    
+    # Also update the SuperMemo state based on performance
+    update_vocab_supermemo_state(user_id, vocab, performance_quality)
+    
+    return True
+
+def update_vocab_supermemo_state(user_id, vocab, quality):
+    """Update SuperMemo state for a specific vocabulary item based on review quality"""
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    
+    if not user or "supermemo" not in user:
+        print(f"[ERROR] User {user_id} not found or has no SuperMemo data")
+        return False
+        
+    supermemo_data = user["supermemo"]
+    
+    # Check if in needs_practice or mastered
+    if vocab in supermemo_data.get("needs_practice", {}):
+        state = supermemo_data["needs_practice"][vocab]
+        # Update the state
+        state = update_supermemo_state(state, quality)
+        # Save back to database
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": {f"supermemo.needs_practice.{vocab}": state}}
+        )
+        return True
+        
+    if vocab in supermemo_data.get("mastered", {}):
+        state = supermemo_data["mastered"][vocab]
+        # Update the state
+        state = update_supermemo_state(state, quality)
+        # Save back to database
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": {f"supermemo.mastered.{vocab}": state}}
+        )
+        return True
+        
+    print(f"[WARNING] Vocabulary '{vocab}' not found in SuperMemo data")
+    return False
 
 def update_supermemo_state(state, quality):
     """
@@ -315,6 +696,12 @@ def update_supermemo_state(state, quality):
     efactor = efactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
     if efactor < 1.3:
         efactor = 1.3
+        
+    # NEW: Cap interval at 7 days (1 week)
+    MAX_INTERVAL = 7  # 1 week maximum
+    if interval > MAX_INTERVAL:
+        print(f"[SuperMemo] Capping interval from {interval} to {MAX_INTERVAL} days")
+        interval = MAX_INTERVAL
 
     today = datetime.now().date()
     state.update({

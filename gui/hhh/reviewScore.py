@@ -1,5 +1,6 @@
 import flet as ft
 import os
+from mainmenu import on_daily_review_complete
 
 def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorrect=0, responseTime="3:01"):
     """
@@ -22,6 +23,8 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     
     def return_to_levels(e):
         """Navigate back to the levels page"""
+        user = page.session.get("user")
+        on_daily_review_complete(e, page, user)
         page.go("/main-menu")
     
     # Create top header with close button

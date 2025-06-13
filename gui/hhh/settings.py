@@ -23,6 +23,27 @@ def settings_page(page: ft.Page):
         nameHolder = "Guest User"
         emailHolder = "Not logged in"
 
+    # Update the perform_logout function in settings.py
+    def perform_logout(e):
+        """Handle user logout with vocabulary scheduling"""
+        user_id = page.session.get("user_id")
+        if user_id:
+            # Schedule vocabulary before logout
+            from supermemo_engine import schedule_pending_vocabulary
+            print("[SuperMemo] Scheduling vocabulary during logout")
+            schedule_result = schedule_pending_vocabulary(user_id)
+            
+            # Clean up temp files including LSTM files
+            from mainmenu import clear_all_temp_files
+            clear_all_temp_files(user_id)  # Pass user_id to clean up user-specific files
+            
+            # Load user data and save any changes
+            user = User().load_data(user_id, page)
+            user.save_user(page)
+        
+        page.session.clear()
+        page.go("/login")
+
     # Header with logo and back button
     header = ft.Container(
         content=ft.Row(

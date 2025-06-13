@@ -1893,6 +1893,11 @@ def lesson_page(page: ft.Page, image_urls: list):
     performance_tracker = {}  # Track performance during lesson
     rebatching_needed = False
 
+    from bkt_engine import update_current_vocab
+    import bkt_engine
+    bkt_engine.current_vocab = None  # Reset current vocabulary tracking
+    bkt_engine.questions_seen = set()  # Reset questions seen tracking
+
     # EXIT ALERT
     dlg_modal = ft.AlertDialog(
         modal=True,
@@ -1988,18 +1993,50 @@ def lesson_page(page: ft.Page, image_urls: list):
         
         # Track performance for this vocabulary
         vocab = getattr(current_question, "vocabulary", "").lower()
-        if vocab and vocab in performance_tracker:
+        if vocab:
             # Check if the question was answered correctly
-            is_correct = current_question.question in correct_answers
+            unique_key = f"{current_question.question}__{current_question.type}__{current_question_index['value']-1}"
+            is_correct = unique_key in correct_answers
+            
+            # Initialize vocabulary tracking if needed
+            if vocab not in performance_tracker:
+                performance_tracker[vocab] = {"answers": [], "predicted_mastery": 0.5}
+            
+            # Call the BKT vocabulary tracking function
+            from bkt_engine import process_question_answer, update_current_vocab, check_vocab_completion
+            
+            # Add answer to performance tracker
             performance_tracker[vocab]["answers"].append(1 if is_correct else 0)
             
-            # Check if we need to rebatch after every 2 questions for a vocabulary
-            if len(performance_tracker[vocab]["answers"]) >= 2:
-                # Check in background thread to avoid UI lag
-                threading.Thread(
-                    target=check_rebatch_need, 
-                    args=(vocab, current_question_index["value"])
-                ).start()
+            # Process the question answer and check if rebatching is needed
+            rebatch_needed = process_question_answer(current_question, is_correct, page)
+            
+            # If we've completed a vocabulary (all questions answered)
+            if check_vocab_completion(performance_tracker, vocab):
+                print(f"[BKT] Vocabulary '{vocab}' completed!")
+                
+                # Get ordered vocabulary list from BKT
+                try:
+                    from bkt_engine import load_custom_bkt
+                    custom_bkt = load_custom_bkt(page.session.get("user_id"))
+                    ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
+                    
+                    # Update current vocabulary tracking
+                    next_vocab = update_current_vocab(vocab, ordered_vocab)
+                    if next_vocab:
+                        print(f"[BKT] Next vocabulary: {next_vocab}")
+                except Exception as e:
+                    print(f"[BKT] Error updating vocabulary progression: {e}")
+            
+            # If rebatching is needed, do it now
+            if rebatch_needed:
+                print(f"[BKT] Rebatching questions based on vocabulary performance")
+                remaining_questions = questions[current_question_index["value"]:]
+                if remaining_questions:
+                    from bkt_engine import select_adaptive_questions
+                    rebatched = select_adaptive_questions(remaining_questions, performance_tracker, page.session.get("user_id"))
+                    questions[current_question_index["value"]:] = rebatched
+                    print(f"[BKT] Rebatched {len(rebatched)} questions")
 
         current_question_index["value"] += 1
         progress_value = (current_question_index["value"] + 1) / total_questions
@@ -2050,6 +2087,32 @@ def lesson_page(page: ft.Page, image_urls: list):
             incorrect_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()}
             page.session.set("updated_data", [grade_percentage, formatted_time, total_response_time, correct_answers_serialized, incorrect_answers_serialized, questions])
             update_user_library()
+
+            user_id = page.session.get("user_id")
+            if user_id:
+                print("[SuperMemo] Collecting vocabulary for batch registration")
+                
+                # Collect all unique vocabulary words
+                vocab_to_register = set()
+                for q_id, q_data in correct_answers.items():
+                    vocab = q_data.vocabulary if hasattr(q_data, 'vocabulary') else q_data.get('vocabulary')
+                    if vocab:
+                        vocab_to_register.add(vocab)
+                        
+                # Register them in a separate thread
+                def register_vocab_batch(user_id, vocab_list):
+                    from supermemo_engine import register_new_vocabulary_batch
+                    register_new_vocabulary_batch(user_id, list(vocab_list))
+                    
+                # Start the registration thread
+                import threading
+                registration_thread = threading.Thread(
+                    target=register_vocab_batch, 
+                    args=(user_id, vocab_to_register),
+                    daemon=True
+                )
+                registration_thread.start()
+
             lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)
             reset_var()
 

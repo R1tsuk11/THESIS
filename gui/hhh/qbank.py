@@ -1529,7 +1529,7 @@ module_1 = {
     {
         "id": 145,
         "type": "Lesson",
-        "question": "'Ambot' means 'I don't know' in Waray, the same as 'ewan' in Filipino. Use it when you're uncertain or don't have an answer.",
+        "question": "'Ambot' means 'I do not know' in Waray, the same as 'ewan' in Filipino. Use it when you're uncertain or don't have an answer.",
         "audio_file": "ambot.mp3",
         "image": "M1V17.png",
         "answer": None,

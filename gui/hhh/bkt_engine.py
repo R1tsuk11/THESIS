@@ -8,8 +8,21 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import subprocess
 import pickle
+import pymongo
+import sys
+from pymongo.errors import ConfigurationError
+import types
 
-from mainmenu import connect_to_mongoDB
+uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+
+def connect_to_mongoDB():
+    try:
+        arami = pymongo.MongoClient(uri)["arami"]
+        usercol = arami["users"]
+        return usercol
+    except ConfigurationError as e:
+        print(f"Failed to connect to MongoDB: {e}")
+        sys.exit("Terminating the program due to MongoDB connection failure.")
 
 executor = ThreadPoolExecutor(max_workers=2)
 TEMP_FILE = "temp_bkt_data.json"
@@ -18,6 +31,21 @@ bkt_model = Model()
 bkt_data = []
 bkt_thread = None
 bkt_thread_lock = threading.Lock()
+uid = None
+current_vocab_index = 0
+current_vocab = None
+questions_seen = set()  # Track IDs of questions already seen
+
+def save_predictions_file():
+    """Save the latest BKT predictions to a JSON file (legacy support)"""
+    state = load_temp_state()
+    predictions = state.get("predictions", {})
+    
+    # Save to the prediction file
+    with open(PREDICTION_FILE, "w") as f:
+        json.dump({"predictions": predictions}, f, indent=2)
+        
+    print(f"[BKT] Saved predictions to {PREDICTION_FILE}")
 
 class CustomBKTPredictor:
     """Custom BKT predictor that directly uses the vocabulary parameters"""
@@ -96,6 +124,13 @@ class CustomBKTPredictor:
                 result_df.loc[group.index[i], 'state_predictions'] = prob
                 
         return result_df
+    
+    def get_vocabulary_in_order(self):
+        """Return vocabulary items in their original qbank order"""
+        vocab_items = list(self.vocab_parameters.items())
+        # Sort by the 'order' parameter
+        vocab_items.sort(key=lambda x: x[1].get('order', 999999))
+        return [vocab for vocab, _ in vocab_items]
 
 def get_custom_bkt_path(user_id=None):
     """Get path for user-specific custom BKT predictor"""
@@ -110,13 +145,30 @@ def load_custom_bkt(user_id=None):
         if os.path.exists(model_path):
             print(f"[BKT] Loading custom predictor for user {user_id}")
             
-            # Fix the pickle issue by loading the parameters and creating a new object
             with open(model_path, "rb") as f:
                 try:
                     # Try normal loading first
-                    return pickle.load(f)
-                except AttributeError:
-                    # If that fails, load raw data and recreate object
+                    predictor = pickle.load(f)
+                    
+                    # Check if the loaded predictor has the required method
+                    if not hasattr(predictor, 'get_vocabulary_in_order'):
+                        print(f"[BKT] Adding missing get_vocabulary_in_order method to predictor")
+                        # Add the method dynamically
+                        def get_vocabulary_in_order(self):
+                            """Return vocabulary items in their original qbank order"""
+                            vocab_items = list(self.vocab_parameters.items())
+                            # Sort by the 'order' parameter
+                            vocab_items.sort(key=lambda x: x[1].get('order', 999999))
+                            return [vocab for vocab, _ in vocab_items]
+                        
+                        # Bind the method to the instance
+                        import types
+                        predictor.get_vocabulary_in_order = types.MethodType(get_vocabulary_in_order, predictor)
+                    
+                    return predictor
+                    
+                except (AttributeError, pickle.UnpicklingError):
+                    # If that fails, reload and recreate object
                     f.seek(0)  # Go back to start of file
                     raw_data = pickle.load(f)
                     
@@ -129,8 +181,16 @@ def load_custom_bkt(user_id=None):
                         print("[BKT] Could not extract parameters from predictor")
                         return None
         else:
-            print(f"[BKT] No custom predictor found for user {user_id}, checking default")
-            # Try to load the default model
+            print(f"[BKT] No custom predictor found for user {user_id}, creating new one")
+            
+            # CHANGE: Explicitly create a user-specific predictor first
+            user_predictor = create_user_bkt_predictor(user_id)
+            if user_predictor:
+                print(f"[BKT] Successfully created custom BKT predictor for user {user_id}")
+                return user_predictor
+                
+            # Fall back to default if creation failed
+            print(f"[BKT] Failed to create custom predictor, checking default")
             if os.path.exists("custom_bkt_predictor.pkl"):
                 with open("custom_bkt_predictor.pkl", "rb") as f:
                     predictor = pickle.load(f)
@@ -164,6 +224,19 @@ def create_user_bkt_predictor(user_id):
                 
                 # Clone the predictor (copy parameters)
                 user_predictor = CustomBKTPredictor(base_predictor.vocab_parameters.copy())
+                
+                # Ensure the new predictor has the get_vocabulary_in_order method
+                if not hasattr(user_predictor, 'get_vocabulary_in_order'):
+                    def get_vocabulary_in_order(self):
+                        """Return vocabulary items in their original qbank order"""
+                        vocab_items = list(self.vocab_parameters.items())
+                        # Sort by the 'order' parameter
+                        vocab_items.sort(key=lambda x: x[1].get('order', 999999))
+                        return [vocab for vocab, _ in vocab_items]
+                    
+                    # Bind the method to the instance
+                    import types
+                    user_predictor.get_vocabulary_in_order = types.MethodType(get_vocabulary_in_order, user_predictor)
                 
                 # Save the user-specific predictor
                 save_custom_bkt(user_predictor, user_id)
@@ -224,18 +297,36 @@ def get_vocab_mastery(vocab, default_for_new=0.4, user_performance=None, user_id
     
     return default_for_new
 
-def select_adaptive_questions(questions_pool, user_performance=None):
+def select_adaptive_questions(questions_pool, user_performance=None, user_id=None):
     """
     Select questions adaptively while preserving lesson structure.
     Each vocabulary gets 1 lesson + 3 practice questions.
     Pronunciation questions are always included.
+    Questions already seen won't be reused.
     """
+    global current_vocab, questions_seen
+    
     if not questions_pool:
         return []
         
-    # Group questions by vocabulary
+    global uid
+    if not user_id:
+        user_id = uid
+        
+    # Load BKT predictor for proper vocab order
+    custom_bkt = load_custom_bkt(user_id)
+    ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
+    
+    # Filter out questions already seen
+    fresh_questions = [q for q in questions_pool if getattr(q, "id", None) not in questions_seen]
+    if not fresh_questions:
+        print("[BKT] Warning: No fresh questions available!")
+        return []
+    
+    # Group questions by vocabulary maintaining original order
     vocab_questions = {}
-    for q in questions_pool:
+    
+    for q in fresh_questions:
         vocab = getattr(q, "vocabulary", "").lower()
         if vocab not in vocab_questions:
             vocab_questions[vocab] = {"lesson": [], "pronunciation": [], "practice": []}
@@ -250,7 +341,20 @@ def select_adaptive_questions(questions_pool, user_performance=None):
     # Build the new batch preserving structure
     selected_questions = []
     
-    for vocab, q_sets in vocab_questions.items():
+    # Determine which vocabularies to process based on current progress
+    if current_vocab in ordered_vocab:
+        current_index = ordered_vocab.index(current_vocab)
+        vocabs_to_process = ordered_vocab[current_index:current_index+3]  # Current + next 2 vocabs
+    else:
+        vocabs_to_process = ordered_vocab[:3]  # First 3 vocabs
+    
+    # Mastery from previous vocab (for transfer learning)
+    previous_mastery = 0.5  # Default medium mastery
+    
+    for vocab in vocabs_to_process:
+        if vocab not in vocab_questions:
+            continue
+            
         # Get mastery for this vocabulary
         mastery = 0.4  # Default medium mastery
         if user_performance and vocab in user_performance:
@@ -261,28 +365,132 @@ def select_adaptive_questions(questions_pool, user_performance=None):
             elif actual_performance["answers"]:
                 mastery = sum(actual_performance["answers"]) / len(actual_performance["answers"])
         
+        # Apply mastery transfer from previous vocabulary
+        if vocab != vocabs_to_process[0]:  # Not the first vocab in this batch
+            # Blend current vocab mastery with previous performance
+            mastery = (mastery * 0.7) + (previous_mastery * 0.3)
+        
         print(f"[BKT] Vocab '{vocab}' has mastery {mastery:.2f}")
         
-        # 1. Always add the lesson question
+        q_sets = vocab_questions[vocab]
+        
+        # 1. Add lesson question if available and not seen
         if q_sets["lesson"]:
-            selected_questions.append(q_sets["lesson"][0])
+            lesson_q = q_sets["lesson"][0]
+            selected_questions.append(lesson_q)
+            questions_seen.add(getattr(lesson_q, "id", None))
             print(f"[BKT] Added lesson question for '{vocab}'")
         
-        # 2. Always add pronunciation question if available
+        # 2. Add pronunciation question if available and not seen
         if q_sets["pronunciation"]:
-            selected_questions.append(q_sets["pronunciation"][0])
+            pron_q = q_sets["pronunciation"][0]
+            selected_questions.append(pron_q)
+            questions_seen.add(getattr(pron_q, "id", None))
             print(f"[BKT] Added pronunciation question for '{vocab}'")
         
         # 3. Select practice questions based on difficulty and mastery
         remaining_slots = 3 - (1 if q_sets["pronunciation"] else 0)  # After lesson & pronunciation
         practice_questions = select_by_difficulty(q_sets["practice"], mastery, remaining_slots)
-        selected_questions.extend(practice_questions)
         
         for q in practice_questions:
+            selected_questions.append(q)
+            questions_seen.add(getattr(q, "id", None))
             print(f"[BKT] Added {q.type} question for '{vocab}' (difficulty: {getattr(q, 'difficulty', 'N/A')})")
+        
+        # Update previous mastery for next vocabulary
+        previous_mastery = mastery
+        
+        # Update current vocabulary tracking
+        if not current_vocab:
+            current_vocab = vocab
     
     print(f"[BKT] Selected {len(selected_questions)} questions adaptively while preserving structure")
     return selected_questions
+
+def update_current_vocab(completed_vocab, ordered_vocab_list):
+    """
+    Update the current vocabulary tracking based on completion
+    
+    Args:
+        completed_vocab: The vocabulary item just completed
+        ordered_vocab_list: Ordered list of vocabulary items
+        
+    Returns:
+        The next vocabulary item
+    """
+    global current_vocab
+    
+    try:
+        current_index = ordered_vocab_list.index(completed_vocab)
+        if current_index < len(ordered_vocab_list) - 1:
+            next_vocab = ordered_vocab_list[current_index + 1]
+            current_vocab = next_vocab
+            print(f"[BKT] Advancing to next vocabulary: {current_vocab}")
+            return next_vocab
+        else:
+            current_vocab = None
+            print("[BKT] All vocabularies completed")
+            return None
+    except ValueError:
+        print(f"[BKT] Warning: Vocabulary '{completed_vocab}' not found in ordered list")
+        return None
+
+def check_vocab_completion(performance_data, vocab):
+    """Check if a vocabulary item has been completed (all questions answered)"""
+    if not vocab or vocab not in performance_data:
+        return False
+        
+    # Typically 4 questions per vocabulary (1 lesson + 3 practice)
+    data = performance_data.get(vocab, {})
+    answers = data.get("answers", [])
+    return len(answers) >= 4  # Consider vocab complete after 4 answers
+
+def process_question_answer(question, is_correct, page):
+    """Process a question answer and determine if rebatching is needed"""
+    vocab = getattr(question, "vocabulary", None)
+    if not vocab:
+        return False  # No vocabulary to process
+        
+    # Get performance data - FIXED SESSION HANDLING
+    user_id = page.session.get("user_id")
+    
+    # Properly handle session storage
+    try:
+        performance_data = page.session.get("user_performance")
+    except Exception:
+        performance_data = {}
+    
+    # Initialize if None
+    if performance_data is None:
+        performance_data = {}
+    
+    if vocab not in performance_data:
+        performance_data[vocab] = {"answers": []}
+    
+    # Record answer (1 for correct, 0 for incorrect)
+    performance_data[vocab]["answers"].append(1 if is_correct else 0)
+    page.session.set("user_performance", performance_data)
+    
+    # Get ordered vocabulary list
+    custom_bkt = load_custom_bkt(user_id)
+    ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
+    
+    # Check if this vocabulary is complete
+    is_vocab_complete = check_vocab_completion(performance_data, vocab)
+    
+    if is_vocab_complete:
+        print(f"[BKT] Vocabulary '{vocab}' completed!")
+        # Vocabulary complete, move to next vocabulary
+        next_vocab = update_current_vocab(vocab, ordered_vocab)
+        
+        # Check if we need to rebatch for next vocabulary
+        need_rebatch, rebatch_vocab = should_rebatch(performance_data, vocab, ordered_vocab)
+        
+        if need_rebatch:
+            print(f"[BKT] Rebatching needed for next vocabulary '{rebatch_vocab}'")
+            return True  # Signal that rebatching is needed
+    
+    return False  # No rebatching needed
 
 def select_by_difficulty(questions, mastery, count):
     """Select questions with appropriate difficulty based on mastery level."""
@@ -328,40 +536,62 @@ def select_by_difficulty(questions, mastery, count):
     
     return selected[:count]
 
-def should_rebatch(performance_data, threshold=0.3):
+def should_rebatch(performance_data, current_vocab, vocab_list, threshold=0.3):
     """
-    Determine if we need to rebatch questions based on performance changes
+    Determine if we need to rebatch questions based on current vocabulary completion
     
     Args:
         performance_data: Dictionary mapping vocabulary to lists of correct/incorrect answers
+        current_vocab: The vocabulary item the user is currently working on
+        vocab_list: Ordered list of vocabulary items in the lesson
         threshold: Threshold for rebatching (difference between expected and actual accuracy)
     
     Returns:
         Boolean indicating if rebatching is needed and the vocabulary that triggered it
     """
+    # Don't rebatch if we don't have a current vocabulary
+    if not current_vocab:
+        return False, None
+        
+    # Check if we have performance data for the current vocabulary
+    if current_vocab not in performance_data:
+        return False, None
+        
+    # Check if we have enough answers for the current vocabulary (typical vocab has 4 questions)
+    data = performance_data[current_vocab]
+    if len(data.get("answers", [])) < 4:  # Not enough answers yet
+        return False, None
+        
+    # Get the index of the current vocab in the list
+    try:
+        current_index = vocab_list.index(current_vocab)
+    except ValueError:
+        return False, None
+        
+    # If this was the last vocabulary, no need to rebatch
+    if current_index >= len(vocab_list) - 1:
+        return False, None
+        
+    # Calculate actual accuracy for the current vocabulary
+    actual_accuracy = sum(data["answers"]) / len(data["answers"])
+    
+    # Get predicted mastery and expected accuracy  
+    mastery = get_vocab_mastery(current_vocab)
     state = load_temp_state()
     predictions = state.get("predictions", {})
+    vocab_pred = predictions.get(current_vocab.lower(), {})
+    guess = float(vocab_pred.get("guess", 0.2))
+    slip = float(vocab_pred.get("slip", 0.1))
+    expected_accuracy = mastery * (1 - slip) + (1 - mastery) * guess
     
-    for vocab, data in performance_data.items():
-        if not data["answers"]:
-            continue  # Skip if no answers for this vocabulary
-            
-        # Calculate actual accuracy
-        actual_accuracy = sum(data["answers"]) / len(data["answers"])
+    # Compare actual vs expected
+    if abs(actual_accuracy - expected_accuracy) > threshold:
+        print(f"[BKT] Performance for '{current_vocab}' differs significantly from prediction")
+        print(f"[BKT] Expected: {expected_accuracy:.2f}, Actual: {actual_accuracy:.2f}")
         
-        # Get predicted mastery and expected accuracy
-        mastery = get_vocab_mastery(vocab)
-        # Expected accuracy from BKT (using mastery, guess and slip)
-        vocab_pred = predictions.get(vocab.lower(), {})
-        guess = float(vocab_pred.get("guess", 0.2))
-        slip = float(vocab_pred.get("slip", 0.1))
-        expected_accuracy = mastery * (1 - slip) + (1 - mastery) * guess
-        
-        # Compare actual vs expected
-        if abs(actual_accuracy - expected_accuracy) > threshold:
-            print(f"[BKT] Performance for '{vocab}' differs significantly from prediction")
-            print(f"[BKT] Expected: {expected_accuracy:.2f}, Actual: {actual_accuracy:.2f}")
-            return True, vocab
+        # Return the NEXT vocabulary to rebatch (not the current one)
+        next_vocab = vocab_list[current_index + 1]
+        return True, next_vocab
             
     return False, None
 
@@ -433,7 +663,9 @@ def save_temp_state(state):
         json.dump(state, f, indent=4)
 
 def update_bkt(user_id, correct_answers, incorrect_answers):
+    global uid
     print(f"[update_bkt] Starting BKT update for user {user_id}...")
+    uid = user_id
     
     # Load or create custom BKT predictor
     custom_bkt = load_custom_bkt(user_id)
@@ -549,6 +781,8 @@ def update_bkt(user_id, correct_answers, incorrect_answers):
     
     print("\nDisplaying BKT predictions after update:")
     display_bkt_predictions(user_id)
+
+    save_predictions_file()
 
     # Add this to bkt_engine.py
 def display_bkt_predictions(user_id, filter_vocab=None):

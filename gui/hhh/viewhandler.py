@@ -8,7 +8,7 @@ from mainmenu import main_menu_page
 from levels import levels_page
 from lesson import lesson_page
 from chapterTest import chapter_test_page
-from reviewFrame import review_session
+from reviewFrame import daily_review_page
 from wordLibrary import word_library_page
 from settings import settings_page, about_page, acknowledgements_page
 from achievements import achievement_page
@@ -192,7 +192,7 @@ async def main(page: ft.Page):
         elif page.route == "/chaptertest":
             chapter_test_page(page, image_urls)
         elif page.route == "/daily-review":
-            review_session(page, image_urls)
+            daily_review_page(page, image_urls)
         elif page.route == "/word-library":
             word_library_page(page, image_urls)
         elif page.route == "/settings":

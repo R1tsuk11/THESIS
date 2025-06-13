@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import warnings
 import time
 import threading
+from qbank import module_bank
 
 warnings.filterwarnings('ignore', category=RuntimeWarning, module='pyBKT.fit.EM_fit')
 
@@ -95,6 +96,13 @@ class CustomBKTPredictor:
                 result_df.loc[group.index[i], 'state_predictions'] = prob
                 
         return result_df
+    
+    def get_vocabulary_in_order(self):
+        """Return vocabulary items in their original qbank order"""
+        vocab_items = list(self.vocab_parameters.items())
+        # Sort by the 'order' parameter
+        vocab_items.sort(key=lambda x: x[1].get('order', 999999))
+        return [vocab for vocab, _ in vocab_items]
 
 def initialize_bkt_model(vocab_parameters):
     """Create a properly initialized BKT model that can make predictions"""
@@ -219,6 +227,21 @@ def extract_vocabulary_from_qbank():
     print(f"Extracted {len(vocabulary_items)} unique vocabulary items from qbank")
     return vocabulary_items
 
+def extract_vocab_in_order():
+    """Extract vocabulary items from qbank in their original order"""
+    ordered_vocab = []
+    module_nums = sorted([int(mod_num.replace("module_", "")) for mod_num in dir(module_bank) if mod_num.startswith("module_")])
+    
+    for mod_num in module_nums:
+        module = getattr(module_bank, f"module_{mod_num}")
+        for lesson_name, lesson_content in module.items():
+            for question in lesson_content:
+                vocab = question.get("vocabulary")
+                if vocab and vocab not in ordered_vocab:
+                    ordered_vocab.append(vocab)
+    
+    return ordered_vocab
+
 # Updates to create_synthetic_data_for_vocab function
 def create_synthetic_data_for_vocab(vocab, metadata):
     """Create synthetic training data for a single vocabulary item"""
@@ -288,11 +311,17 @@ def preprocess_training_data(df):
 
 def create_base_bkt_model_batched():
     """Create a pre-trained BKT model processing one vocabulary at a time"""
-    # Extract vocabulary from qbank
-    vocab_metadata = extract_vocabulary_from_qbank()
+    print("=== Creating BKT model with original vocabulary order ===")
     
-    # Create a consolidated model
-    base_model = Model()
+    # Get vocabulary in original order from qbank
+    ordered_vocab_list = extract_vocab_in_order()
+    print(f"Extracted {len(ordered_vocab_list)} vocabularies in original qbank order")
+    
+    # Create a dictionary mapping vocab to its original position
+    vocab_order = {vocab.lower(): idx for idx, vocab in enumerate(ordered_vocab_list)}
+    
+    # Extract vocabulary from qbank with metadata
+    vocab_metadata = extract_vocabulary_from_qbank()
     
     # Dictionary to store parameters for each vocabulary
     vocab_parameters = {}
@@ -301,16 +330,12 @@ def create_base_bkt_model_batched():
     vocab_pbar = tqdm(vocab_metadata.items(), total=len(vocab_metadata),
                     desc="Processing vocabularies", ncols=100)
     
-    # Update this section in create_base_bkt_model_batched function
     for vocab, metadata in vocab_pbar:
         vocab_pbar.set_description(f"Processing '{vocab}'")
         
         # Create synthetic data for this vocabulary
         vocab_data = create_synthetic_data_for_vocab(vocab, metadata)
         df = pd.DataFrame(vocab_data)
-        
-        # SIMPLIFIED APPROACH: Instead of fitting with PyBKT, calculate parameters directly
-        # This avoids the fitting problems completely
         
         # Calculate difficulty
         module = metadata['module'] 
@@ -336,16 +361,20 @@ def create_base_bkt_model_batched():
         guess = min(0.35, max(0.1, guess))
         slip = min(0.2, max(0.02, slip))
         
-        # Store parameters
+        # Add original order information from qbank
+        order_position = vocab_order.get(vocab.lower(), 999999)  # Default to high number if not found
+        
+        # Store parameters with order information
         vocab_parameters[vocab] = {
             'learn': learn,
             'guess': guess,
             'slip': slip,
             'prior': 0.5,
-            'difficulty': difficulty
+            'difficulty': difficulty,
+            'order': order_position  # Store original position in qbank
         }
         
-        vocab_pbar.set_postfix({'difficulty': f"{difficulty:.2f}", 'status': 'direct'})
+        vocab_pbar.set_postfix({'difficulty': f"{difficulty:.2f}", 'order': order_position, 'status': 'direct'})
     
     # Save the per-vocabulary parameters
     with open('bkt_vocab_parameters.json', 'w') as f:
@@ -358,7 +387,6 @@ def create_base_bkt_model_batched():
     
     print("Vocabulary parameters saved to 'bkt_vocab_parameters.json'")
     
-    # Now create a consolidated model with these parameters
     # Now create a consolidated model with these parameters
     print("Building consolidated BKT model...")
 
@@ -373,8 +401,20 @@ def create_base_bkt_model_batched():
     else:
         print("Failed to initialize model. Creating custom BKT predictor...")
         
-        # Create and save custom BKT predictor
+        # Create and save custom BKT predictor with ordered vocabulary
         custom_bkt = CustomBKTPredictor(vocab_parameters)
+        
+        # Add an optimized get_vocabulary_in_order method to the instance
+        def get_vocabulary_in_order(self):
+            """Return vocabulary items in their original qbank order"""
+            vocab_items = list(self.vocab_parameters.items())
+            # Sort by the 'order' parameter
+            vocab_items.sort(key=lambda x: x[1].get('order', 999999))
+            return [vocab for vocab, _ in vocab_items]
+            
+        # Attach the method to the instance
+        custom_bkt.get_vocabulary_in_order = get_vocabulary_in_order.__get__(custom_bkt)
+        
         with open("custom_bkt_predictor.pkl", "wb") as f:
             pickle.dump(custom_bkt, f)
         print("✓ Custom BKT predictor saved to 'custom_bkt_predictor.pkl'")
@@ -400,7 +440,8 @@ def create_base_bkt_model_batched():
     for vocab in test_vocabs:
         params = vocab_parameters[vocab]
         diff = params.get('difficulty', 0.0)
-        print(f"  - '{vocab}' (difficulty {diff:.2f}): learn={params['learn']:.2f}, " + 
+        order = params.get('order', 999)
+        print(f"  - '{vocab}' (difficulty {diff:.2f}, order {order}): learn={params['learn']:.2f}, " + 
             f"guess={params['guess']:.2f}, slip={params['slip']:.2f}")
 
     # Initialize the return value
@@ -412,24 +453,23 @@ def create_base_bkt_model_batched():
         print("\nAttempting predictions with PyBKT model:")
         # Your existing PyBKT prediction code...
     else:
-        # Create custom BKT predictor
-        custom_bkt = CustomBKTPredictor(vocab_parameters)
-        return_model = custom_bkt  # Set this as our return value
-        
-        # Save the custom predictor
-        with open("custom_bkt_predictor.pkl", "wb") as f:
-            pickle.dump(custom_bkt, f)
-        print("✓ Custom BKT predictor saved to 'custom_bkt_predictor.pkl'")
+        # Use the already created custom BKT predictor
+        return_model = custom_bkt
         
         # Test the custom predictor
         print("\nAttempting predictions with custom BKT predictor:")
+        
+        # Verify the order feature works
+        ordered_vocab = custom_bkt.get_vocabulary_in_order()
+        print(f"First 5 vocabulary items in qbank order: {ordered_vocab[:5]}")
+        
         for vocab in test_vocabs:
             try:
                 # Test with a sequence of responses
                 correct_history = [0, 1, 1]  # First wrong, then two correct
                 mastery = custom_bkt.predict(vocab, correct_history)
                 params = vocab_parameters[vocab]
-                print(f"  - '{vocab}': mastery={mastery:.2f} after {correct_history}")
+                print(f"  - '{vocab}' (order {params.get('order')}): mastery={mastery:.2f} after {correct_history}")
                 
                 # Test with dataframe format (like PyBKT)
                 test_df = pd.DataFrame([

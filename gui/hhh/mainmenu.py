@@ -8,6 +8,7 @@ from datetime import datetime
 from supermemo_engine import prepare_daily_review
 import time
 import threading
+from supermemo_engine import mark_vocabulary_reviewed
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -108,6 +109,34 @@ def update_last_login_date(user):
     usercol = connect_to_mongoDB()
     usercol.update_one({"user_id": user.user_id}, {"$set": {"last_login_date": today_str}})
 
+def on_daily_review_complete(e, page, user):
+    # Get the review results data
+    review_questions = page.session.get("daily_review_questions")
+    if review_questions is None:
+        review_questions = []
+    
+    correct_answers = page.session.get("correct_answers")
+    if correct_answers is None:
+        correct_answers = {}
+    
+    # FIRST: Process each vocabulary with its quality score
+    for question in review_questions:
+        vocab = question.get("vocabulary")
+        if vocab:
+            # Determine quality score based on correctness
+            quality = 5 if vocab in correct_answers else 2
+            
+            # Mark as reviewed in the SuperMemo system
+            mark_vocabulary_reviewed(user.user_id, vocab, quality)
+    
+    # THEN: Any batch processing would happen here, after individual quality updates
+    
+    print(f"[Daily Review] Completed and processed {len(review_questions)} vocabulary items")
+    update_last_login_date(user)
+    page.session.set("daily_review_needed", False)
+    
+    page.open(ft.SnackBar(ft.Text("Daily review completed successfully!"), bgcolor="#4CAF50"))
+
 def cache_modules_to_temp(modules):
     def module_to_dict(module):
         return {
@@ -144,7 +173,7 @@ def cache_library_to_temp(library):
     with open("temp_library.json", "w") as f:
         json.dump(library, f)
 
-def clear_all_temp_files():
+def clear_all_temp_files(user_id=None):
     """
     Clear all temporary files used by the application.
     This should be called on logout to ensure clean state for next login.
@@ -161,16 +190,29 @@ def clear_all_temp_files():
         "temp_lstm_input.json",             # Temporary LSTM input data        
     ]
     
-    print("[Cleanup] Clearing all temporary files...")
-    for file_path in temp_files:
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"[Cleanup] Deleted: {file_path}")
-        except Exception as e:
-            print(f"[Cleanup] Error deleting {file_path}: {e}")
+    # Remove standard temp files
+    for file in temp_files:
+        if os.path.exists(file):
+            try:
+                os.remove(file)
+                print(f"Removed temp file: {file}")
+            except Exception as e:
+                print(f"Error removing {file}: {e}")
     
-    print("[Cleanup] All temporary files cleared.")
+    # Clean up user-specific LSTM files
+    if user_id:
+        lstm_files = [
+            os.path.join("lstm_history", f"temp_prof_history_{user_id}.json"),
+            os.path.join("lstm_counters", f"lstm_counter_{user_id}.json")
+        ]
+        
+        for file in lstm_files:
+            if os.path.exists(file):
+                try:
+                    os.remove(file)
+                    print(f"Removed LSTM file: {file}")
+                except Exception as e:
+                    print(f"Error removing {file}: {e}")
 
 def connect_to_mongoDB():
     try:
@@ -494,8 +536,12 @@ class User:  # User class
         self.save_library()
         self.save_bkt_data()
         self.save_prof_history()
-        self.save_lstm_counter()  # Added this to ensure LSTM counter is saved
+        self.save_lstm_counter()
 
+        # Add this code to ensure vocabulary scheduling happens during logout
+        print("[SuperMemo] Scheduling vocabulary before logout")
+        from supermemo_engine import schedule_pending_vocabulary
+        schedule_pending_vocabulary(self.user_id)
 
         print(f"[TEST] Usage time (seconds): {usage_time_seconds}, (minutes): {usage_time_seconds // 60}")
         
@@ -530,6 +576,35 @@ def get_user_id(page):
             print("No user ID found in session.")
             return None
         return page.session.get("user_id")
+
+# Add this to the main_menu_page function or where sessions are initialized
+def check_for_unscheduled_vocabulary(user_id):
+    """Check and schedule any unscheduled vocabulary when user returns"""
+    if user_id:
+        from supermemo_engine import schedule_pending_vocabulary
+        
+        # Check if this is the first time we're scheduling today
+        usercol = connect_to_mongoDB()
+        user_data = usercol.find_one({"user_id": user_id})
+        if user_data and "last_schedule_date" in user_data:
+            last_scheduled = user_data["last_schedule_date"]
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            if last_scheduled == today:
+                print(f"[SuperMemo] Already scheduled vocabulary today ({today}), skipping")
+                return False
+        
+        # Schedule vocabulary and update the last scheduling date
+        result = schedule_pending_vocabulary(user_id)
+        
+        # Update the last schedule date
+        if result:  # Only update if scheduling actually happened
+            usercol.update_one(
+                {"user_id": user_id},
+                {"$set": {"last_schedule_date": datetime.now().strftime("%Y-%m-%d")}}
+            )
+        return result
+    return False
 
 def main_menu_page(page: ft.Page, image_urls: list):
     """Main menu page with module cards"""
@@ -756,6 +831,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
     cards = []
     user_id = get_user_id(page)  # Get user ID from session
     user = User().load_data(user_id, page)  # Load user data
+    page.session.set("user", user)
     page.session.set("user_library", user.library)  # Cache library for later use
     for module in user.modules:
         card = create_module_card(module.id, module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
@@ -903,6 +979,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
     page.update()
 
     start_usage_timer(page)
+    check_for_unscheduled_vocabulary(get_user_id(page))  # Check for unscheduled vocabulary
 
     # Attach reset_idle_timer to user interactions
     page.on_pointer_move = reset_idle_timer
@@ -919,5 +996,5 @@ def main_menu_page(page: ft.Page, image_urls: list):
         review_questions = prepare_daily_review(user.user_id)
         print("Review questions:", review_questions)
         page.session.set("daily_review_questions", review_questions)
+        page.session.set("daily_review_needed", True)
         show_daily_review_overlay(page)
-        update_last_login_date(user)

@@ -127,20 +127,50 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
                 json.dump([{"proficiency": proficiency}], f)
 
     # 6. Run LSTM in subprocess
-    result = subprocess.run(
-        ["python", "lstm_engine_runner.py", "temp_lstm_input.json", prof_history_path, str(user_id)],
-        capture_output=True, text=True
-    )
-    if result.stdout:
-        try:
-            output = json.loads(result.stdout)
-            print("[LSTM subprocess] Output:", output)
-            proficiency = output.get("proficiency")
-            page.session.set("proficiency", proficiency)
-        except Exception as e:
-            print("[LSTM subprocess] Failed to parse output:", e)
-    if result.stderr:
-        print("[LSTM subprocess] Error:", result.stderr)
+    try:
+        # Your existing code to prepare bkt_sequence and completion
+        
+        # Use the new lstm_helper interface instead
+        from lstm_helper import get_lstm_proficiency
+        
+        # Make sure the user model exists before prediction
+        user_model_path = f"lstm_models/lstm_proficiency_model_{user_id}.keras"
+        base_model_path = "lstm_models/lstm_proficiency_model.keras"
+
+        # Only run pre-training if necessary
+        if not os.path.exists(user_model_path):
+            # Check if base model exists
+            if not os.path.exists(base_model_path):
+                print("[LSTM] Base model doesn't exist, running full pre-training...")
+                subprocess.run(["python", "pre_train_lstm.py"], capture_output=True)
+            
+            # Create user-specific model (much faster than full pre-training)
+            print(f"[LSTM] Creating model for user {user_id}...")
+            subprocess.run(["python", "pre_train_lstm.py", str(user_id)], capture_output=True)
+            print(f"[LSTM] User model creation complete")
+        else:
+            print(f"[LSTM] User model already exists at {user_model_path}")
+        
+        # Get the proficiency prediction
+        result = get_lstm_proficiency(current_bkt_sequence, completion, user_id)
+        print("[LSTM] Result:", result)
+        
+        # Save to page session
+        proficiency = result.get("proficiency", 0)
+        confidence = result.get("confidence", 0)
+        method = result.get("method", "unknown")
+        
+        page.session.set("proficiency", proficiency)
+        page.session.set("proficiency_confidence", confidence)
+        
+        print(f"[LSTM] Proficiency: {proficiency:.4f}, Confidence: {confidence:.2f}, Method: {method}")
+
+        from lstm_engine import display_lstm_predictions_table
+        print("\nGenerating LSTM predictions...\n")
+        display_lstm_predictions_table(current_bkt_sequence, user_id)
+        
+    except Exception as e:
+        print(f"[LSTM] Error in get_lstm_proficiency: {e}")
 
 def compute_completion(page):
     modules = page.session.get("modules")
@@ -423,18 +453,33 @@ def levels_page(page: ft.Page, image_urls: list):
                 f"vocab={getattr(q, 'vocabulary', 'unknown')}, "
                 f"difficulty={getattr(q, 'difficulty', 'unknown')}")
 
-        # Get all unique vocabularies in this lesson
-        # Get all unique vocabularies in this lesson - preserve original case
+        # MOVED HERE: Get vocabulary in proper order using BKT engine
+        from bkt_engine import load_custom_bkt
+        custom_bkt = load_custom_bkt(user_id)
+        ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
+        
+        # Create vocabulary dictionary from questions
         vocab_dict = {}
         for q in all_questions:
             if q.vocabulary:
-                # Use lowercase as key for case-insensitive matching, but store original case
                 vocab_key = q.vocabulary.lower()
                 vocab_dict[vocab_key] = q.vocabulary  # Store original case
         
-        # Get sorted list of vocabularies with original casing preserved
-        vocab_list = [vocab_dict[key] for key in sorted(vocab_dict.keys())]
-        print(f"[DEBUG] Vocabularies in this level: {vocab_list}")
+        # Create vocabulary list in proper order
+        vocab_list = []
+        
+        # First add vocabularies in their original qbank order
+        for vocab in ordered_vocab:
+            vocab_lower = vocab.lower()
+            if vocab_lower in vocab_dict:
+                vocab_list.append(vocab_dict[vocab_lower])
+        
+        # Add any remaining vocabularies not found in the ordered list
+        for vocab_lower, vocab in vocab_dict.items():
+            if vocab not in vocab_list:
+                vocab_list.append(vocab)
+                
+        print(f"[DEBUG] Vocabularies in this level (ordered by qbank): {vocab_list}")
 
         def select_lesson_and_practice_questions(all_questions, vocab, proficiency):
             # Match using lowercase for case-insensitive matching but keep original case for display
