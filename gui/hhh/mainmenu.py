@@ -8,6 +8,11 @@ from datetime import datetime
 from supermemo_engine import prepare_daily_review
 import time
 import threading
+import requests
+import hashlib
+from urllib.parse import urlparse
+from PIL import Image
+import io
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -15,6 +20,11 @@ user_active = True
 usage_time_seconds = 0
 idle_seconds = 0
 IDLE_THRESHOLD = 120  # 2 minutes
+
+# Cache settings
+CACHE_DIR = "cache"
+CACHE_INDEX_FILE = os.path.join(CACHE_DIR, "cache_index.json")
+CACHE_EXPIRY = 7 * 24 * 60 * 60  # 7 days
 
 def start_usage_timer(page):
     def timer_loop():
@@ -522,6 +532,107 @@ class User:  # User class
         page.session.clear()
         page.go("/login")
 
+def initialize_cache():
+    """Initialize the cache directory structure"""
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    
+    if not os.path.exists(CACHE_INDEX_FILE):
+        with open(CACHE_INDEX_FILE, "w") as f:
+            json.dump({}, f)
+        
+    print(f"[CACHE] Cache initialized at {CACHE_DIR}")
+
+def get_cached_image(url_or_path, max_size=1024):
+    """
+    Check if image is in cache and return local path if it exists
+    Otherwise download and cache it
+    """
+    # If it's already a local file path, just verify it exists
+    if os.path.exists(url_or_path):
+        return url_or_path
+        
+    # For URLs, check cache
+    if url_or_path.startswith(('http://', 'https://')):
+        # Generate a unique filename based on the URL
+        url_hash = hashlib.md5(url_or_path.encode()).hexdigest()
+        file_ext = os.path.splitext(urlparse(url_or_path).path)[1] or '.png'
+        cache_path = os.path.join(CACHE_DIR, f"{url_hash}{file_ext}")
+        
+        # Check if the file exists in cache
+        if os.path.exists(cache_path):
+            # Check cache index for expiry information
+            with open(CACHE_INDEX_FILE, "r") as f:
+                cache_index = json.load(f)
+            
+            # Check if cache entry is still valid
+            if url_or_path in cache_index:
+                cached_time = cache_index[url_or_path]["timestamp"]
+                if time.time() - cached_time < CACHE_EXPIRY:
+                    print(f"[CACHE] Using cached image for {url_or_path}")
+                    return cache_path
+            
+            # If we get here, cache is expired
+            print(f"[CACHE] Cache expired for {url_or_path}")
+        
+        # Download and cache the image
+        try:
+            print(f"[CACHE] Downloading image: {url_or_path}")
+            response = requests.get(url_or_path, timeout=10)
+            response.raise_for_status()
+            
+            # After downloading but before saving to cache
+            try:
+                # Resize large images
+                img = Image.open(io.BytesIO(response.content))
+                if img.width > max_size or img.height > max_size:
+                    img.thumbnail((max_size, max_size), Image.LANCZOS)
+                    buffer = io.BytesIO()
+                    img.save(buffer, format=img.format or "PNG", quality=85)
+                    with open(cache_path, "wb") as f:
+                        f.write(buffer.getvalue())
+                else:
+                    with open(cache_path, "wb") as f:
+                        f.write(response.content)
+            except Exception as e:
+                # Fallback to original saving method
+                with open(cache_path, "wb") as f:
+                    f.write(response.content)
+                
+        except Exception as e:
+            print(f"[CACHE] Error caching image {url_or_path}: {str(e)}")
+            return url_or_path  # Return original URL as fallback
+    
+    # If not a URL or local file, return as is
+    return url_or_path
+
+def clear_image_cache():
+    """Clear the image cache"""
+    if os.path.exists(CACHE_DIR):
+        for filename in os.listdir(CACHE_DIR):
+            if filename != "cache_index.json":  # Don't delete the index file
+                file_path = os.path.join(CACHE_DIR, filename)
+                try:
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                except Exception as e:
+                    print(f"[CACHE] Error deleting {file_path}: {e}")
+        
+        # Reset the index file
+        with open(CACHE_INDEX_FILE, "w") as f:
+            json.dump({}, f)
+            
+        print("[CACHE] Image cache cleared")
+
+def get_cache_size():
+    """Calculate the total size of cached files in MB"""
+    total_size = 0
+    if os.path.exists(CACHE_DIR):
+        for filename in os.listdir(CACHE_DIR):
+            file_path = os.path.join(CACHE_DIR, filename)
+            if os.path.isfile(file_path):
+                total_size += os.path.getsize(file_path)
+    return total_size / (1024 * 1024)  # Convert to MB
 
 def get_user_id(page):
         """Retrieves user_id from previous page session."""
@@ -532,6 +643,14 @@ def get_user_id(page):
         return page.session.get("user_id")
 
 def main_menu_page(page: ft.Page, image_urls: list):
+    # Initialize the cache system
+    initialize_cache()
+    
+    # Pre-cache the important images
+    cached_image_urls = []
+    for url in image_urls:
+        cached_image_urls.append(get_cached_image(url))
+    
     """Main menu page with module cards"""
 
     # ----- HEADER with image -----
@@ -555,7 +674,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
                 ),
                 ft.Container(
                     content=ft.Image(
-                        src=image_urls[1], #purple logo
+                        src=cached_image_urls[1], #purple logo
                         width=120,
                         # height=65,
                         fit=ft.ImageFit.COVER
@@ -633,27 +752,27 @@ def main_menu_page(page: ft.Page, image_urls: list):
         
         # Set colors and background image based on module_id
         if module_id == 1:      # KAMUSTAHAY
-            bg_image = image_urls[2] 
+            bg_image = cached_image_urls[2] 
             main_color = "#FFC124"
             sub_color = "#FFE850"
         elif module_id == 2:    # KALAKAT
-            bg_image = image_urls[3]
+            bg_image = cached_image_urls[3]
             main_color = "#3FEA8C"
             sub_color = "#79E17F"
         elif module_id == 3:    # PAMALIT
-            bg_image = image_urls[4]
+            bg_image = cached_image_urls[4]
             main_color = "#FFAD60"
             sub_color = "#D1D1A7"
         elif module_id == 4:     # PANGAON
-            bg_image = image_urls[5]
+            bg_image = cached_image_urls[5]
             main_color = "#86C8CD"
             sub_color = "#6CCDB9"
         elif module_id == 5:    # SLANG
-            bg_image = image_urls[6]
+            bg_image = cached_image_urls[6]
             main_color = "#86C8CD"
             sub_color = "#FFE850"
         else:
-            bg_image = image_urls[2]
+            bg_image = cached_image_urls[2]
             main_color = "#86C8CD"
             sub_color = "#FFE850"
 
@@ -752,14 +871,45 @@ def main_menu_page(page: ft.Page, image_urls: list):
             on_click=lambda e, module_id=module_id: navigate_to_levels(e, user, module_id),
         )
 
-    # Create the module cards with updated colors
+    # Load only visible modules first
+    visible_modules = user.modules[:3]  # First 3 modules
+    
+    def load_more_modules(e):
+        nonlocal cards
+        # Add more modules to the list
+        for module in user.modules[len(cards):len(cards)+3]:
+            card = create_module_card(module.id, module.waray_name, 
+                                     module.eng_name, "#FFB74D", "#FF9800")
+            cards.append(card)
+            modules_column.controls.append(card)
+        
+        # Hide "Load More" button if all modules are loaded
+        if len(cards) >= len(user.modules):
+            load_more_button.visible = False
+        
+        page.update()
+    
+    load_more_button = ft.ElevatedButton(
+        "Load More Modules",
+        on_click=load_more_modules,
+        visible=len(user.modules) > 3
+    )
+    
+    # Initialize with first batch of cards
     cards = []
-    user_id = get_user_id(page)  # Get user ID from session
-    user = User().load_data(user_id, page)  # Load user data
-    page.session.set("user_library", user.library)  # Cache library for later use
-    for module in user.modules:
-        card = create_module_card(module.id, module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
+    for module in visible_modules:
+        card = create_module_card(module.id, module.waray_name, 
+                                 module.eng_name, "#FFB74D", "#FF9800")
         cards.append(card)
+        
+    modules_column = ft.Column(
+        [
+            modules_title,
+            *cards,
+            load_more_button
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+    )
 
     # Logout button
     logout_button = ft.IconButton(
@@ -789,7 +939,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
         # Store just the library in the page session
         page.go("/word-library")
 
-    # Create the bottom navigation bar
+    # Modify your bottom navigation to use less expensive animations
     bottom_nav = ft.Container(
         content=ft.Row(
             [
@@ -855,20 +1005,15 @@ def main_menu_page(page: ft.Page, image_urls: list):
             height=60,  
         ),
         border_radius=25,
-        gradient=ft.LinearGradient(
-            begin=ft.alignment.top_center,
-            end=ft.alignment.bottom_center,
-            colors=["#30b4fc", "#2980b9"],
+        bgcolor="#30b4fc",  # Use solid color instead of gradient
+        shadow=ft.BoxShadow(
+            blur_radius=8,
+            color=ft.Colors.with_opacity(0.3, "#000000"),
+            offset=ft.Offset(0, 2),  # Simpler shadow
         ),
         height=70,  
         padding=ft.padding.symmetric(horizontal=15, vertical=5),
         margin=ft.margin.only(bottom=10, left=10, right=10),
-        shadow=ft.BoxShadow(
-            spread_radius=1,
-            blur_radius=15,
-            color=ft.Colors.with_opacity(0.3, "#000000"),
-            offset=ft.Offset(0, 0),
-        ),
         alignment=ft.alignment.center,
     )
 
@@ -921,3 +1066,187 @@ def main_menu_page(page: ft.Page, image_urls: list):
         page.session.set("daily_review_questions", review_questions)
         show_daily_review_overlay(page)
         update_last_login_date(user)
+
+def find_image(choice):
+    # Try direct filename
+    path = os.path.join(ASSETS_PATH, os.path.basename(str(choice)))
+    if os.path.exists(path):
+        return path
+        
+    # Try with extension
+    for ext in ['.jpg', '.png', '.jpeg']:
+        path = os.path.join(ASSETS_PATH, f"{str(choice)}{ext}")
+        if os.path.exists(path):
+            return path
+            
+    # Try with underscores instead of spaces
+    path = os.path.join(ASSETS_PATH, f"{str(choice).replace(' ', '_')}.png")
+    if os.path.exists(path):
+        return path
+        
+    # For URLs, use the caching system
+    if str(choice).startswith(('http://', 'https://')):
+        return get_cached_image(str(choice))
+        
+    # Last resort - return the choice as is
+    return str(choice)
+
+def add_cache_settings(settings_column):
+    cache_size = get_cache_size()  # Helper function to calculate cache size
+    
+    cache_settings = ft.Container(
+        content=ft.Column([
+            ft.Text("Image Cache", weight=ft.FontWeight.BOLD, size=18),
+            ft.Text(f"Current cache size: {cache_size:.2f} MB"),
+            ft.Row([
+                ft.ElevatedButton(
+                    "Clear Cache", 
+                    on_click=lambda e: (clear_image_cache(), e.control.page.update())
+                ),
+            ]),
+        ]),
+        padding=10,
+        border=ft.border.all(1, ft.colors.GREY_400),
+        border_radius=8,
+        margin=ft.margin.only(bottom=15)
+    )
+    
+    settings_column.controls.append(cache_settings)
+
+# Add indexing for frequently queried fields
+def setup_database_indexes():
+    """Create indexes for frequently accessed fields"""
+    usercol = connect_to_mongoDB()
+    
+    # Check if indexes exist
+    existing_indexes = usercol.index_information()
+    
+    # Create indexes if they don't exist
+    if "user_id_1" not in existing_indexes:
+        usercol.create_index("user_id")
+        print("[DB] Created index on user_id")
+    
+    # Add other indexes as needed
+    # For example, if you query by email frequently:
+    if "email_1" not in existing_indexes:
+        usercol.create_index("email")
+        print("[DB] Created index on email")
+
+# Call this function during app initialization
+
+# Add a function to clean up memory
+def clean_memory():
+    """Release memory when app goes to background or during navigation"""
+    import gc
+    
+    # Clear any large variables that aren't needed
+    large_images = []  # Store references to large images here
+    
+    # Clear references
+    for img in large_images:
+        img = None
+    
+    # Force garbage collection
+    gc.collect()
+    print("[MEMORY] Memory cleanup performed")
+
+# Call this when navigating away from memory-intensive screens
+
+# Add a background worker for heavy processing
+def run_in_background(func, callback=None, *args, **kwargs):
+    """Run a function in background thread and call callback when done"""
+    result = [None]
+    exception = [None]
+    
+    def worker():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+        finally:
+            if callback:
+                callback(result[0], exception[0])
+    
+    thread = threading.Thread(target=worker)
+    thread.daemon = True
+    thread.start()
+    return thread
+
+# Example usage for loading modules
+def load_modules_async(user_id, page):
+    def on_modules_loaded(modules, error):
+        if error:
+            print(f"Error loading modules: {error}")
+            page.open(ft.SnackBar(ft.Text("Failed to load modules"), bgcolor="#FF5252"))
+        else:
+            page.session.set("modules", modules)
+            page.update()
+    
+    run_in_background(lambda: load_modules_from_db(user_id), on_modules_loaded)
+
+# Check if running on mobile and optimize accordingly
+def is_mobile(page):
+    """Detect if app is running on mobile device"""
+    # Width below 600px is usually mobile
+    return page.width < 600
+
+def apply_mobile_optimizations(page):
+    """Apply mobile-specific optimizations"""
+    if is_mobile(page):
+        # Reduce image quality for mobile
+        global CACHE_DIR
+        CACHE_DIR = "mobile_cache"  # Separate cache for mobile-optimized images
+        
+        # Use simpler UI components
+        return True
+    return False
+
+# Call this function during page initialization
+# and adjust UI components accordingly
+
+# Add performance monitoring
+import time
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.timers = {}
+        
+    def start(self, label):
+        self.timers[label] = time.time()
+        
+    def end(self, label):
+        if label in self.timers:
+            elapsed = time.time() - self.timers[label]
+            print(f"[PERF] {label}: {elapsed:.3f}s")
+            del self.timers[label]
+            return elapsed
+        return 0
+
+# Global monitor instance
+performance = PerformanceMonitor()
+
+# Example usage
+def load_data(user_id, page):
+    performance.start("load_data")
+    # ... your existing code ...
+    performance.end("load_data")
+
+# Add pagination for word library
+def navigate_to_word_library(e, user_library):
+    # Only load first 20 words initially
+    page.session.set("library_page", 1)
+    page.session.set("library_page_size", 20)
+    page.go("/word-library")
+
+# In word library page:
+def word_library_page(page):
+    current_page = page.session.get("library_page", 1)
+    page_size = page.session.get("library_page_size", 20)
+    library = page.session.get("user_library", [])
+    
+    start_idx = (current_page - 1) * page_size
+    end_idx = start_idx + page_size
+    current_items = library[start_idx:end_idx]
+    
+    # Add pagination controls
+    # ...
