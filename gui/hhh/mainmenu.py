@@ -110,6 +110,7 @@ def update_last_login_date(user):
     usercol.update_one({"user_id": user.user_id}, {"$set": {"last_login_date": today_str}})
 
 def on_daily_review_complete(e, page, user):
+    """Handle completion of daily review"""
     # Get the review results data
     review_questions = page.session.get("daily_review_questions")
     if review_questions is None:
@@ -119,23 +120,38 @@ def on_daily_review_complete(e, page, user):
     if correct_answers is None:
         correct_answers = {}
     
-    # FIRST: Process each vocabulary with its quality score
+    # Prepare data for background processing
+    vocab_list = []
+    quality_scores = {}
+    
+    # Process each reviewed vocabulary
     for question in review_questions:
         vocab = question.get("vocabulary")
         if vocab:
-            # Determine quality score based on correctness
-            quality = 5 if vocab in correct_answers else 2
+            vocab_list.append(vocab)
             
-            # Mark as reviewed in the SuperMemo system
-            mark_vocabulary_reviewed(user.user_id, vocab, quality)
+            # Determine quality score (0-5) based on correctness
+            if vocab in correct_answers:
+                # Correct answer - assign quality 4 or 5
+                quality_scores[vocab] = 5  # Perfect recall
+            else:
+                # Incorrect answer - assign quality 0-2
+                quality_scores[vocab] = 2  # Some hesitation/recall issues
     
-    # THEN: Any batch processing would happen here, after individual quality updates
+    # Start background processing
+    from supermemo_engine import process_review_items_in_background
+    process_review_items_in_background(user.user_id, vocab_list, quality_scores)
     
-    print(f"[Daily Review] Completed and processed {len(review_questions)} vocabulary items")
+    print(f"[Daily Review] Completed and processing {len(review_questions)} vocabulary items in background")
+
+    # Update the last login date immediately
     update_last_login_date(user)
+    
+    # Mark review as completed in session
     page.session.set("daily_review_needed", False)
     
-    page.open(ft.SnackBar(ft.Text("Daily review completed successfully!"), bgcolor="#4CAF50"))
+    # Show success message
+    page.open(ft.SnackBar(ft.Text("Daily review completed!"), bgcolor="#4CAF50"))
 
 def cache_modules_to_temp(modules):
     def module_to_dict(module):
@@ -482,6 +498,10 @@ class User:  # User class
 
                     # Save it in user records
                     self.chapter_test_records[module_id] = chapter_test_data
+
+            if self.user_id:
+                from supermemo_engine import merge_duplicate_vocab_entries
+                merge_duplicate_vocab_entries(self.user_id)
                 
             return self
         else:
@@ -494,6 +514,11 @@ class User:  # User class
 
             page.session.set("user", self)  # Cache it for later updates
             page.open(ft.SnackBar(ft.Text("Successfully loaded data!"), bgcolor="#4CAF50"))
+
+            if self.user_id:
+                from supermemo_engine import merge_duplicate_vocab_entries
+                merge_duplicate_vocab_entries(self.user_id)
+
             return self
 
     def save_library(self):
@@ -979,6 +1004,10 @@ def main_menu_page(page: ft.Page, image_urls: list):
     page.update()
 
     start_usage_timer(page)
+
+    from supermemo_engine import merge_duplicate_vocab_entries
+    merge_duplicate_vocab_entries(get_user_id(page))
+
     check_for_unscheduled_vocabulary(get_user_id(page))  # Check for unscheduled vocabulary
 
     # Attach reset_idle_timer to user interactions

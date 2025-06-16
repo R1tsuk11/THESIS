@@ -3,6 +3,7 @@ import os
 import pymongo
 from pymongo.errors import ConfigurationError
 import sys
+import threading
 from datetime import datetime, timedelta
 from qbank import module_bank
 from bkt_engine import get_vocab_mastery
@@ -18,6 +19,41 @@ def connect_to_mongoDB():
     except ConfigurationError as e:
         print(f"Failed to connect to MongoDB: {e}")
         sys.exit("Terminating the program due to MongoDB connection failure.")
+
+def process_review_items_in_background(user_id, vocab_list, quality_scores):
+    """
+    Process a batch of review items in a background thread
+    
+    Args:
+        user_id: The user ID
+        vocab_list: List of vocabulary items to mark as reviewed
+        quality_scores: Dictionary mapping vocabulary to quality scores
+    """
+    # Create a background thread for processing
+    thread = threading.Thread(
+        target=_process_review_items_thread,
+        args=(user_id, vocab_list, quality_scores),
+        daemon=True  # Make it a daemon thread so it doesn't block program exit
+    )
+    thread.start()
+    print(f"[SuperMemo] Started background processing thread for {len(vocab_list)} items")
+    return thread
+
+def _process_review_items_thread(user_id, vocab_list, quality_scores):
+    """Thread target function to process review items"""
+    print(f"[SuperMemo] Processing {len(vocab_list)} review items in background thread")
+    
+    try:
+        for vocab in vocab_list:
+            # Get quality score for this vocabulary (default to 3 if not specified)
+            quality = quality_scores.get(vocab, 2)
+            
+            # Mark as reviewed (reusing existing function)
+            mark_vocabulary_reviewed(user_id, vocab, quality)
+        
+        print(f"[SuperMemo] Background processing complete for {len(vocab_list)} items")
+    except Exception as e:
+        print(f"[SuperMemo] Error in background thread: {str(e)}")
 
 def has_review_questions(user_id):
     """Check if user has any vocabulary scheduled for review"""
@@ -60,13 +96,26 @@ def has_review_questions(user_id):
 def get_user_proficiency(user_id):
     """
     Fetches the user's proficiency from the database.
-    This function should be implemented to return the user's proficiency level.
+    Handles both dictionary and numeric values.
     """
     usercol = connect_to_mongoDB()
     user = usercol.find_one({"user_id": user_id})
     if user and "proficiency" in user:
-        return user["proficiency"]
-    return 0  # Default proficiency if not found
+        # Handle case where proficiency is a dictionary
+        if isinstance(user["proficiency"], dict):
+            # Extract the value you need - modify this based on your dictionary structure
+            if "prediction" in user["proficiency"]:
+                return user["proficiency"]["prediction"] * 100  # Converting to percentage
+            else:
+                print(f"[WARNING] Proficiency dictionary missing expected fields: {user['proficiency']}")
+                return 50  # Default if dictionary doesn't have expected structure
+        # Handle numeric case
+        elif isinstance(user["proficiency"], (int, float)):
+            return user["proficiency"]
+        else:
+            print(f"[WARNING] Unknown proficiency format: {type(user['proficiency'])}")
+            return 50  # Default for unknown format
+    return 50  # Updated default proficiency if not found
 
 def schedule_pending_vocabulary(user_id, session_data=None, force=False):
     """
@@ -113,7 +162,7 @@ def schedule_pending_vocabulary(user_id, session_data=None, force=False):
     
     # Look for vocabulary in correct answers that aren't yet in SuperMemo
     for question_id, question_data in correct_answers.items():
-        vocab = question_data.get('vocabulary')
+        vocab = normalize_vocab(question_data.get('vocabulary'))
         if not vocab:
             continue
             
@@ -180,6 +229,7 @@ def register_new_vocabulary(user_id, vocabulary_item):
         supermemo_data["mastered"] = {}
     
     # Check if this vocab is already in SuperMemo
+    vocabulary_item = normalize_vocab(vocabulary_item)
     if vocabulary_item in supermemo_data["needs_practice"] or vocabulary_item in supermemo_data["mastered"]:
         print(f"[SuperMemo] Vocabulary '{vocabulary_item}' already scheduled")
         return False
@@ -244,6 +294,7 @@ def register_new_vocabulary_batch(user_id, vocabulary_items):
     updates_made = False
     
     for vocab in vocabulary_items:
+        vocab = normalize_vocab(vocab)
         # Skip if already scheduled
         if vocab in supermemo_data["needs_practice"] or vocab in supermemo_data["mastered"]:
             print(f"[SuperMemo] Vocabulary '{vocab}' already scheduled")
@@ -598,40 +649,138 @@ def mark_vocabulary_reviewed(user_id, vocab, performance_quality):
         vocab: The vocabulary word that was reviewed
         performance_quality: Quality rating (0-5) of recall, where 5 is perfect recall
     """
+    vocab = normalize_vocab(vocab)
     print(f"[SuperMemo] Marking '{vocab}' as reviewed with quality {performance_quality}")
     
-    usercol = connect_to_mongoDB()
-    user = usercol.find_one({"user_id": user_id})
-    
-    if not user:
-        print(f"[ERROR] User {user_id} not found in database")
-        return False
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
         
-    # Get review history
-    review_history = user.get("review_history", {})
-    if vocab not in review_history:
-        review_history[vocab] = {}
+        if not user:
+            print(f"[ERROR] User {user_id} not found in database")
+            return False
+            
+        # Get review history
+        review_history = user.get("review_history", {})
+        if vocab not in review_history:
+            review_history[vocab] = {}
+        
+        # Update last reviewed date
+        today = datetime.now().date()
+        review_history[vocab]["last_reviewed"] = str(today)
+        
+        # Track performance quality
+        review_history[vocab]["last_quality"] = performance_quality
+        
+        # Reset skip counter since item was reviewed
+        review_history[vocab]["times_skipped"] = 0
+        
+        # Batch update in database - combine with SuperMemo state update
+        # to reduce database operations
+        
+        # Get current SuperMemo state
+        supermemo_data = user.get("supermemo", {})
+        updates = {"review_history": review_history}
+        
+        # Update SuperMemo state based on performance
+        vocab_updated = False
+        
+        # Check if in needs_practice or mastered
+        if vocab in supermemo_data.get("needs_practice", {}):
+            state = supermemo_data["needs_practice"][vocab]
+            # Update the state
+            state = update_supermemo_state(state, performance_quality)
+            # Add to updates
+            updates[f"supermemo.needs_practice.{vocab}"] = state
+            vocab_updated = True
+            
+        elif vocab in supermemo_data.get("mastered", {}):
+            state = supermemo_data["mastered"][vocab]
+            # Update the state
+            state = update_supermemo_state(state, performance_quality)
+            # Add to updates
+            updates[f"supermemo.mastered.{vocab}"] = state
+            vocab_updated = True
+            
+        # Apply all updates at once
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": updates}
+        )
+        
+        if not vocab_updated:
+            print(f"[WARNING] Vocabulary '{vocab}' not found in SuperMemo data")
+            
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Error updating vocabulary '{vocab}': {str(e)}")
+        return False
+
+def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
+    """
+    Process multiple vocabulary items in a single database operation
     
-    # Update last reviewed date
-    today = datetime.now().date()
-    review_history[vocab]["last_reviewed"] = str(today)
-    
-    # Track performance quality
-    review_history[vocab]["last_quality"] = performance_quality
-    
-    # Reset skip counter since item was reviewed
-    review_history[vocab]["times_skipped"] = 0
-    
-    # Update in database
-    usercol.update_one(
-        {"user_id": user_id},
-        {"$set": {"review_history": review_history}}
-    )
-    
-    # Also update the SuperMemo state based on performance
-    update_vocab_supermemo_state(user_id, vocab, performance_quality)
-    
-    return True
+    Args:
+        user_id: User ID
+        vocab_quality_map: Dictionary mapping vocabulary words to quality scores
+    """
+    if not vocab_quality_map:
+        return
+        
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
+        
+        if not user:
+            print(f"[ERROR] User {user_id} not found in database")
+            return False
+            
+        # Get review history and SuperMemo data
+        review_history = user.get("review_history", {})
+        supermemo_data = user.get("supermemo", {})
+        
+        # Prepare updates
+        today = datetime.now().date()
+        updates = {}
+        
+        # Process each vocabulary
+        for vocab, quality in vocab_quality_map.items():
+            vocab = normalize_vocab(vocab)
+            
+            # Update review history
+            if vocab not in review_history:
+                review_history[vocab] = {}
+                
+            review_history[vocab]["last_reviewed"] = str(today)
+            review_history[vocab]["last_quality"] = quality
+            review_history[vocab]["times_skipped"] = 0
+            
+            # Update SuperMemo state
+            if vocab in supermemo_data.get("needs_practice", {}):
+                state = supermemo_data["needs_practice"][vocab]
+                state = update_supermemo_state(state, quality)
+                updates[f"supermemo.needs_practice.{vocab}"] = state
+                
+            elif vocab in supermemo_data.get("mastered", {}):
+                state = supermemo_data["mastered"][vocab]
+                state = update_supermemo_state(state, quality)
+                updates[f"supermemo.mastered.{vocab}"] = state
+        
+        # Add review history to updates
+        updates["review_history"] = review_history
+        
+        # Apply all updates at once
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": updates}
+        )
+        
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Error in batch update: {str(e)}")
+        return False
 
 def update_vocab_supermemo_state(user_id, vocab, quality):
     """Update SuperMemo state for a specific vocabulary item based on review quality"""
@@ -645,6 +794,7 @@ def update_vocab_supermemo_state(user_id, vocab, quality):
     supermemo_data = user["supermemo"]
     
     # Check if in needs_practice or mastered
+    vocab = normalize_vocab(vocab)
     if vocab in supermemo_data.get("needs_practice", {}):
         state = supermemo_data["needs_practice"][vocab]
         # Update the state
@@ -720,6 +870,7 @@ def get_due_for_review(user_id):
     due = []
     if user and "supermemo" in user:
         for vocab, state in user["supermemo"].get("needs_practice", {}).items():
+            vocab = normalize_vocab(vocab)
             if datetime.fromisoformat(state["next_review"]).date() <= today:
                 due.append((vocab, state))
     return due
@@ -790,3 +941,185 @@ def display_supermemo_schedule(user_id):
     print("└──────────────────────┴───────────┴────────────┴─────────────┴────────────┴─────────────┘")
     print("* EFactor: Memory strength (higher = better retained)")
     print("* Interval: Days between reviews")
+
+# Add to supermemo_engine.py
+def normalize_vocab(vocabulary):
+    """Normalize vocabulary to prevent case-sensitive duplicates"""
+    if not vocabulary:
+        return None
+    return vocabulary.lower()  # Always store and lookup as lowercase
+
+def merge_duplicate_vocab_entries(user_id):
+    """Find and merge vocabulary entries that differ only by capitalization"""
+    print(f"[SuperMemo] Checking for duplicate vocabulary entries for user {user_id}")
+    
+    # Connect to MongoDB
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    if not user or "supermemo" not in user:
+        print(f"[SuperMemo] No SuperMemo data found for user {user_id}")
+        return False
+        
+    supermemo_data = user["supermemo"]
+    needs_practice = supermemo_data.get("needs_practice", {})
+    mastered = supermemo_data.get("mastered", {})
+    
+    # Create temporary dictionaries using normalized case
+    normalized_needs_practice = {}
+    normalized_mastered = {}
+    
+    # Track changes that need to be made
+    changes_needed = False
+    
+    # Process needs_practice entries
+    for vocab, state in needs_practice.items():
+        normalized = normalize_vocab(vocab)
+        if normalized in normalized_needs_practice:
+            print(f"[SuperMemo] Found duplicate in needs_practice: '{vocab}' and '{normalized}'")
+            changes_needed = True
+            # Keep entry with latest review date or higher EFactor
+            existing = normalized_needs_practice[normalized]
+            if compare_states(state, existing):
+                normalized_needs_practice[normalized] = state
+        else:
+            normalized_needs_practice[normalized] = state
+            
+    # Process mastered entries
+    for vocab, state in mastered.items():
+        normalized = normalize_vocab(vocab)
+        if normalized in normalized_mastered:
+            print(f"[SuperMemo] Found duplicate in mastered: '{vocab}' and '{normalized}'")
+            changes_needed = True
+            # Keep entry with latest review date or higher EFactor
+            existing = normalized_mastered[normalized]
+            if compare_states(state, existing):
+                normalized_mastered[normalized] = state
+        else:
+            normalized_mastered[normalized] = state
+    
+    # Check for duplicates across categories
+    for vocab in list(normalized_needs_practice.keys()):
+        if vocab in normalized_mastered:
+            print(f"[SuperMemo] Found duplicate across categories: '{vocab}'")
+            changes_needed = True
+            # Keep in mastered if mastery is high, otherwise in needs_practice
+            needs_practice_state = normalized_needs_practice[vocab]
+            mastered_state = normalized_mastered[vocab]
+            if compare_states(mastered_state, needs_practice_state):
+                # Mastered entry is better, remove from needs_practice
+                del normalized_needs_practice[vocab]
+            else:
+                # Needs practice entry is better, remove from mastered
+                del normalized_mastered[vocab]
+    
+    # If changes needed, update the database
+    if changes_needed:
+        print(f"[SuperMemo] Updating user {user_id} with merged vocabulary data")
+        supermemo_data["needs_practice"] = normalized_needs_practice
+        supermemo_data["mastered"] = normalized_mastered
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": {"supermemo": supermemo_data}}
+        )
+        return True
+    else:
+        print(f"[SuperMemo] No duplicate entries found for user {user_id}")
+        return False
+
+def compare_states(state1, state2):
+    """Compare two SuperMemo states to determine which is more advantageous
+    Returns True if state1 is better than state2, False otherwise"""
+    
+    # If one has a later review date, it's more up-to-date
+    try:
+        date1 = datetime.strptime(state1.get("last_review", "2000-01-01"), "%Y-%m-%d").date()
+        date2 = datetime.strptime(state2.get("last_review", "2000-01-01"), "%Y-%m-%d").date()
+        if date1 > date2:
+            return True
+        if date2 > date1:
+            return False
+    except (ValueError, TypeError):
+        pass  # If dates can't be compared, fall back to other criteria
+    
+    # Higher EFactor is better (stronger memory)
+    if state1.get("efactor", 0) > state2.get("efactor", 0):
+        return True
+    
+    # Higher repetition count is better
+    if state1.get("repetition", 0) > state2.get("repetition", 0):
+        return True
+        
+    # Default to state2 if no clear winner
+    return False
+
+# Add these functions if they don't exist
+
+def get_average_efactor(user_id):
+    """
+    Get average EFactor for all vocabulary items in SuperMemo
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Average EFactor (typically between 1.3 and 2.5)
+        or None if no data available
+    """
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": int(user_id)})
+        
+        if not user or "supermemo" not in user:
+            return None
+            
+        supermemo_data = user["supermemo"]
+        efactors = []
+        
+        # Get EFactors from needs_practice
+        for vocab, state in supermemo_data.get("needs_practice", {}).items():
+            if "efactor" in state:
+                efactors.append(state["efactor"])
+                
+        # Get EFactors from mastered
+        for vocab, state in supermemo_data.get("mastered", {}).items():
+            if "efactor" in state:
+                efactors.append(state["efactor"])
+                
+        # Calculate average
+        if efactors:
+            avg_efactor = sum(efactors) / len(efactors)
+            return avg_efactor
+        return None
+        
+    except Exception as e:
+        print(f"[SuperMemo] Error getting average EFactor: {e}")
+        return None
+
+def get_completion_rate(user_id):
+    """
+    Get vocabulary completion rate based on mastered vs. total
+    
+    Returns:
+        Completion rate (0-1)
+    """
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": int(user_id)})
+        
+        if not user or "supermemo" not in user:
+            return 0
+            
+        supermemo_data = user["supermemo"]
+        mastered_count = len(supermemo_data.get("mastered", {}))
+        needs_practice_count = len(supermemo_data.get("needs_practice", {}))
+        
+        total = mastered_count + needs_practice_count
+        
+        if total == 0:
+            return 0
+            
+        return mastered_count / total
+        
+    except Exception as e:
+        print(f"[SuperMemo] Error getting completion rate: {e}")
+        return 0

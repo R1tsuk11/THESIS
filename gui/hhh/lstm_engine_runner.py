@@ -31,72 +31,116 @@ def get_model_path(user_id=None):
     
 def simple_proficiency_calculation(bkt_sequence, completion, user_id):
     """Simple and reliable proficiency calculation that won't hang"""
-    log(f"Starting proficiency calculation for user {user_id}")
-    
-    # Get appropriate paths
-    history_path = get_history_path(user_id)
-    model_path = get_model_path(user_id)
-    
-    # Create user model if needed
-    setup_user_model(user_id)
-    
-    # Calculate basic average as fallback
-    avg = sum(bkt_sequence) / len(bkt_sequence) if bkt_sequence else 0
-    result = avg * completion / 100.0  # Assuming completion is in percent
-    
-    # Attempt LSTM prediction if model exists
-    prediction = result
-    confidence = 0.5
-    method = "average"
-    error = None
-    
     try:
-        # Only try to use the model if it exists
-        if os.path.exists(model_path):
-            from tensorflow.keras.models import load_model
-            from tensorflow.keras.preprocessing.sequence import pad_sequences
+        # Set up paths
+        model_path = get_model_path(user_id)
+        history_path = get_history_path(user_id)
+        
+        # Ensure user model exists
+        setup_user_model(user_id)
+        
+        # Check if model exists
+        if not os.path.exists(model_path):
+            log(f"Model not found at {model_path}")
+            return {
+                "proficiency": 0.5,
+                "method": "fallback",
+                "confidence": 0.5,
+                "error": "Model not found"
+            }
+        
+        # Load model
+        log(f"Loading model from {model_path}")
+        from tensorflow.keras.models import load_model
+        from tensorflow.keras.preprocessing.sequence import pad_sequences
+        model = load_model(model_path)
+        
+        # Prepare input data
+        X = np.array([bkt_sequence])
+        if len(X[0]) != model.input_shape[1]:
+            # Pad sequence if necessary
+            X = pad_sequences(X, maxlen=model.input_shape[1], dtype='float32')
+        
+        # Add channel dimension if needed
+        if len(model.input_shape) > 2:  # Model expects 3D input
+            X = np.expand_dims(X, -1)
+        
+        # Make prediction
+        log("Making prediction with model")
+        pred = model.predict(X, verbose=0)
+        prediction = float(pred[0][0])
+        
+        # Calculate confidence using multiple approaches
+        try:
+            # Generate multiple predictions by adding small noise to inputs
+            n_iterations = 5  # Fewer iterations for speed in subprocess
+            predictions = []
             
-            log(f"Loading model from {model_path}")
-            model = load_model(model_path)
+            # Create variations of the input
+            for i in range(n_iterations):
+                if i == 0:
+                    pred = prediction  # First prediction already made
+                else:
+                    # Add gaussian noise
+                    noise_level = 0.02 * i
+                    X_noisy = X + np.random.normal(0, noise_level, X.shape)
+                    pred = model.predict(X_noisy, verbose=0)[0][0]
+                predictions.append(pred)
             
-            # Prepare input
-            X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
-            X = np.expand_dims(X, -1)  # Add feature dimension
+            # Calculate variance to measure model uncertainty
+            std_dev = np.std(predictions)
+            model_confidence = max(0.3, min(0.95, np.exp(-8 * std_dev)))
+            log(f"Input perturbation variance: {std_dev:.4f}, confidence: {model_confidence:.2f}")
             
-            # Make prediction
-            log("Making prediction with model")
-            pred = model.predict(X, verbose=0)
-            prediction = float(pred[0][0])
+            # Calculate historical component if history exists
+            history_confidence = 0.7  # Default
+            history = []  # Initialize empty history
+            if os.path.exists(history_path):
+                try:
+                    with open(history_path, "r") as f:
+                        history = json.load(f)
+                        if isinstance(history, list) and len(history) >= 3:
+                            recent = history[-5:] if len(history) > 5 else history
+                            std_dev = np.std(recent)
+                            history_confidence = max(0.3, min(0.95, np.exp(-7 * std_dev)))
+                except Exception as e:
+                    log(f"Error reading history: {str(e)}")
             
-            # Calculate loss/confidence
-            y_true = np.array([prediction])  # Use prediction as target
-            loss = float(model.evaluate(X, y_true, verbose=0)[0])
-            confidence = max(0.3, min(0.95, np.exp(-loss)))
+            # Data sufficiency component
+            data_points = len(history) if history else 0
+            data_confidence = min(0.9, 0.5 + (data_points * 0.05))
             
-            log(f"Model prediction: {prediction}, loss: {loss}, confidence: {confidence}")
-            method = "lstm"
+            # Combine components
+            confidence = (0.4 * model_confidence + 
+                         0.4 * history_confidence + 
+                         0.2 * data_confidence)
+                         
+            # Ensure reasonable bounds
+            confidence = max(0.3, min(0.95, confidence))
             
-            # Apply completion percentage
-            prediction = prediction * completion / 100.0
-    except Exception as e:
-        log(f"Error using LSTM model: {str(e)}")
-        traceback.print_exc(file=sys.stderr)
-        error = str(e)
-        # Fall back to average method
-    
-    # Update history with this prediction
-    try:
+        except Exception as e:
+            log(f"Error calculating confidence: {str(e)}")
+            confidence = 0.7  # Default moderate confidence
+        
+        # Update history with new prediction
         update_history(history_path, prediction)
+        
+        # Return calculation result
+        return {
+            "proficiency": prediction,
+            "method": "lstm",
+            "confidence": confidence,
+            "error": None
+        }
+        
     except Exception as e:
-        log(f"Error updating history: {str(e)}")
-    
-    # Return result
-    return {
-        "proficiency": prediction,
-        "confidence": confidence,
-        "method": method,
-        "error": error
-    }
+        log(f"Error in proficiency calculation: {str(e)}")
+        return {
+            "proficiency": 0.0,
+            "method": "error",
+            "confidence": 0.0,
+            "error": str(e)
+        }
 
 def setup_user_model(user_id):
     """Set up a user model if it doesn't exist"""

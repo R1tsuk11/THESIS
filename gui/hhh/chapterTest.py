@@ -1424,7 +1424,7 @@ def chapter_test_page(page, image_urls: list):
         
         if question_type == "Image Picker":
             return build_imgpicker_question(page, question_data, progress_value, on_next, on_back)
-        elif question_type == "Word Select / Translate":
+        elif question_type == "Word Select":
             return build_wordselect_question(page, question_data, progress_value, on_next, on_back)
         elif question_type == "True or False":
             return build_tf_question(page, question_data, progress_value, on_next, on_back)

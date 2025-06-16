@@ -241,118 +241,211 @@ def get_lstm_counter_path(user_id=None):
         return os.path.join("lstm_counters", f"lstm_counter_{user_id}.json")
     return os.path.join("lstm_counters", "lstm_counter.json")
 
-def calculate_confidence(model, X, prediction):
-    """Calculate confidence based on model loss"""
-    # Create target based on prediction (as we don't know the true value)
-    y_pred = np.array([prediction])
+def calculate_history_confidence(history):
+    """Calculate confidence based on historical stability"""
+    if not isinstance(history, list) or len(history) < 3:
+        return 0.7  # Default value for limited history
+        
+    # Get recent history points
+    recent = history[-5:] if len(history) > 5 else history
     
-    # Calculate loss for this prediction
-    loss = model.evaluate(X, y_pred, verbose=0)[0]
+    # Calculate stability (standard deviation)
+    std_dev = np.std(recent)
+    stability_confidence = max(0.3, min(0.95, np.exp(-7 * std_dev)))
     
-    # Convert loss to confidence score (0-1 range, higher is better)
-    # Loss is typically 0+ with 0 being perfect, so we use an exponential conversion
-    confidence = max(0.1, min(0.95, np.exp(-loss)))
+    # Analyze trend consistency (if predictions follow a consistent pattern)
+    if len(recent) > 3:
+        # Calculate consecutive differences
+        diffs = [abs(recent[i] - recent[i-1]) for i in range(1, len(recent))]
+        # Standard deviation of differences (lower means more consistent changes)
+        diff_std = np.std(diffs) if len(diffs) > 1 else 0
+        trend_confidence = max(0.3, min(0.95, np.exp(-10 * diff_std)))
+        
+        # Combine both aspects of historical analysis
+        return 0.6 * stability_confidence + 0.4 * trend_confidence
     
-    print(f"[LSTM] Raw loss: {loss}, Calculated confidence: {confidence:.4f}")
-    return confidence
+    return stability_confidence
+
+def fallback_confidence(history):
+    """Provide fallback confidence when other methods fail"""
+    if isinstance(history, list):
+        # Base on data amount
+        return min(0.8, 0.4 + len(history) * 0.04)
+    return 0.5  # Default moderate confidence
+
+def calculate_confidence(model, X, history):
+    """Calculate LSTM confidence using input perturbation technique"""
+    try:
+        # Generate multiple predictions by adding small noise to inputs
+        n_iterations = 8
+        predictions = []
+        
+        # Create variations of the input
+        for i in range(n_iterations):
+            # First prediction uses original input
+            if i == 0:
+                pred = model.predict(X, verbose=0)[0][0]
+            else:
+                # Add gaussian noise with increasing magnitude
+                noise_level = 0.02 * (i / 3)
+                X_noisy = X + np.random.normal(0, noise_level, X.shape)
+                pred = model.predict(X_noisy, verbose=0)[0][0]
+            predictions.append(pred)
+        
+        # Calculate variance to measure model uncertainty
+        std_dev = np.std(predictions)
+        model_confidence = max(0.3, min(0.95, np.exp(-8 * std_dev)))
+        
+        print(f"[LSTM] Input perturbation variance: {std_dev:.4f}, confidence: {model_confidence:.2f}")
+        
+        # Historical stability component
+        history_confidence = calculate_history_confidence(history)
+        
+        # Data sufficiency component 
+        data_confidence = min(0.9, 0.5 + (len(history) if isinstance(history, list) else 0) * 0.05)
+        
+        # Combine components with appropriate weights
+        final_confidence = (0.4 * model_confidence + 
+                           0.4 * history_confidence + 
+                           0.2 * data_confidence)
+        
+        # Ensure reasonable bounds
+        final_confidence = max(0.3, min(0.95, final_confidence))
+        
+        print(f"[LSTM] Final confidence: {final_confidence:.2f}")
+        return final_confidence
+        
+    except Exception as e:
+        print(f"[LSTM] Error in confidence calculation: {str(e)}")
+        return fallback_confidence(history)
+    
+    except Exception as e:
+        print(f"[LSTM] Error in confidence calculation: {str(e)}")
+        # Fall back to simple confidence estimation
+        if isinstance(history, list) and len(history) >= 2:
+            # Use history stability as confidence
+            recent = history[-5:] if len(history) > 5 else history
+            stability = np.std(recent)
+            confidence = max(0.5, min(0.9, np.exp(-3 * stability)))
+            print(f"[LSTM] Fallback confidence from history stability: {confidence:.2f}")
+            return confidence
+        else:
+            # No history, use moderate confidence
+            print("[LSTM] Using default moderate confidence: 0.7")
+            return 0.7
 
 def predict_proficiency(bkt_sequence, user_id=None):
     """Predict proficiency using appropriate model for the user"""
     print(f"[LSTM] Predicting proficiency for user {user_id}, sequence: {bkt_sequence}")
     
-    # Determine which model to use
-    model_path = get_lstm_model_path(user_id)
-    history_file = get_lstm_history_path(user_id)
-    counter_file = get_lstm_counter_path(user_id)
-    
-    # If user doesn't have enough history, check if we should use the global model
-    user_has_enough_data = False
-    if os.path.exists(history_file):
-        with open(history_file, "r") as f:
-            history = json.load(f)
-            user_has_enough_data = len(history) >= MIN_SEQUENCE_LENGTH
-    
-    # If user doesn't have enough data, use global model with blend
-    global_contribution = 1.0
-    if not user_has_enough_data:
-        print(f"[LSTM] User {user_id} has insufficient data, using global model")
-        # Check if global model exists and has enough data
-        if os.path.exists(get_lstm_model_path()) and os.path.exists("temp_prof_history.json"):
-            with open("temp_prof_history.json", "r") as f:
-                global_history = json.load(f)
-                if len(global_history) >= MIN_SEQUENCE_LENGTH:
-                    # Use global model for prediction
-                    model_path = get_lstm_model_path()
-                    print(f"[LSTM] Using global model for prediction")
-                else:
-                    # Not enough global data either
-                    print(f"[LSTM] Not enough global data, using average")
-                    return average_proficiency(bkt_sequence)
+    try:
+        # Determine which model to use
+        model_path = get_lstm_model_path(user_id)
+        history_file = get_lstm_history_path(user_id)
+        counter_file = get_lstm_counter_path(user_id)
+        
+        # If user doesn't have enough history, check if we should use the global model
+        user_has_enough_data = False
+        history = []
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                history = json.load(f)
+                user_has_enough_data = len(history) >= MIN_SEQUENCE_LENGTH
+        
+        # If user doesn't have enough data, use global model with blend
+        global_contribution = 1.0
+        if not user_has_enough_data:
+            print(f"[LSTM] User {user_id} has insufficient data, using global model")
+            # Check if global model exists and has enough data
+            if os.path.exists(get_lstm_model_path()) and os.path.exists("temp_prof_history.json"):
+                with open("temp_prof_history.json", "r") as f:
+                    global_history = json.load(f)
+                    if len(global_history) >= MIN_SEQUENCE_LENGTH:
+                        # Use global model for prediction
+                        model_path = get_lstm_model_path()
+                        print(f"[LSTM] Using global model for prediction")
+                    else:
+                        # Not enough global data either
+                        print(f"[LSTM] Not enough global data, using average")
+                        avg = average_proficiency(bkt_sequence)
+                        return {"prediction": avg, "confidence": 0.5}  # FIXED: Return dict
+            else:
+                # No global model
+                print(f"[LSTM] No global model available, using average")
+                avg = average_proficiency(bkt_sequence)
+                return {"prediction": avg, "confidence": 0.5}  # FIXED: Return dict
         else:
-            # No global model
-            print(f"[LSTM] No global model available, using average")
-            return average_proficiency(bkt_sequence)
-    else:
-        # As user gets more data, reduce global model influence
+            # As user gets more data, reduce global model influence
+            data_points = len(history)
+            # Gradually reduce global contribution as user data grows
+            if data_points >= MIN_SEQUENCE_LENGTH:
+                global_contribution = max(0.0, min(1.0, 1.0 - (data_points - MIN_SEQUENCE_LENGTH) / 20))
+                print(f"[LSTM] User has {data_points} data points, global contribution: {global_contribution:.2f}")
+        
+        # Check if we need to train or update user model
+        force_train_if_needed(user_id)
+        
+        # If still no model, revert to average
+        if not os.path.exists(model_path):
+            print("[LSTM] Model still not found after force training. Returning average.")
+            avg = average_proficiency(bkt_sequence)
+            return {"prediction": avg, "confidence": 0.5}  # FIXED: Return dict
+        
+        # Track the current history length
         with open(history_file, "r") as f:
             history = json.load(f)
-        data_points = len(history)
-        # Gradually reduce global contribution as user data grows
-        if data_points >= MIN_SEQUENCE_LENGTH:
-            global_contribution = max(0.0, min(1.0, 1.0 - (data_points - MIN_SEQUENCE_LENGTH) / 20))
-            print(f"[LSTM] User has {data_points} data points, global contribution: {global_contribution:.2f}")
-    
-    # Check if we need to train or update user model
-    force_train_if_needed(user_id)
-    
-    # If still no model, revert to average
-    if not os.path.exists(model_path):
-        print("[LSTM] Model still not found after force training. Returning average.")
-        return average_proficiency(bkt_sequence)
-    
-    # Track the current history length
-    with open(history_file, "r") as f:
-        history = json.load(f)
-    with open(counter_file, "w") as f:
-        f.write(str(len(history)))
-        
-    # Make prediction with user-specific or global model
-    model = load_model(model_path)
-    X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
-    X = np.expand_dims(X, -1)
-    pred = model.predict(X, verbose=0)
-    user_prediction = float(pred[0][0])
+        with open(counter_file, "w") as f:
+            f.write(str(len(history)))
+            
+        # Make prediction with user-specific or global model
+        model = load_model(model_path)
+        X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
+        X = np.expand_dims(X, -1)
+        pred = model.predict(X, verbose=0)
+        user_prediction = float(pred[0][0])
 
-    confidence = calculate_confidence(model, X, user_prediction)
-    
-    # If we're using a blend, compute global prediction too
-    if user_has_enough_data and global_contribution > 0:
-        # Get global model prediction
-        global_model_path = get_lstm_model_path()
-        if os.path.exists(global_model_path):
-            global_model = load_model(global_model_path)
-            X_global = pad_sequences([bkt_sequence], maxlen=global_model.input_shape[1], dtype='float32')
-            X_global = np.expand_dims(X_global, -1)
-            global_pred = global_model.predict(X_global, verbose=0)
-            global_prediction = float(global_pred[0][0])
-            
-            # Blend predictions
-            final_prediction = (global_contribution * global_prediction + 
-                               (1.0 - global_contribution) * user_prediction)
-            print(f"[LSTM] Blended prediction: {global_prediction:.3f} (global) * {global_contribution:.2f} + "
-                  f"{user_prediction:.3f} (user) * {(1-global_contribution):.2f} = {final_prediction:.3f}")
-            
-            user_confidence = confidence
-            global_confidence = calculate_confidence(global_model, X_global, global_prediction)
-            confidence = (global_contribution * global_confidence + 
-                        (1.0 - global_contribution) * user_confidence)
-            
-            return {"prediction": final_prediction, "confidence": confidence}
+        # Always calculate confidence
+        user_confidence = calculate_confidence(model, X, history)  # FIXED: Pass history 
         
-        return {"prediction": user_prediction, "confidence": confidence}
-    
-    print(f"[LSTM] User prediction: {user_prediction:.3f}")
-    return user_prediction
+        # If we're using a blend, compute global prediction too
+        if user_has_enough_data and global_contribution > 0:
+            # Get global model prediction
+            global_model_path = get_lstm_model_path()
+            if os.path.exists(global_model_path):
+                global_model = load_model(global_model_path)
+                X_global = pad_sequences([bkt_sequence], maxlen=global_model.input_shape[1], dtype='float32')
+                X_global = np.expand_dims(X_global, -1)
+                global_pred = global_model.predict(X_global, verbose=0)
+                global_prediction = float(global_pred[0][0])
+                
+                # Blend predictions
+                final_prediction = (global_contribution * global_prediction + 
+                                   (1.0 - global_contribution) * user_prediction)
+                print(f"[LSTM] Blended prediction: {global_prediction:.3f} (global) * {global_contribution:.2f} + "
+                      f"{user_prediction:.3f} (user) * {(1-global_contribution):.2f} = {final_prediction:.3f}")
+                
+                # Get global confidence and blend
+                with open("temp_prof_history.json", "r") as f:
+                    global_history = json.load(f)
+                global_confidence = calculate_confidence(global_model, X_global, global_history)
+                final_confidence = (global_contribution * global_confidence + 
+                                   (1.0 - global_contribution) * user_confidence)
+                
+                return {"prediction": final_prediction, "confidence": final_confidence}
+            
+        # FIXED: Always return dict with both values    
+        return {"prediction": user_prediction, "confidence": user_confidence}
+        
+    except Exception as e:
+        # Proper error handling
+        import traceback
+        print(f"[LSTM] Error in predict_proficiency: {str(e)}")
+        traceback.print_exc()
+        return {
+            "prediction": 0.0, 
+            "confidence": 0.3,  # Low confidence when error occurs
+            "error": str(e)
+        }
 
 # Add this to lstm_engine.py
 def display_lstm_proficiency(user_id=None):
@@ -550,3 +643,5 @@ def display_lstm_predictions_table(bkt_sequence, user_id=None):
     
     # Print overall statistics
     print(f"\nOverall LSTM Proficiency: {overall_prediction:.2f} (Confidence: {overall_confidence:.2f})")
+
+    return {"confidence": overall_confidence, "prediction": overall_prediction}

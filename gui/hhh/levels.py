@@ -1,3 +1,4 @@
+import traceback
 import flet as ft
 import json
 import os
@@ -78,6 +79,10 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
             "completion_percentage": completion
         }, f)
     
+    if current_bkt_sequence:
+        bkt_avg = sum(current_bkt_sequence) / len(current_bkt_sequence)
+        page.session.set("bkt_average", bkt_avg)
+        print(f"[BKT] Average mastery: {bkt_avg:.2f}")
     # 4. Also save current BKT sequence back to user document
     try:
         if current_bkt_sequence:
@@ -154,20 +159,83 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
         # Get the proficiency prediction
         result = get_lstm_proficiency(current_bkt_sequence, completion, user_id)
         print("[LSTM] Result:", result)
-        
+
         # Save to page session
         proficiency = result.get("proficiency", 0)
         confidence = result.get("confidence", 0)
         method = result.get("method", "unknown")
-        
+
+        # Store both raw confidence and final confidence
         page.session.set("proficiency", proficiency)
-        page.session.set("proficiency_confidence", confidence)
+        page.session.set("lstm_raw_confidence", confidence)  # Raw from runner
+        page.session.set("proficiency_confidence", confidence)  # Will be overwritten if available
+
+        # Try to get the more dynamic confidence if available
+        if "final_confidence" in result:
+            page.session.set("proficiency_confidence", result.get("final_confidence"))
         
         print(f"[LSTM] Proficiency: {proficiency:.4f}, Confidence: {confidence:.2f}, Method: {method}")
 
         from lstm_engine import display_lstm_predictions_table
-        print("\nGenerating LSTM predictions...\n")
-        display_lstm_predictions_table(current_bkt_sequence, user_id)
+    
+        # Get the display result and store it in session
+        lstm_display_result = display_lstm_predictions_table(current_bkt_sequence, user_id)
+        page.session.set("lstm_display_result", lstm_display_result)
+        
+        # When calculating system-wide confidence:
+        # Get LSTM confidence from the display result
+        lstm_confidence = lstm_display_result.get("confidence", result.get("confidence", 0.5))
+        print(f"[DEBUG] Using LSTM display confidence: {lstm_confidence}")
+
+        # Calculate system-wide confidence with Bayesian fusion
+        try:
+            from confidence_scoring import get_system_confidence, interpret_confidence
+            
+            # Get confidence inputs
+            bkt_score = sum(current_bkt_sequence) / len(current_bkt_sequence) if current_bkt_sequence else 0
+            
+            # Get LSTM confidence - look for the correct value in the result
+            # Check for BOTH confidence values
+            lstm_result = page.session.get("lstm_display_result")
+            if lstm_result and "confidence" in lstm_result:
+                lstm_confidence = lstm_result.get("confidence")
+            else:
+                # Use the subprocess value as backup
+                lstm_confidence = result.get("confidence", 0.5)
+            
+            # Debug what values we're getting
+            print(f"[DEBUG] Raw LSTM result values: {result}")
+            
+            # Get value from the table generation (which has the 0.76 value)
+            display_result = page.session.get("lstm_display_result")
+            if display_result and "confidence" in display_result:
+                lstm_score = display_result.get("confidence")
+                print(f"[DEBUG] Using display result confidence: {lstm_score}")
+            else:
+                lstm_score = lstm_confidence
+            
+            # Get SuperMemo data if available
+            try:
+                from supermemo_engine import get_average_efactor, get_completion_rate
+                supermemo_score = get_average_efactor(user_id) / 2.5  # Normalize to 0-1 range
+            except:
+                supermemo_score = None
+            
+            # Calculate overall system confidence - LET IT HANDLE ALL PRINTING
+            confidence_result = get_system_confidence(bkt_score, lstm_confidence, supermemo_score)
+            system_confidence = confidence_result["system_confidence"]
+            confidence_interpretation = confidence_result["interpretation"]
+            
+            # Store in session
+            page.session.set("system_confidence", system_confidence)
+            page.session.set("confidence_interpretation", confidence_interpretation)
+            
+        except Exception as e:
+            print(f"[Confidence] Error calculating system confidence: {e}")
+            traceback.print_exc()
+
+        if page.session.get("proficiency_confidence") is not None and correct_answers and incorrect_answers:
+            record_confidence_validation(page, correct_answers, incorrect_answers)
         
     except Exception as e:
         print(f"[LSTM] Error in get_lstm_proficiency: {e}")
@@ -271,6 +339,48 @@ def get_updated_data(page):
 def clear_temp_module_cache():
     if os.path.exists("temp_modules.json"):
         os.remove("temp_modules.json")
+
+def record_confidence_validation(page, correct_answers, incorrect_answers):
+    """Record validation data for improving the confidence prediction model"""
+    try:
+        from confidence_scoring import add_validation_example
+        
+        # Get model outputs (predictions before the test/lesson)
+        bkt_score = page.session.get("bkt_average")
+        lstm_confidence = page.session.get("proficiency_confidence")
+        
+        if bkt_score is None or lstm_confidence is None:
+            print("[Confidence] Missing prediction data for validation")
+            return
+            
+        # Calculate actual performance score
+        total_questions = len(correct_answers) + len(incorrect_answers)
+        if total_questions == 0:
+            return
+            
+        actual_score = len(correct_answers) / total_questions
+        
+        # Was the prediction correct? (did high confidence match high performance?)
+        # A prediction is considered "correct" if:
+        # - High confidence (>0.7) → high score (>70%)
+        # - Low confidence (<0.5) → low score (<60%)
+        
+        threshold = 0.7  # Performance threshold
+        was_correct_bkt = (bkt_score >= 0.7 and actual_score >= threshold) or \
+                          (bkt_score < 0.5 and actual_score < 0.6)
+                          
+        was_correct_lstm = (lstm_confidence >= 0.7 and actual_score >= threshold) or \
+                           (lstm_confidence < 0.5 and actual_score < 0.6)
+        
+        # Add validation data points
+        add_validation_example("bkt", bkt_score, was_correct_bkt)
+        add_validation_example("lstm", lstm_confidence, was_correct_lstm)
+        
+        print(f"[Confidence] Added validation points - BKT: {bkt_score:.2f} (correct: {was_correct_bkt}), " +
+              f"LSTM: {lstm_confidence:.2f} (correct: {was_correct_lstm})")
+        
+    except Exception as e:
+        print(f"[Confidence] Error recording validation: {e}")
 
 def levels_page(page: ft.Page, image_urls: list):
     """Levels selection page"""
