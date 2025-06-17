@@ -52,6 +52,17 @@ def get_questions(page):
         q.lesson_id = level_data.lesson_id
         q.module_name = level_data.module_name
 
+    lesson_images = []
+    for q in questions:
+        if getattr(q, "type", None) == "Lesson" and getattr(q, "image", None):
+            lesson_images.append(q.image)
+    # Add invisible images to the page to trigger preloading
+    for img_url in lesson_images:
+        page.controls.append(
+            ft.Image(src=img_url, visible=False, width=1, height=1)
+        )
+    page.update()
+
     return questions
 
 def get_user_library():
@@ -825,7 +836,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -1032,7 +1043,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back, cur
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -1384,7 +1395,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -1470,26 +1481,62 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         on_click=lambda e: start_recording(e)
     )
     
+    # Define mic_icon as a mutable container
+    mic_icon = ft.Container(
+        content=ft.Icon(
+            name=ft.Icons.MIC,
+            color="black",
+            size=40
+        ),
+        alignment=ft.alignment.center,
+    )
+
+    # Yellow Microphone Button
+    button_mic = ft.Container(
+        content=mic_icon,
+        width=120,
+        height=120,
+        bgcolor="#FFC107", 
+        border_radius=60,  
+        alignment=ft.alignment.center,
+        on_click=lambda e: start_recording(e),
+        # Glow effect 
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=15,
+            color=ft.Colors.YELLOW_100,
+            offset=ft.Offset(0, 0)
+        )
+    )
+
     # Import threading here to avoid issues
     import threading
 
     def start_recording(e):
-        if attempts["count"] >= attempts["max"]:
-            # Don't allow more attempts
-            return
-        attempts["count"] += 1
         button_mic.disabled = True
-        attempts_text.value = f"Attempt {attempts['count']}/{attempts['max']}"
-        txt_transcription.value = "Listening..."
+        button_mic.bgcolor = "#FF9800"  # Darker yellow when recording
+        mic_icon.content = ft.ProgressRing(width=40, height=40, color="black")  # Show loading spinner
+        txt_transcription.value = "Loading..."
         txt_accuracy.value = ""
         pronunciation_tips.visible = False
         pronunciation_chart.visible = False
         e.page.update()
-        
+    
         recording["is_recording"] = True
         threading.Thread(target=lambda: record_audio(e.page)).start()
 
     def record_audio(page):
+        time.sleep(2.5)  # Wait for initialization
+        
+        # Update UI to show listening state
+        mic_icon.content = ft.Icon(
+            name=ft.Icons.MIC,
+            color="black",
+            size=40
+        )  # Restore mic icon
+        txt_transcription.value = "Listening..."
+        page.update()
+
         if not model_available:
             # Simulate audio processing when model isn't available
             time.sleep(2)
@@ -1510,10 +1557,12 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             else:
                 txt_transcription.value = "No audio detected. Please try again."
                 txt_accuracy.value = ""
+                button_mic.bgcolor = "#FFC107"  # Reset button color
                 button_mic.disabled = False
                 page.update()
         except Exception as e:
             txt_transcription.value = f"Error recording audio: {str(e)}"
+            button_mic.bgcolor = "#FFC107"  # Reset button color
             button_mic.disabled = False
             page.update()
         finally:

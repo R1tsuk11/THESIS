@@ -19,6 +19,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     score_image_urls = [
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653930/tryagain_j5tsjw.png",  # tryagain - 0
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653931/goodjob_jbi6dt.png",  # goodjob - 1
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653842/landscape_background_vppv58.png",  # landscape background - 2
     ]
     
     def return_to_levels(e):
@@ -296,7 +297,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     # Background with landscape image
     background = ft.Container(
         content=ft.Image(
-            src="THESIS-main/THESIS/gui/hhh/assets/landscape_background.png",
+            src=score_image_urls[2],
             width=page.width,
             height=page.height,
             fit=ft.ImageFit.COVER

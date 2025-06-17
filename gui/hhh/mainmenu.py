@@ -727,7 +727,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
         page.go("/levels")
 
     # Function to create a module card
-    def create_module_card(module_id, main_button_text, sub_button_text, main_color, sub_color, bg_color="#2A2A2A"):
+    def create_module_card(module_id, main_button_text, sub_button_text, main_color, sub_color, bg_color="#2A2A2A", is_locked=False):
         # Create the background container with image
         module_id = int(module_id) if isinstance(module_id, str) and module_id.isdigit() else module_id
         
@@ -757,20 +757,44 @@ def main_menu_page(page: ft.Page, image_urls: list):
             main_color = "#86C8CD"
             sub_color = "#FFE850"
 
-        # Background image container
-        bg_container = ft.Container(
-            content=ft.Image(
-                src=bg_image,
+        # If module is locked, override colors with gray
+        if is_locked:
+            main_color = "#757575"  # Dark gray
+            sub_color = "#9E9E9E"   # Medium gray
+        
+        # Image container without unsupported color_filter_matrix
+        image_container = ft.Image(
+            src=bg_image,
+            width=300,
+            height=150, 
+            fit=ft.ImageFit.COVER,
+            opacity=0.7 if is_locked else 1.0,
+            error_content=ft.Container(
                 width=300,
                 height=150,
-                fit=ft.ImageFit.COVER,
-                error_content=ft.Container(
+                bgcolor="gray" if is_locked else "orange",
+                border_radius=15
+            )
+        )
+        
+        # If locked, add grayscale effect with an overlay container
+        if is_locked:
+            bg_container = ft.Stack([
+                image_container,
+                # Add gray overlay to simulate grayscale
+                ft.Container(
                     width=300,
                     height=150,
-                    bgcolor="orange",
+                    bgcolor=ft.colors.with_opacity(0.5, "#808080"),
                     border_radius=15
                 )
-            ),
+            ])
+        else:
+            bg_container = image_container
+        
+        # Wrap in a container for border radius
+        bg_container = ft.Container(
+            content=bg_container,
             border_radius=15,
             width=300,
             height=150
@@ -804,7 +828,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
                             size=11,
                             text_align=ft.TextAlign.CENTER,
                         ),
-                        bgcolor=ft.Colors.with_opacity(0.7,sub_color),
+                        bgcolor=ft.Colors.with_opacity(0.7, sub_color),
                         border_radius=10,
                         padding=8,
                         width=200,
@@ -818,10 +842,10 @@ def main_menu_page(page: ft.Page, image_urls: list):
             alignment=ft.alignment.center,
         )
         
-        # Arrow icon container
-        arrow_container = ft.Container(
+        # Lock icon for locked modules, arrow for unlocked
+        icon_container = ft.Container(
             content=ft.Icon(
-                ft.Icons.ARROW_FORWARD,
+                ft.Icons.LOCK if is_locked else ft.Icons.ARROW_FORWARD,
                 color="#FFFFFF",
                 size=20,
             ),
@@ -835,7 +859,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
                 controls=[
                     bg_container,
                     content_container,
-                    arrow_container
+                    icon_container
                 ]
             ),
             border_radius=15,
@@ -848,7 +872,6 @@ def main_menu_page(page: ft.Page, image_urls: list):
                 offset=ft.Offset(0, 4),
                 spread_radius=1,
             ),
-            # Keep your existing navigation logic
             on_click=lambda e, module_id=module_id: navigate_to_levels(e, user, module_id),
         )
 
@@ -858,8 +881,24 @@ def main_menu_page(page: ft.Page, image_urls: list):
     user = User().load_data(user_id, page)  # Load user data
     page.session.set("user", user)
     page.session.set("user_library", user.library)  # Cache library for later use
-    for module in user.modules:
-        card = create_module_card(module.id, module.waray_name, module.eng_name, "#FFB74D", "#FF9800")
+
+    # Check which modules should be unlocked
+    for i, module in enumerate(user.modules):
+        # First module is always unlocked
+        if i == 0:
+            is_locked = False
+        else:
+            # Check if all previous modules are completed
+            is_locked = any(not getattr(prev_module, "completed", False) 
+                            for prev_module in user.modules[:i])
+        
+        card = create_module_card(
+            module.id, 
+            module.waray_name, 
+            module.eng_name, 
+            "#FFB74D", "#FF9800", 
+            is_locked=is_locked
+        )
         cards.append(card)
 
     # Logout button
@@ -974,33 +1013,50 @@ def main_menu_page(page: ft.Page, image_urls: list):
     )
 
     # Main content with centered items
+    # Scrollable Cards only
+    scrollable_cards = ft.Container(
+        content=ft.ListView(
+            controls=[
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            *cards  
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=10,  
+                    ),
+                    padding=ft.padding.all(10),
+                ),
+            ],
+            spacing=0,
+            padding=ft.padding.all(0),
+        ),
+        expand=True,
+    )
+
+    centered_modules_title = ft.Container(
+        content=modules_title,
+        alignment=ft.alignment.center,
+        padding=ft.padding.symmetric(vertical=10),
+    )
+
     content = ft.Column(
         [
-            header,
-            ft.Container(
-                content=ft.Column(
-                    [
-                        modules_title,
-                        *cards  # Iterate and insert all module cards
-                    ],
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                alignment=ft.alignment.center,
-                expand=True
-            ),
-            logout_button,
+            header, #fixed lang
+            centered_modules_title,
+            scrollable_cards,
+            # fixed bottom navigation (removed logout_button bc idk if still needed here sa main menu page pero pwede lang naman mabalik)
             bottom_nav,
         ],
         spacing=0,
         expand=True,
+        tight=True,
     )
 
-    # Configure page settings
     page.padding = 0
-    page.bgcolor = "#FFFFFF"  # Set page background to white
+    page.bgcolor = "#FFFFFF" 
     
-    # Add view with updated styling
-    page.views.append(ft.View("/main-menu", controls=[content], padding=0, bgcolor="#FFFFFF"))  # White background
+    page.views.append(ft.View("/main-menu", controls=[content], padding=0, bgcolor="#FFFFFF"))
     page.update()
 
     start_usage_timer(page)
