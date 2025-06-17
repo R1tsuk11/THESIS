@@ -30,7 +30,7 @@ def lesson_pronounce_page(page: ft.Page):
                 ft.Container(
                     width=50, 
                     content=ft.IconButton(
-                        icon=ft.icons.CLOSE, 
+                        icon=ft.Icons.CLOSE, 
                         icon_color="black",
                         on_click=go_back
                     )
@@ -70,7 +70,7 @@ def lesson_pronounce_page(page: ft.Page):
                         [
                             # Sound icon
                             ft.Icon(
-                                name=ft.icons.VOLUME_UP_ROUNDED,
+                                name=ft.Icons.VOLUME_UP_ROUNDED,
                                 color="black",
                                 size=20
                             ),
@@ -112,7 +112,7 @@ def lesson_pronounce_page(page: ft.Page):
                             # Circular yellow button with microphone
                             ft.Container(
                                 content=ft.Icon(
-                                    name=ft.icons.MIC,
+                                    name=ft.Icons.MIC,
                                     color="black",
                                     size=40
                                 ),
@@ -166,7 +166,7 @@ def lesson_pronounce_page(page: ft.Page):
             [
                 ft.Container(
                     content=ft.IconButton(
-                        icon=ft.icons.ARROW_BACK,
+                        icon=ft.Icons.ARROW_BACK,
                         icon_color="grey",
                         on_click=go_back
                     ),

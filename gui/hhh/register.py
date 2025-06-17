@@ -453,7 +453,7 @@ def register_page(page: ft.Page, image_urls: list):
                                     bgcolor="#4285F4",  # Blue register button
                                     color="white",
                                     on_click=on_register_click,
-                                    icon=ft.icons.ARROW_FORWARD,
+                                    icon=ft.Icons.ARROW_FORWARD,
                                     style=ft.ButtonStyle(
                                         shape=ft.RoundedRectangleBorder(radius=20),
                                         padding=ft.Padding(10, 15, 10, 15),
