@@ -1,4 +1,5 @@
 import flet as ft
+from achievements_manager import check_and_unlock_achievements, load_cached_achievements
 
 
 def achievement_page(page: ft.Page, image_urls: list):
@@ -18,6 +19,42 @@ def achievement_page(page: ft.Page, image_urls: list):
         lessons_completed = achievement_data.get("lessons_completed", 0)
         words_learned = achievement_data.get("words_learned", 0)
         language_proficiency = achievement_data.get("language_proficiency", 0)
+        user_achievements = achievement_data.get("achievements", {})
+
+        # Add this type checking and conversion code:
+        if isinstance(language_proficiency, dict):
+            # If it's a dictionary, extract the numeric value
+            try:
+                # Try common dictionary keys that might contain the value
+                if "value" in language_proficiency:
+                    language_proficiency = language_proficiency["value"]
+                elif "proficiency" in language_proficiency:
+                    language_proficiency = language_proficiency["proficiency"]
+                elif "score" in language_proficiency:
+                    language_proficiency = language_proficiency["score"]
+                else:
+                    # Fall back to the first numeric value in the dictionary
+                    for value in language_proficiency.values():
+                        if isinstance(value, (int, float)):
+                            language_proficiency = value
+                            break
+                    else:
+                        # If no numeric values found, default to 0
+                        language_proficiency = 0
+            except Exception as e:
+                print(f"Error extracting language proficiency value: {e}")
+                language_proficiency = 0
+                
+        # Ensure it's a number and within appropriate range
+        try:
+            language_proficiency = float(language_proficiency)
+            # Ensure it's within 0-100 range for percentage calculations
+            language_proficiency = max(0, min(100, language_proficiency))
+        except (TypeError, ValueError):
+            # If conversion fails, use a default
+            print(f"Error converting language_proficiency to float: {language_proficiency}")
+            language_proficiency = 0
+
         user_achievements = achievement_data.get("achievements", {})
     else:
         # Fallback to default data
@@ -49,36 +86,135 @@ def achievement_page(page: ft.Page, image_urls: list):
             language_proficiency = 5.2
             user_achievements = {}
     
+    user_id = page.session.get("user_id")
+    if user_id:
+        # Load cached achievements if available
+        if not load_cached_achievements(user_id, page):
+            # If no cache, initialize and check achievements
+            check_and_unlock_achievements(user_id, page)
+        
+        # Get user achievements directly from session
+        user_achievements = page.session.get("user_achievements")
+        if user_achievements is None:
+            user_achievements = {}
+        
+        # Debugging output
+        print(f"[Achievements] Loaded {len(user_achievements)} achievements from session")
+        print(f"[Achievements] Completed: {sum(1 for a in user_achievements.values() if a.get('completed', False))}")
+
     # Convert achievements to the format needed for display
     achievements_data = []
     for achievement_id, achievement in user_achievements.items():
+        # Check if the achievement is completed before adding it to display
+        is_completed = False
+        
         if isinstance(achievement, dict):
-            # If it's already a dictionary
-            achievements_data.append({
-                "title": achievement.get("name", "Unknown"),
-                "description": achievement.get("description", ""),
-                "icon": getattr(ft.Icons, achievement.get("icon", "STAR")),
-                "color": "#0055b3"
-            })
+            is_completed = achievement.get("completed", False)
+            if is_completed:
+                achievements_data.append({
+                    "title": achievement.get("name", "Unknown"),
+                    "description": achievement.get("description", ""),
+                    "icon": getattr(ft.Icons, achievement.get("icon", "STAR")),
+                    "color": "#0055b3" 
+                })
         else:
             # If it's an Achievement object
-            achievements_data.append({
-                "title": achievement.name,
-                "description": achievement.description,
-                "icon": getattr(ft.Icons, achievement.icon),
-                "color": "#0055b3"
-            })
+            is_completed = achievement.completed
+            if is_completed:
+                achievements_data.append({
+                    "title": achievement.name,
+                    "description": achievement.description,
+                    "icon": getattr(ft.Icons, achievement.icon),
+                    "color": "#0055b3"
+                })
+
+    # Add locked achievements section
+    locked_achievements_data = []
+    for achievement_id, achievement in user_achievements.items():
+        is_completed = False
+        
+        if isinstance(achievement, dict):
+            is_completed = achievement.get("completed", False)
+            if not is_completed:
+                locked_achievements_data.append({
+                    "title": achievement.get("name", "???"),
+                    "description": "Achievement locked",
+                    "icon": getattr(ft.Icons, "LOCK"),
+                    "color": "#AAAAAA" 
+                })
+        else:
+            is_completed = achievement.completed
+            if not is_completed:
+                locked_achievements_data.append({
+                    "title": "???",
+                    "description": "Achievement locked",
+                    "icon": getattr(ft.Icons, "LOCK"),
+                    "color": "#AAAAAA"
+                })
     
-    # If no achievements, add default one
+    # Function to create achievement cards dynamically
+    def create_achievement_card(achievement):
+        return ft.Container(
+            content=ft.Row([
+                ft.Container(
+                    content=ft.Icon(
+                        name=achievement["icon"],
+                        size=24,
+                        color="#FFFFFF",
+                    ),
+                    bgcolor=achievement["color"],
+                    border_radius=25,
+                    width=40,
+                    height=40,
+                    alignment=ft.alignment.center,
+                ),
+                ft.Container(width=15),  # Spacing
+                ft.Column([
+                    ft.Text(
+                        achievement["title"],
+                        size=16,
+                        color="#000000",
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    ft.Text(
+                        achievement["description"],
+                        size=14,
+                        color="#666666",
+                    ),
+                ], 
+                spacing=2,
+                expand=True),
+            ]),
+            padding=ft.padding.all(15),
+            bgcolor="#FFFFFF",
+            border_radius=15,
+            width=320,
+            shadow=ft.BoxShadow(
+                spread_radius=1,
+                blur_radius=15,
+                color=ft.Colors.with_opacity(0.1, "grey"),
+                offset=ft.Offset(0, 2),
+            ),
+            margin=ft.margin.only(bottom=10),
+        )
+
+    # If no achievements, show a message instead of cards
     if not achievements_data:
-        achievements_data = [
-            {
-                "title": "Makarit",
-                "description": "Completed your first lesson",
-                "icon": ft.Icons.STAR,
-                "color": "#0055b3"
-            },
+        achievement_cards = [
+            ft.Container(
+                content=ft.Text(
+                    "No achievements yet.",
+                    size=16,
+                    color="#888888",
+                    weight=ft.FontWeight.NORMAL,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                padding=ft.padding.all(20),
+                alignment=ft.alignment.center,
+            )
         ]
+    else:
+        achievement_cards = [create_achievement_card(achievement) for achievement in achievements_data]
 
     header = ft.Container(
         content=ft.Row(
@@ -296,8 +432,10 @@ def achievement_page(page: ft.Page, image_urls: list):
                         bgcolor="#4CAF50",  # Darker green progress as shown in image
                         border_radius=10,
                         height=16,
-                        width=language_proficiency * 2.8,  # Dynamic width based on percentage
-                    ),
+                        width=float(language_proficiency if isinstance(language_proficiency, (int, float)) 
+                            else (language_proficiency.get("value", 0) if isinstance(language_proficiency, dict) 
+                                else 0)) * 2.8,  # Dynamic width based on percentage
+                        ),
                 ]),
                 margin=ft.margin.only(top=1,bottom=3),
                 alignment=ft.alignment.center,
@@ -351,55 +489,6 @@ def achievement_page(page: ft.Page, image_urls: list):
         margin=ft.margin.symmetric(horizontal=10, vertical=10),
         alignment=ft.alignment.center,
     )
-
-    # Function to create achievement cards dynamically
-    def create_achievement_card(achievement):
-        return ft.Container(
-            content=ft.Row([
-                ft.Container(
-                    content=ft.Icon(
-                        name=achievement["icon"],
-                        size=24,
-                        color="#FFFFFF",
-                    ),
-                    bgcolor=achievement["color"],
-                    border_radius=25,
-                    width=40,
-                    height=40,
-                    alignment=ft.alignment.center,
-                ),
-                ft.Container(width=15),  # Spacing
-                ft.Column([
-                    ft.Text(
-                        achievement["title"],
-                        size=16,
-                        color="#000000",
-                        weight=ft.FontWeight.BOLD,
-                    ),
-                    ft.Text(
-                        achievement["description"],
-                        size=14,
-                        color="#666666",
-                    ),
-                ], 
-                spacing=2,
-                expand=True),
-            ]),
-            padding=ft.padding.all(15),
-            bgcolor="#FFFFFF",
-            border_radius=15,
-            width=320,
-            shadow=ft.BoxShadow(
-                spread_radius=1,
-                blur_radius=15,
-                color=ft.Colors.with_opacity(0.1, "grey"),
-                offset=ft.Offset(0, 2),
-            ),
-            margin=ft.margin.only(bottom=10),
-        )
-
-    # Create achievement cards list dynamically
-    achievement_cards = [create_achievement_card(achievement) for achievement in achievements_data]
 
     # Achievements section
     achievements_section = ft.Container(

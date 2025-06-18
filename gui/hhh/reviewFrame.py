@@ -402,22 +402,25 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         question_data.response_time = response_time
         global total_response_time
         total_response_time += response_time
-        if selected_option["value"] == 0:
-            print("User selected Choice 1")
-        elif selected_option["value"] == 1:
-            print("User selected Choice 2")
-        elif selected_option["value"] == 2:
-            print("User selected Choice 3")
-        else:
-            print("User did not select any image")
+        
+        # Make sure selected_option has a value
+        if selected_option["value"] is None:
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
             page.update()
             return
-
-        question_data.answer = question_data.choices[selected_option["value"]]
-
-        if question_data.choices[selected_option["value"]] == correct_answer:
-            print("Correct answer!")
+            
+        user_answer = question_data.choices[selected_option["value"]]
+        question_data.answer = user_answer
+        
+        # FIX: Create a unique key using vocabulary if question is empty
+        dict_key = question_data.question
+        if not dict_key or dict_key.strip() == "":
+            # Use vocabulary or word_to_translate as fallback key
+            dict_key = f"Word Select: {question_data.vocabulary or question_data.word_to_translate}"
+        
+        # Check answer and save with proper key
+        if user_answer == correct_answer:
+            print(f"Correct answer for '{dict_key}'!")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
                 color="green",
@@ -430,9 +433,9 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
+            correct_answers[dict_key] = question_data
         else:
-            print("Incorrect answer.")
+            print(f"Incorrect answer for '{dict_key}'.")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CLOSE,
                 color="red",
@@ -445,7 +448,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data
+            incorrect_answers[dict_key] = question_data
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -1689,6 +1692,25 @@ def review_session(page, image_urls: list):
             print("DEBUG correct_answers values:", list(correct_answers.values()))
             print("DEBUG incorrect_answers values:", list(incorrect_answers.values()))
             print(len(correct_answers))
+
+            print(f"[DEBUG] Questions total: {len(questions)}")
+            print(f"[DEBUG] correct_answers: {len(correct_answers)}, incorrect_answers: {len(incorrect_answers)}")
+            print(f"[DEBUG] Total answers recorded: {len(correct_answers) + len(incorrect_answers)}")
+
+            # If we're still missing questions, do a final check
+            if len(correct_answers) + len(incorrect_answers) != len(questions):
+                print("[WARNING] Question count mismatch - fixing before score calculation")
+                # Find any questions that weren't recorded
+                for q in questions:
+                    dict_key = q.question
+                    if not dict_key or dict_key.strip() == "":
+                        dict_key = f"Word Select: {q.vocabulary or q.word_to_translate}"
+                        
+                    # If this question isn't in either dictionary, add it to incorrect (safer default)
+                    if dict_key not in correct_answers and dict_key not in incorrect_answers:
+                        print(f"[RECOVERED] Adding missing question: {dict_key}")
+                        incorrect_answers[dict_key] = q
+
             grade_percentage = round((len(correct_answers) / len(questions)) * 100, 2)
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
             user_id = page.session.get("user_id")

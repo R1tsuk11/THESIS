@@ -158,6 +158,7 @@ def word_library_page(page: ft.Page, image_urls: list):
     # Load words from user's library and find translations in global dictionary
     def load_words_from_library(user_library):
         words = []
+        seen_words = set()  # Track lowercase versions of words we've already added
         
         if not user_library or len(user_library) == 0:
             return words
@@ -174,7 +175,16 @@ def word_library_page(page: ft.Page, image_urls: list):
             else:
                 # Skip invalid entries
                 continue
+            
+            # Check if we've already seen this word (case-insensitive)
+            word_lower = waray_word.lower()
+            if word_lower in seen_words:
+                # Skip duplicate words
+                print(f"Skipping duplicate word: {waray_word} (already have {word_lower})")
+                continue
                 
+            # Add to our tracking set and results
+            seen_words.add(word_lower)
             words.append({"waray": waray_word, "english": english_translation})
         
         return words
@@ -207,6 +217,75 @@ def word_library_page(page: ft.Page, image_urls: list):
             word_data = load_words_from_library(sample_words)
             print("Using sample words due to error")
     
+    if not word_data:
+        # Create a message for empty library
+        empty_library_message = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Icon(
+                        name=ft.icons.MENU_BOOK_OUTLINED,
+                        size=70,
+                        color="#CCCCCC"
+                    ),
+                    ft.Container(height=15),
+                    ft.Text(
+                        "Your word library is empty",
+                        size=18,
+                        color="#666666",
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Container(height=10),
+                    ft.Text(
+                        "Complete lessons to build your vocabulary!",
+                        size=14,
+                        color="#999999",
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Container(height=30),
+                    ft.ElevatedButton(
+                        content=ft.Text("Start Learning", size=14),
+                        style=ft.ButtonStyle(
+                            color={"": "white"},
+                            bgcolor={"": "#30b4fc"},
+                            elevation={"": 5},
+                            shape=ft.RoundedRectangleBorder(radius=8),
+                        ),
+                        on_click=lambda _: page.go("/main-menu")
+                    )
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.all(30),
+            margin=ft.margin.only(top=50),
+            alignment=ft.alignment.center,
+        )
+        
+        # Update the scrollable_list creation to include this message when empty
+        scrollable_list = ft.ListView(
+            controls=[empty_library_message],
+            spacing=10,
+            padding=ft.padding.only(bottom=80),
+            expand=True,
+        )
+    else:
+        # Original code for when there are words
+        word_cards = []
+        for word in word_data:
+            card = create_word_card(word["waray"], word["english"])
+            word_cards.append(card)
+        
+        # Create a ListView for scrollable content instead of a Column
+        scrollable_list = ft.ListView(
+            spacing=10,
+            padding=ft.padding.only(bottom=80),  # Increased padding to prevent bottom nav overlap
+            expand=True,
+        )
+        
+        # Add word cards to the ListView
+        for card in word_cards:
+            scrollable_list.controls.append(card)
+
     # Display word cards - your existing code here...
     word_cards = []
     for word in word_data:
@@ -296,17 +375,6 @@ def word_library_page(page: ft.Page, image_urls: list):
         # Ensure the container aligns its content in the center
         alignment=ft.alignment.center,
     )
-
-    # Create a ListView for scrollable content instead of a Column
-    scrollable_list = ft.ListView(
-        spacing=10,
-        padding=ft.padding.only(bottom=80),  # Increased padding to prevent bottom nav overlap
-        expand=True,
-    )
-    
-    # Add word cards to the ListView
-    for card in word_cards:
-        scrollable_list.controls.append(card)
     
     # Content area that will be scrollable
     content_area = ft.Container(

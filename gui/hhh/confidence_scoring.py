@@ -333,12 +333,29 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
             "lstm": min(0.95, max(0.1, lstm_score)),
         }
         
+        # Check if user has completed any daily reviews before using SuperMemo data
         if supermemo_score is not None:
-            try:
-                scores["supermemo"] = min(0.95, max(0.1, float(supermemo_score)))
-            except (TypeError, ValueError):
-                print(f"[Confidence] Warning: Invalid supermemo_score: {supermemo_score}")
-                scores["supermemo"] = 0.7  # Default
+            # Import here to avoid circular imports
+            from supermemo_engine import has_completed_reviews
+            
+            # Get user_id from context (assuming it's passed through levels.py)
+            user_id = None
+            import inspect
+            frame = inspect.currentframe()
+            while frame:
+                if 'user_id' in frame.f_locals:
+                    user_id = frame.f_locals['user_id']
+                    break
+                frame = frame.f_back
+            
+            # Only use SuperMemo if user has completed reviews
+            if user_id and has_completed_reviews(user_id):
+                try:
+                    scores["supermemo"] = min(0.95, max(0.1, float(supermemo_score)))
+                except (TypeError, ValueError):
+                    print(f"[Confidence] Warning: Invalid supermemo_score: {supermemo_score}")
+            else:
+                print("[Confidence] SuperMemo confidence excluded - user has not completed any daily reviews")
         
         if pronunciation_score is not None:
             try:
@@ -385,7 +402,7 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
         
         # Print info about missing components for new users
         if "supermemo" not in scores:
-            print("SUPERMEMO: Not available - user needs more practice data")
+            print("SUPERMEMO: Not available - user hasn't completed any daily reviews yet")
             
         print(f"Overall System Confidence: {confidence:.2f}")
         print(f"Interpretation: {interpretation}")

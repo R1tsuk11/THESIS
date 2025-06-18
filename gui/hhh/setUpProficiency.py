@@ -554,6 +554,12 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
         expand=True
     )
     
+    # Semi-transparent overlay to improve text readability
+    overlay = ft.Container(
+        bgcolor=ft.colors.with_opacity(0.4, "#000000"),
+        expand=True
+    )
+    
     # Card content with explanation
     card_content = ft.Container(
         content=ft.Column(
@@ -562,15 +568,15 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
                 ft.Row(
                     [
                         ft.Container(
-                            content=ft.Divider(color="grey", thickness=1),
+                            content=ft.Divider(color="white", thickness=1),
                             width=60
                         ),
                         ft.Container(
-                            content=ft.Text("PRE-TEST", color="grey", size=14, weight=ft.FontWeight.W_500),
+                            content=ft.Text("PRE-TEST", color="white", size=16, weight=ft.FontWeight.W_500),
                             padding=ft.padding.symmetric(horizontal=10)
                         ),
                         ft.Container(
-                            content=ft.Divider(color="grey", thickness=1),
+                            content=ft.Divider(color="white", thickness=1),
                             width=60
                         ),
                     ],
@@ -581,7 +587,7 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
                 ft.Container(
                     content=ft.Icon(
                         name=ft.icons.QUIZ_ROUNDED,
-                        color="#0078D7",
+                        color="#FFFFFF",
                         size=60
                     ),
                     margin=ft.margin.only(top=20, bottom=15),
@@ -592,8 +598,8 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
                 ft.Container(
                     content=ft.Text(
                         "Let's Assess Your Level",
-                        color="#0078D7",
-                        size=22,
+                        color="#FFFFFF",
+                        size=24,
                         weight=ft.FontWeight.BOLD,
                         text_align=ft.TextAlign.CENTER
                     ),
@@ -601,7 +607,7 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
                     alignment=ft.alignment.center
                 ),
                 
-                # Explanation text
+                # Card for explanation text (with white background for better readability)
                 ft.Container(
                     content=ft.Text(
                         "Before we begin, let's take a quick pre-test to determine "
@@ -613,11 +619,13 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
                         text_align=ft.TextAlign.CENTER
                     ),
                     margin=ft.margin.only(bottom=25),
-                    padding=ft.padding.symmetric(horizontal=10),
+                    padding=ft.padding.all(20),
+                    border_radius=10,
+                    bgcolor=ft.colors.with_opacity(0.95, "white"),
                     alignment=ft.alignment.center
                 ),
                 
-                # What to expect
+                # What to expect card (with white background)
                 ft.Container(
                     content=ft.Column([
                         ft.Text(
@@ -631,24 +639,26 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
                         ft.Row([
                             ft.Icon(name=ft.icons.CHECK_CIRCLE, color="#0078D7", size=16),
                             ft.Container(width=8),
-                            ft.Text("6 simple questions", size=14)
+                            ft.Text("6 simple questions", size=14, color="black")
                         ]),
                         ft.Container(height=5),
                         ft.Row([
                             ft.Icon(name=ft.icons.CHECK_CIRCLE, color="#0078D7", size=16),
                             ft.Container(width=8),
-                            ft.Text("Takes about 2 minutes", size=14)
+                            ft.Text("Takes about 2 minutes", size=14, color="black")
                         ]),
                         ft.Container(height=5),
                         ft.Row([
                             ft.Icon(name=ft.icons.CHECK_CIRCLE, color="#0078D7", size=16),
                             ft.Container(width=8),
-                            ft.Text("No pressure - just try your best!", size=14)
+                            ft.Text("No pressure - just try your best!", size=14, color="black")
                         ]),
                     ]),
                     margin=ft.margin.only(bottom=30),
-                    padding=ft.padding.symmetric(horizontal=20),
-                    alignment=ft.alignment.center_left
+                    padding=ft.padding.all(20),
+                    border_radius=10,
+                    bgcolor=ft.colors.with_opacity(0.95, "white"),
+                    alignment=ft.alignment.top_left
                 ),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
@@ -656,17 +666,9 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
             spacing=0
         ),
         width=312,
-        bgcolor="white",
         border_radius=10,
-        border=ft.border.all(2, "#0078D7"),
         padding=20,
         margin=ft.margin.symmetric(vertical=20),
-        shadow=ft.BoxShadow(
-            spread_radius=1,
-            blur_radius=10,
-            color=ft.Colors.GREY_400,
-            offset=ft.Offset(2, 2)
-        )
     )
     
     # Bottom button
@@ -696,18 +698,26 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
         padding=ft.padding.only(bottom=20)
     )
     
-    # Main content
-    main_content = ft.Column(
+    # Make content scrollable with ListView
+    scrollable_content = ft.ListView(
         [
             ft.Container(height=30),  # Top spacing
-            ft.Container(
-                content=card_content,
-                alignment=ft.alignment.center,
-            ),
-            ft.Container(expand=True),  # Flexible space
-            bottom_nav
+            card_content,
+            ft.Container(height=30),  # Bottom spacing before button
         ],
-        alignment=ft.MainAxisAlignment.START,
+        expand=True,
+        spacing=0,
+        padding=10,
+        auto_scroll=True
+    )
+    
+    # Main content structure
+    main_content = ft.Column(
+        [
+            scrollable_content,
+            bottom_nav  # Fixed button at bottom
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=0,
         expand=True
@@ -715,7 +725,7 @@ def pretest_landing_page(page: ft.Page, image_urls: list):
     
     # Full page stack
     stack = ft.Stack(
-        [background, main_content],
+        [background, overlay, main_content],
         expand=True
     )
     

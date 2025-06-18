@@ -7,6 +7,7 @@ from supermemo_engine import get_user_proficiency
 import pymongo
 import threading
 import subprocess
+from achievements_manager import check_and_unlock_achievements
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -414,6 +415,41 @@ def levels_page(page: ft.Page, image_urls: list):
                 level.grade_percentage = grade_percentage
                 break
 
+        if level.completed:
+            try:
+                # Save the completed level to the database immediately
+                arami = pymongo.MongoClient(uri)["arami"]
+                users_col = arami["users"]
+                
+                # Find the module and level in the database
+                update_result = users_col.update_one(
+                    {
+                        "user_id": int(user_id),
+                        "modules.id": int(page.session.get("module_id")),
+                        "modules.levels.lesson_id": level.lesson_id
+                    },
+                    {
+                        "$set": {
+                            "modules.$[module].levels.$[level].completed": True,
+                            "modules.$[module].levels.$[level].completion_time": completion_time,
+                            "modules.$[module].levels.$[level].grade_percentage": grade_percentage
+                        }
+                    },
+                    array_filters=[
+                        {"module.id": int(page.session.get("module_id"))},
+                        {"level.lesson_id": level.lesson_id}
+                    ]
+                )
+                
+                print(f"[DEBUG] Updated level completion in database: {update_result.modified_count} document(s) modified")
+                
+                # Now check for achievements after the database update
+                check_and_unlock_achievements(user_id, page)
+            except Exception as e:
+                print(f"[ERROR] Failed to update level completion in database: {str(e)}")
+                # Still try to check achievements with the session data
+                check_and_unlock_achievements(user_id, page)
+
     completion = compute_completion(page)
 
     if completion:
@@ -746,6 +782,10 @@ def levels_page(page: ft.Page, image_urls: list):
                     spacing=10
                 )
             )
+
+    user_id = page.session.get("user_id")
+    if user_id:
+        check_and_unlock_achievements(user_id, page)
 
     # Header with gradient background and title
     header = ft.Container(

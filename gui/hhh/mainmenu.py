@@ -9,6 +9,7 @@ from supermemo_engine import prepare_daily_review
 import time
 import threading
 from supermemo_engine import mark_vocabulary_reviewed
+from achievements_manager import check_and_unlock_achievements
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -149,6 +150,15 @@ def on_daily_review_complete(e, page, user):
     
     # Mark review as completed in session
     page.session.set("daily_review_needed", False)
+
+    # Update reviews_completed counter in database
+    usercol = connect_to_mongoDB()
+    usercol.update_one(
+        {"user_id": user.user_id}, 
+        {"$inc": {"reviews_completed": 1}}
+    )
+    
+    check_and_unlock_achievements(user.user_id, page)
     
     # Show success message
     page.open(ft.SnackBar(ft.Text("Daily review completed!"), bgcolor="#4CAF50"))
@@ -454,6 +464,16 @@ class User:  # User class
                 print(f"Skipping invalid achievement format for {key}: {value}")
 
         self.achievements = loaded_achievements
+
+    def sync_achievements_from_session(self, page):
+        """Sync achievements from session to user object before database save"""
+        session_achievements = page.session.get("user_achievements")
+        if session_achievements:
+            # Update the user's achievements with session data
+            print(f"[DEBUG] Syncing {len(session_achievements)} achievements from session to user")
+            self.achievements = session_achievements
+            return True
+        return False
 
     def load_data(self, user_id, page):
         """Loads user data from the session or database."""

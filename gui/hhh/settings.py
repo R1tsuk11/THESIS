@@ -33,12 +33,17 @@ def settings_page(page: ft.Page):
             print("[SuperMemo] Scheduling vocabulary during logout")
             schedule_result = schedule_pending_vocabulary(user_id)
             
+            # Load user data
+            user = User().load_data(user_id, page)
+            
+            # SYNC ACHIEVEMENTS BEFORE SAVING
+            user.sync_achievements_from_session(page)
+            
             # Clean up temp files including LSTM files
             from mainmenu import clear_all_temp_files
             clear_all_temp_files(user_id)  # Pass user_id to clean up user-specific files
             
-            # Load user data and save any changes
-            user = User().load_data(user_id, page)
+            # Save any changes
             user.save_user(page)
         
         page.session.clear()

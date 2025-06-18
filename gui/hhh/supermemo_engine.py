@@ -20,6 +20,43 @@ def connect_to_mongoDB():
         print(f"Failed to connect to MongoDB: {e}")
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
+def has_completed_reviews(user_id):
+    """
+    Check if the user has completed at least one daily review
+    
+    Args:
+        user_id: The user ID to check
+        
+    Returns:
+        bool: True if user has completed at least one review, False otherwise
+    """
+    try:
+        # Connect to MongoDB
+        arami = pymongo.MongoClient(uri)["arami"]
+        users_col = arami["users"]
+        
+        # Get user document
+        user_data = users_col.find_one({"user_id": int(user_id)})
+        
+        if not user_data:
+            return False
+            
+        # Check for reviews_completed counter
+        if "reviews_completed" in user_data and user_data["reviews_completed"] > 0:
+            return True
+            
+        # Check for vocabulary items with review data
+        if "library" in user_data:
+            for vocab in user_data["library"]:
+                if isinstance(vocab, dict) and "last_review" in vocab:
+                    # If any vocabulary has been reviewed, return True
+                    return True
+        
+        return False
+    except Exception as e:
+        print(f"[SuperMemo] Error checking review completion: {e}")
+        return False
+
 def process_review_items_in_background(user_id, vocab_list, quality_scores):
     """
     Process a batch of review items in a background thread

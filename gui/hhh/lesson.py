@@ -1429,8 +1429,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
     vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
     attempts = {"count": 0, "max": 3, "best_accuracy": 0.0}
 
-    # Check if the question is specifically asking for a subword (like "aga" from "Maupay nga aga")
-    # This is often in the question text: "How do you pronounce 'aga'?"
+    # Check if the question is specifically asking for a subword
     target_word = vocabulary
     question_text = question_data.question.lower()
     
@@ -1447,10 +1446,6 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
     print(f"Will recognize pronunciation for: '{recognition_target}'")
     accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.6)
     
-    # Remove the incorrect Page._current reference
-    # Instead, we'll use the page reference from the update function context
-    
-    # Create speech processor with error handling
     try:
         # Use explicit paths to ensure files are found
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1473,13 +1468,6 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
     txt_accuracy = ft.Text("", size=16)
     pronunciation_tips = ft.Text("", size=14, color="orange", visible=False)
     pronunciation_chart = ft.Image(visible=False)
-    button_mic = ft.IconButton(
-        icon=ft.icons.MIC,
-        icon_color="white",
-        bgcolor="#0078D7",
-        icon_size=36,
-        on_click=lambda e: start_recording(e)
-    )
     
     # Define mic_icon as a mutable container
     mic_icon = ft.Container(
@@ -1500,7 +1488,6 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         border_radius=60,  
         alignment=ft.alignment.center,
         on_click=lambda e: start_recording(e),
-        # Glow effect 
         shadow=ft.BoxShadow(
             spread_radius=1,
             blur_radius=15,
@@ -1509,8 +1496,9 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         )
     )
 
-    # Import threading here to avoid issues
-    import threading
+    # Create a mutable text for attempts tracking
+    attempts_text = ft.Text("Attempt 0/3", size=14, color="grey")
+    txt_attempts_remaining = ft.Text("3 attempts remaining", size=14, color="grey")
 
     def start_recording(e):
         button_mic.disabled = True
@@ -1526,7 +1514,8 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         threading.Thread(target=lambda: record_audio(e.page)).start()
 
     def record_audio(page):
-        time.sleep(2.5)  # Wait for initialization
+        # Shorter initialization delay
+        time.sleep(1.0)  # Reduced from 2.5
         
         # Update UI to show listening state
         mic_icon.content = ft.Icon(
@@ -1544,26 +1533,47 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             txt_accuracy.value = "Model not available - simulating correct pronunciation"
             txt_accuracy.color = "orange"
             button_mic.disabled = False
-            button_mic.bgcolor = "#0078D7"
-            button_mic.icon_color = "white"
+            button_mic.bgcolor = "#FFC107"
             page.update()
             return
             
         try:
+            # During the "Loading..." phase, perform initialization and ambient adjustment
+            # The user already sees the loading spinner and "Loading..." text at this point
+            
+            # Wait a very short time to ensure UI updates
+            time.sleep(0.4)
+            
+            # After initialization, show "Listening..." and start actual recording
+            mic_icon.content = ft.Icon(
+                name=ft.Icons.MIC,
+                color="black",
+                size=40
+            )
+            txt_transcription.value = "Listening..."
+            page.update()
+            
+            # NOW start recording - this should match when the terminal says "Speak now"
             recording["file_path"] = capture_audio(duration=3)
             
+            # Process the recording as before
             if recording["file_path"] and os.path.exists(recording["file_path"]):
+                # Only count as an attempt if audio is detected
+                attempts["count"] += 1
+                attempts_text.value = f"Attempt {attempts['count']}/{attempts['max']}"
+                page.update()
                 process_recording(page)
             else:
                 txt_transcription.value = "No audio detected. Please try again."
                 txt_accuracy.value = ""
-                button_mic.bgcolor = "#FFC107"  # Reset button color
+                button_mic.bgcolor = "#FFC107"
                 button_mic.disabled = False
                 page.update()
+                
         except Exception as e:
             txt_transcription.value = f"Error recording audio: {str(e)}"
-            button_mic.bgcolor = "#FFC107"  # Reset button color
             button_mic.disabled = False
+            button_mic.bgcolor = "#FFC107"
             page.update()
         finally:
             recording["is_recording"] = False
@@ -1577,16 +1587,18 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
                 recording["file_path"], recognition_target
             )
-            
-            # Compare with the specific target word not the full vocabulary
-            if predicted_word:
 
-                if predicted_word:
-                    # Track the best accuracy attempt
-                    current_accuracy = confidence if confidence else 0.0
+            # Special case for "Gab-i"
+            if recognition_target.lower() == "gab-i":
+                if predicted_word and predicted_word.lower() in ["gabby", "gab e", "gabi", "gab-i"]:
+                    predicted_word = "gab-i"
+            
+            # Track the best accuracy attempt
+            if predicted_word:
+                current_accuracy = confidence if confidence else 0.0
                 if current_accuracy > attempts["best_accuracy"]:
                     attempts["best_accuracy"] = current_accuracy
-                    
+                
                 # Show attempts remaining
                 remaining = attempts["max"] - attempts["count"]
                 if remaining <= 0:
@@ -1629,7 +1641,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                                 pronunciation_tips.visible = False
                                 
                             # Generate and display visualization
-                            viz_buffer = visualize_pronunciation_feedback(vocabulary, phoneme_confidence)
+                            viz_buffer = visualize_pronunciation_feedback(target_word, phoneme_confidence)
                             if viz_buffer:
                                 pronunciation_chart.src_base64 = base64.b64encode(viz_buffer.read()).decode('utf-8')
                                 pronunciation_chart.visible = True
@@ -1641,7 +1653,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                         if phoneme_confidence:
                             problem_syllables = speech_processor._identify_problem_syllables(
                                 [(p, s) for p, s in phoneme_confidence.items() if s < 0.7],
-                                speech_processor._map_phonemes_to_syllables(vocabulary.lower())
+                                speech_processor._map_phonemes_to_syllables(target_word.lower())
                             )
                             
                             feedback_text = ""
@@ -1658,7 +1670,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                             pronunciation_tips.value = feedback_text
                             pronunciation_tips.visible = bool(feedback_text)
                 else:
-                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{vocabulary}'"
+                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{target_word}'"
                     txt_accuracy.value = f"Incorrect word detected"
                     txt_accuracy.color = "red"
                     question_data.accuracy = 0.0
@@ -1734,9 +1746,6 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             
         if on_next:
             on_next(e)
-
-    attempts_text = ft.Text(f"Attempt 0/{attempts['max']}", size=14, color="grey")
-    txt_attempts_remaining = ft.Text(f"{attempts['max']} attempts remaining", size=14, color="grey")
     
     next_button = ft.ElevatedButton(
         content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
@@ -1774,17 +1783,12 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                     margin=ft.margin.only(bottom=10, top=10)
                 ),
                 ft.Container(
-                    ft.Text(
-                        attempts_text,
-                        text_align=ft.TextAlign.CENTER,
-                        size=12,
-                        weight=ft.FontWeight.W_500
-                    ),
+                    attempts_text,  # Using the mutable Text object
                     margin=ft.margin.only(bottom=10, top=10)
                 ),
                 ft.Container(
                     ft.Text(
-                        vocabulary,
+                        target_word,  # Changed from vocabulary to target_word
                         color="#0078D7",
                         size=28,
                         weight=ft.FontWeight.BOLD,
@@ -1855,7 +1859,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                 ),
                 ft.Container(width=10),
                 ft.Container(
-                    content= next_button,
+                    content=next_button,
                 )
             ],
             alignment=ft.MainAxisAlignment.CENTER
