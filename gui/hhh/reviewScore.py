@@ -24,7 +24,70 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     def return_to_levels(e):
         """Navigate back to the levels page"""
         user = page.session.get("user")
+        
+        # Existing code
         on_daily_review_complete(e, page, user)
+        
+        # NEW CODE: Update proficiency models with review results
+        user_id = page.session.get("user_id")
+        if user_id:
+            # 1. Get review results from current session
+            correct_answers_dict = page.session.get("correct_answers", {})
+            incorrect_answers_dict = page.session.get("incorrect_answers", {})
+            
+            # 2. Run BKT and LSTM updates - similar to what happens after lessons
+            if correct_answers_dict or incorrect_answers_dict:
+                # Completion percentage should be retrieved from user data
+                from levels import run_bkt_and_lstm
+                from levels import compute_completion
+                
+                # Get completion percentage
+                completion_percentage = compute_completion(page)
+                if completion_percentage is None:
+                    completion_percentage = 0
+                
+                # Update the models with review data
+                print(f"[Review] Updating proficiency models with daily review results")
+                print(f"[Review] Correct answers: {len(correct_answers_dict)}, Incorrect: {len(incorrect_answers_dict)}")
+                
+                # Run BKT and LSTM (in background thread to avoid UI freeze)
+                import threading
+                threading.Thread(
+                    target=run_bkt_and_lstm, 
+                    args=(page, completion_percentage, user_id, correct_answers_dict, incorrect_answers_dict)
+                ).start()
+                
+                # 3. Add a proficiency boost for consistent daily reviews
+                try:
+                    arami = pymongo.MongoClient(uri)["arami"]
+                    users_col = arami["users"]
+                    user_data = users_col.find_one({"user_id": int(user_id)})
+                    
+                    # Calculate review performance
+                    total_questions = len(correct_answers_dict) + len(incorrect_answers_dict)
+                    if total_questions > 0:
+                        accuracy = len(correct_answers_dict) / total_questions
+                        
+                        # Small boost to proficiency based on review performance
+                        current_proficiency = user_data.get("proficiency", 0)
+                        
+                        # Higher accuracy = higher boost (max 2% boost for perfect score)
+                        boost = accuracy * 0.02
+                        
+                        # Apply boost (but don't exceed 100%)
+                        new_proficiency = min(1.0, current_proficiency + boost)
+                        
+                        # Update in database
+                        users_col.update_one(
+                            {"user_id": int(user_id)},
+                            {"$set": {"proficiency": new_proficiency}}
+                        )
+                        
+                        print(f"[Review] Applied proficiency boost: +{boost:.2%}, new value: {new_proficiency:.2%}")
+                except Exception as e:
+                    print(f"[Review] Error applying proficiency boost: {str(e)}")
+        
+        # Continue with navigation
         page.go("/main-menu")
     
     # Create top header with close button

@@ -111,57 +111,86 @@ def update_last_login_date(user):
     usercol.update_one({"user_id": user.user_id}, {"$set": {"last_login_date": today_str}})
 
 def on_daily_review_complete(e, page, user):
-    """Handle completion of daily review"""
-    # Get the review results data
-    review_questions = page.session.get("daily_review_questions")
-    if review_questions is None:
-        review_questions = []
+    """Handle completion of daily review - with proficiency impact"""
+    # Get user_id from context or page
+    user_id = page.session.get("user_id") if page else None
     
-    correct_answers = page.session.get("correct_answers")
-    if correct_answers is None:
-        correct_answers = {}
+    if not user_id:
+        print("[ERROR] Cannot update proficiency - missing user_id")
+        return
     
-    # Prepare data for background processing
-    vocab_list = []
-    quality_scores = {}
-    
-    # Process each reviewed vocabulary
-    for question in review_questions:
-        vocab = question.get("vocabulary")
-        if vocab:
-            vocab_list.append(vocab)
+    try:
+        # Connect to MongoDB
+        arami = pymongo.MongoClient(uri)["arami"]
+        users_col = arami["users"]
+        
+        # Get current user data
+        user_data = users_col.find_one({"user_id": int(user_id)})
+        if not user_data:
+            print(f"[ERROR] User {user_id} not found")
+            return
+        
+        # Update review data
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        # Track completed reviews
+        reviews_completed = user_data.get("reviews_completed", 0) + 1
+        last_review_date = user_data.get("last_review_date", None)
+        review_streak = user_data.get("review_streak", 0)
+        
+        # Check if this is a consecutive day
+        if last_review_date and last_review_date != today:
+            from datetime import datetime
+            last_date = datetime.strptime(last_review_date, "%Y-%m-%d")
+            today_date = datetime.strptime(today, "%Y-%m-%d")
+            days_diff = (today_date - last_date).days
             
-            # Determine quality score (0-5) based on correctness
-            if vocab in correct_answers:
-                # Correct answer - assign quality 4 or 5
-                quality_scores[vocab] = 5  # Perfect recall
-            else:
-                # Incorrect answer - assign quality 0-2
-                quality_scores[vocab] = 2  # Some hesitation/recall issues
-    
-    # Start background processing
-    from supermemo_engine import process_review_items_in_background
-    process_review_items_in_background(user.user_id, vocab_list, quality_scores)
-    
-    print(f"[Daily Review] Completed and processing {len(review_questions)} vocabulary items in background")
-
-    # Update the last login date immediately
-    update_last_login_date(user)
-    
-    # Mark review as completed in session
-    page.session.set("daily_review_needed", False)
-
-    # Update reviews_completed counter in database
-    usercol = connect_to_mongoDB()
-    usercol.update_one(
-        {"user_id": user.user_id}, 
-        {"$inc": {"reviews_completed": 1}}
-    )
-    
-    check_and_unlock_achievements(user.user_id, page)
-    
-    # Show success message
-    page.open(ft.SnackBar(ft.Text("Daily review completed!"), bgcolor="#4CAF50"))
+            if days_diff == 1:
+                # Consecutive day - increase streak
+                review_streak += 1
+                
+                # Apply streak bonus (up to 5% for 5+ day streak)
+                streak_bonus = min(0.05, review_streak * 0.01)
+                
+                # Add slight bonus to proficiency for maintaining streak
+                current_prof = user_data.get("proficiency", 0)
+                new_prof = min(1.0, current_prof + streak_bonus)
+                
+                print(f"[Review] Applied streak bonus of {streak_bonus:.2%} for {review_streak}-day streak")
+                
+                # Update proficiency
+                users_col.update_one(
+                    {"user_id": int(user_id)}, 
+                    {"$set": {"proficiency": new_prof}}
+                )
+            elif days_diff > 1:
+                # Streak broken
+                review_streak = 1
+        elif not last_review_date:
+            # First review
+            review_streak = 1
+        
+        # Update review tracking data
+        users_col.update_one(
+            {"user_id": int(user_id)},
+            {"$set": {
+                "reviews_completed": reviews_completed,
+                "last_review_date": today,
+                "review_streak": review_streak
+            }}
+        )
+        
+        # Check for achievements after review completion
+        from achievements_manager import check_and_unlock_achievements
+        check_and_unlock_achievements(user_id, page)
+        
+        print(f"[Review] Updated review data - completed: {reviews_completed}, streak: {review_streak}")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to update review data: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def cache_modules_to_temp(modules):
     def module_to_dict(module):
