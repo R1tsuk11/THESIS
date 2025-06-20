@@ -18,6 +18,62 @@ usage_time_seconds = 0
 idle_seconds = 0
 IDLE_THRESHOLD = 120  # 2 minutes
 
+def calculate_completion_percentage(user):
+    """Calculate the correct completion percentage based on completed lessons"""
+    total_lessons = 0
+    completed_lessons = 0
+    
+    if hasattr(user, 'modules') and user.modules:
+        for module in user.modules:
+            if hasattr(module, 'levels') and module.levels:
+                for level in module.levels:
+                    total_lessons += 1
+                    if hasattr(level, 'completed') and level.completed:
+                        completed_lessons += 1
+    
+    if total_lessons > 0:
+        return int((completed_lessons / total_lessons) * 100)
+    return 0
+
+def debug_achievement_progress(page):
+    """Print debugging info about user's achievement progress"""
+    user_id = page.session.get("user_id")
+    if not user_id:
+        return
+        
+    user = page.session.get("user")
+    if not user:
+        return
+        
+    print("\n=== ACHIEVEMENT DEBUG INFO ===")
+    
+    # Count completed lessons
+    lessons_completed = 0
+    modules_completed = 0
+    
+    for module in user.modules:
+        module_complete = True
+        level_count = 0
+        completed_level_count = 0
+        
+        for level in module.levels:
+            level_count += 1
+            if getattr(level, "completed", False):
+                completed_level_count += 1
+                lessons_completed += 1
+            else:
+                module_complete = False
+                
+        print(f"Module {module.id}: {completed_level_count}/{level_count} levels completed")
+        
+        if module_complete:
+            modules_completed += 1
+    
+    print(f"Total completed lessons: {lessons_completed}")
+    print(f"Total completed modules: {modules_completed}")
+    print(f"Vocabulary count: {len(user.library)}")
+    print("============================\n")
+
 def start_usage_timer(page):
     def timer_loop():
         global usage_time_seconds, idle_seconds, user_active
@@ -111,7 +167,7 @@ def update_last_login_date(user):
     usercol.update_one({"user_id": user.user_id}, {"$set": {"last_login_date": today_str}})
 
 def on_daily_review_complete(e, page, user):
-    """Handle completion of daily review - with proficiency impact"""
+    """Handle completion of daily review - simplified version without streaks"""
     # Get user_id from context or page
     user_id = page.session.get("user_id") if page else None
     
@@ -134,58 +190,29 @@ def on_daily_review_complete(e, page, user):
         from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
         
-        # Track completed reviews
+        # Track completed reviews (simple counter)
         reviews_completed = user_data.get("reviews_completed", 0) + 1
-        last_review_date = user_data.get("last_review_date", None)
-        review_streak = user_data.get("review_streak", 0)
         
-        # Check if this is a consecutive day
-        if last_review_date and last_review_date != today:
-            from datetime import datetime
-            last_date = datetime.strptime(last_review_date, "%Y-%m-%d")
-            today_date = datetime.strptime(today, "%Y-%m-%d")
-            days_diff = (today_date - last_date).days
-            
-            if days_diff == 1:
-                # Consecutive day - increase streak
-                review_streak += 1
-                
-                # Apply streak bonus (up to 5% for 5+ day streak)
-                streak_bonus = min(0.05, review_streak * 0.01)
-                
-                # Add slight bonus to proficiency for maintaining streak
-                current_prof = user_data.get("proficiency", 0)
-                new_prof = min(1.0, current_prof + streak_bonus)
-                
-                print(f"[Review] Applied streak bonus of {streak_bonus:.2%} for {review_streak}-day streak")
-                
-                # Update proficiency
-                users_col.update_one(
-                    {"user_id": int(user_id)}, 
-                    {"$set": {"proficiency": new_prof}}
-                )
-            elif days_diff > 1:
-                # Streak broken
-                review_streak = 1
-        elif not last_review_date:
-            # First review
-            review_streak = 1
-        
-        # Update review tracking data
+        # Update critical dates to prevent repeat prompts
         users_col.update_one(
             {"user_id": int(user_id)},
             {"$set": {
                 "reviews_completed": reviews_completed,
                 "last_review_date": today,
-                "review_streak": review_streak
+                "last_login_date": today  # This prevents infinite prompts
             }}
         )
+        
+        # Also update the session to reflect this change
+        page.session.set("last_login_date", today)
+        page.session.set("last_review_date", today)
+        
+        print(f"[Review] Updated last_login_date to {today} to prevent repeat prompts")
+        print(f"[Review] Updated review data - completed: {reviews_completed}")
         
         # Check for achievements after review completion
         from achievements_manager import check_and_unlock_achievements
         check_and_unlock_achievements(user_id, page)
-        
-        print(f"[Review] Updated review data - completed: {reviews_completed}, streak: {review_streak}")
         
     except Exception as e:
         print(f"[ERROR] Failed to update review data: {str(e)}")
@@ -229,20 +256,17 @@ def cache_library_to_temp(library):
         json.dump(library, f)
 
 def clear_all_temp_files(user_id=None):
-    """
-    Clear all temporary files used by the application.
-    This should be called on logout to ensure clean state for next login.
-    """
+    """Clear all temporary files including those in the new folder structure"""
     temp_files = [
-        "temp_library.json",                # User vocabulary library
-        "temp_modules.json",                # User modules data
-        "temp_chaptertest_data.json",       # Chapter test results
-        "temp_bkt_data.json",               # BKT model state
-        "temp_prof_history.json",           # Proficiency history
-        "lstm_counter.json",                # LSTM counter
-        "bkt_predictions.json",             # BKT predictions
-        "bkt_input.csv",                    # BKT input data
-        "temp_lstm_input.json",             # Temporary LSTM input data        
+        "temp_library.json",
+        "temp_modules.json",
+        "temp_chaptertest_data.json",
+        "temp_bkt_data.json",
+        "temp_prof_history.json",
+        "lstm_counter.json",
+        "bkt_predictions.json",
+        "bkt_input.csv",
+        "temp_lstm_input.json",
     ]
     
     # Remove standard temp files
@@ -254,18 +278,24 @@ def clear_all_temp_files(user_id=None):
             except Exception as e:
                 print(f"Error removing {file}: {e}")
     
-    # Clean up user-specific LSTM files
+    # Clean up user-specific files in the new folders
     if user_id:
-        lstm_files = [
-            os.path.join("lstm_history", f"temp_prof_history_{user_id}.json"),
-            os.path.join("lstm_counters", f"lstm_counter_{user_id}.json")
+        # Create the new directory paths if they don't exist yet
+        os.makedirs("lstm_history", exist_ok=True)
+        os.makedirs("lstm_counters", exist_ok=True)
+        
+        user_specific_files = [
+            f"lstm_history/temp_prof_history_{user_id}.json",
+            f"lstm_counters/lstm_counter_{user_id}.json",
+            f"temp_bkt_data_{user_id}.json",
+            f"custom_bkt_predictor_{user_id}.pkl"
         ]
         
-        for file in lstm_files:
+        for file in user_specific_files:
             if os.path.exists(file):
                 try:
                     os.remove(file)
-                    print(f"Removed LSTM file: {file}")
+                    print(f"Removed user-specific file: {file}")
                 except Exception as e:
                     print(f"Error removing {file}: {e}")
 
@@ -585,25 +615,79 @@ class User:  # User class
             print("No temp library cache found.")
 
     def save_prof_history(self):
+        """Save proficiency history from new folder structure"""
+        # Check for user-specific history file first
+        user_history_path = f"lstm_history/temp_prof_history_{self.user_id}.json"
+        if os.path.exists(user_history_path):
+            try:
+                with open(user_history_path, "r") as f:
+                    history = json.load(f)
+                    self.proficiency_history = history
+                    
+                    # Extract most recent proficiency
+                    if history and len(history) > 0:
+                        last_entry = history[-1]
+                        
+                        # Convert to float if possible
+                        if isinstance(last_entry, (int, float)):
+                            self.proficiency = float(last_entry)
+                        elif isinstance(last_entry, dict) and "proficiency" in last_entry:
+                            self.proficiency = float(last_entry["proficiency"])
+                        
+                        # Scale to percentage if it's a decimal
+                        if 0 < self.proficiency < 1:
+                            self.proficiency = self.proficiency * 100
+                    
+                    print(f"[Proficiency] Loaded history from {user_history_path}, current: {self.proficiency:.2f}%")
+                    return
+            except Exception as e:
+                print(f"[Proficiency] Error loading from {user_history_path}: {e}")
+        
+        # Fall back to legacy file
         if os.path.exists("temp_prof_history.json"):
             with open("temp_prof_history.json", "r") as f:
                 self.proficiency_history = json.load(f)
-                self.proficiency = self.proficiency_history[-1] if self.proficiency_history else 0
+                
+                # Get the last proficiency value
+                if self.proficiency_history and len(self.proficiency_history) > 0:
+                    self.proficiency = float(self.proficiency_history[-1])
+                    if 0 < self.proficiency < 1:
+                        self.proficiency *= 100
+                
+                print(f"[Proficiency] Loaded from legacy file, current: {self.proficiency:.2f}%")
         else:
-            print("No temp library cache found.")
+            print("[Proficiency] No proficiency history found.")
 
     def save_lstm_counter(self):
+        """Save LSTM counter from new folder structure"""
+        # Check for user-specific counter file first
+        user_counter_path = f"lstm_counters/lstm_counter_{self.user_id}.json"
+        if os.path.exists(user_counter_path):
+            try:
+                with open(user_counter_path, "r") as f:
+                    lstm_counter = json.load(f)
+                    usercol = connect_to_mongoDB()
+                    usercol.update_one(
+                        {"user_id": self.user_id},
+                        {"$set": {"lstm_counter": lstm_counter}}
+                    )
+                    print(f"[LSTM] Saved counter from {user_counter_path} to database")
+                    return
+            except Exception as e:
+                print(f"[LSTM] Error saving counter from {user_counter_path}: {e}")
+        
+        # Fall back to legacy file
         if os.path.exists("lstm_counter.json"):
             with open("lstm_counter.json", "r") as f:
                 lstm_counter = json.load(f)
                 usercol = connect_to_mongoDB()
                 usercol.update_one(
                     {"user_id": self.user_id},
-                    {"$set": {"lstm_counter": lstm_counter}},
-                    upsert=True
+                    {"$set": {"lstm_counter": lstm_counter}}
                 )
+                print("[LSTM] Saved counter from legacy file to database")
         else:
-            print("No temp lstm counter cache found.")
+            print("[LSTM] No LSTM counter found.")
 
     def save_user(self, page):
         """Saves user data to the database."""
@@ -611,6 +695,20 @@ class User:  # User class
         self.save_bkt_data()
         self.save_prof_history()
         self.save_lstm_counter()
+
+        # NEW: Sync achievements from session before saving to database
+        self.sync_achievements_from_session(page)
+        
+        # Get achievement JSON file if it exists for this user
+        achievement_file = f"achievements_{self.user_id}.json"
+        if os.path.exists(achievement_file):
+            try:
+                with open(achievement_file, "r") as f:
+                    achievements = json.load(f)
+                    print(f"[Achievements] Loaded {len(achievements)} achievements from file")
+                    self.achievements = achievements
+            except Exception as e:
+                print(f"[Achievements] Error loading from file: {e}")
 
         # Add this code to ensure vocabulary scheduling happens during logout
         print("[SuperMemo] Scheduling vocabulary before logout")
@@ -928,6 +1026,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
     cards = []
     user_id = get_user_id(page)  # Get user ID from session
     user = User().load_data(user_id, page)  # Load user data
+    debug_achievement_progress(page)
     page.session.set("user", user)
     page.session.set("user_library", user.library)  # Cache library for later use
 
@@ -959,14 +1058,88 @@ def main_menu_page(page: ft.Page, image_urls: list):
         on_click=lambda e: user.save_user(page)  # Navigate to login page on logout
     )
 
+    def calculate_completion_percentage(user):
+        """Calculate accurate completion percentage based on completed lessons"""
+        if not hasattr(user, 'modules') or not user.modules:
+            return 0
+            
+        total_lessons = 0
+        completed_lessons = 0
+        
+        # Count all lessons across all modules
+        for module in user.modules:
+            if hasattr(module, 'levels'):
+                for level in module.levels:
+                    total_lessons += 1
+                    if getattr(level, 'completed', False):
+                        completed_lessons += 1
+        
+        # Calculate percentage (prevent division by zero)
+        if total_lessons > 0:
+            percentage = int((completed_lessons / total_lessons + 5) * 100)
+            print(f"[Progress] Calculated: {completed_lessons}/{total_lessons} = {percentage}%")
+            return percentage
+        return 0
+
     def navigate_to_achievements(e, user):
-        # Extract needed data from user
+        # Calculate the correct completion percentage
+        completion_percentage = calculate_completion_percentage(user)
+        
+        # Update the user's completion_percentage attribute
+        user.completion_percentage = completion_percentage
+        unique_words = set(w.lower() for w in user.library)
+        words_learned = len(unique_words)
+        
+        # Store in user data
+        try:
+            arami = pymongo.MongoClient(uri)["arami"]
+            users_col = arami["users"]
+            users_col.update_one(
+                {"user_id": int(user.user_id)},
+                {"$set": {"completion_percentage": completion_percentage}}
+            )
+            print(f"[Progress] Updated completion percentage: {completion_percentage}%")
+        except Exception as e:
+            print(f"Error updating completion percentage: {e}")
+        
+        # Extract proficiency properly regardless of format
+        prof_value = user.proficiency
+        print(f"[DEBUG] Raw proficiency value: {prof_value}, type: {type(prof_value)}")
+        
+        # Handle dictionary format
+        if isinstance(prof_value, dict):
+            if "proficiency" in prof_value:
+                prof_value = float(prof_value["proficiency"])
+            elif "value" in prof_value:
+                prof_value = float(prof_value["value"])
+            else:
+                # Find any numeric value in the dict
+                for key, val in prof_value.items():
+                    if isinstance(val, (int, float)):
+                        prof_value = float(val)
+                        break
+                else:
+                    prof_value = 0
+        
+        # Convert to float and scale if needed
+        try:
+            prof_value = float(prof_value)
+            # Scale to percentage if decimal
+            if 0 < prof_value < 1:
+                prof_value *= 100
+        except (ValueError, TypeError):
+            print(f"[WARNING] Could not convert proficiency: {prof_value}")
+            prof_value = 0
+            
+        print(f"[DEBUG] Final proficiency value: {prof_value}%")
+        
+        # Create the achievement data dictionary with the fixed proficiency value
         achievement_data = {
             "username": user.user_name,
             "progress_percentage": user.completion_percentage,
             "lessons_completed": len([l for m in user.modules for l in m.levels if l.completed]),
-            "words_learned": len(user.library),
-            "language_proficiency": user.proficiency if hasattr(user, 'proficiency') else 0,
+            "words_learned": len(set(w.lower() for w in user.library)),  # Case-insensitive count
+            "language_proficiency": prof_value,
             "achievements": user.achievements
         }
         

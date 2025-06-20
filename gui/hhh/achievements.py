@@ -398,19 +398,54 @@ def achievement_page(page: ft.Page, image_urls: list):
         )
     )
 
-    # Language Proficiency card - UPDATED to match the image exactly
+    vocabulary_mastery = 0
+    try:
+        # Get mastery directly from session (no default parameter)
+        raw_mastery = page.session.get("lstm_mastery")
+        if raw_mastery is not None:
+            vocabulary_mastery = float(raw_mastery) * 100
+            print(f"[Vocab] Using LSTM mastery: {vocabulary_mastery:.1f}%")
+        else:
+            # Fallback for new users
+            vocabulary_mastery = float(language_proficiency) * 0.7
+            print(f"[Vocab] No LSTM mastery found, using fallback: {vocabulary_mastery:.1f}%")
+    except Exception as e:
+        print(f"[Vocab] Error getting LSTM mastery: {e}")
+        vocabulary_mastery = 0
+        
+    # Get overall proficiency directly from LSTM
+    raw_proficiency = 0
+    try:
+        # Get proficiency directly from session (no default parameter)
+        raw_proficiency = page.session.get("lstm_proficiency") 
+        if raw_proficiency is not None:
+            raw_proficiency = float(raw_proficiency) * 100
+            print(f"[Proficiency] Raw LSTM proficiency: {raw_proficiency:.1f}%")
+        else:
+            # Use the value we already extracted from achievement_data
+            raw_proficiency = float(language_proficiency)
+            print(f"[Proficiency] Using extracted proficiency: {raw_proficiency:.1f}%")
+    except Exception as e:
+        print(f"[Proficiency] Error getting LSTM proficiency: {e}")
+        raw_proficiency = float(language_proficiency) if isinstance(language_proficiency, (int, float)) else 0
+
+    # Calculate combined proficiency (70% proficiency + 30% completion)
+    combined_proficiency = (raw_proficiency * 0.7) + (progress_percentage * 0.3)
+    print(f"[Combined] Proficiency: {raw_proficiency:.1f}% * 0.7 + {progress_percentage:.1f}% * 0.3 = {combined_proficiency:.1f}%")
+
+    # ------- FIRST CARD: LSTM Language Proficiency -------
     language_proficiency_card = ft.Container(
         content=ft.Column([
             ft.Row(
                 [
                     ft.Text(
-                        "Language Proficiency",
+                        "Overall Progress",  # Changed from "Overall Progress"
                         size=15,
                         color="#FFFFFF",
                         weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(
-                        f"{language_proficiency}%",
+                        f"{combined_proficiency:.1f}%",
                         size=28,
                         color="#FFFFFF",
                         weight=ft.FontWeight.BOLD,
@@ -429,22 +464,78 @@ def achievement_page(page: ft.Page, image_urls: list):
                         width=260,  # Full width for the background
                     ),
                     ft.Container(
-                        bgcolor="#4CAF50",  # Darker green progress as shown in image
+                        bgcolor="#4CAF50",  # Green progress 
                         border_radius=10,
                         height=16,
-                        width=float(language_proficiency if isinstance(language_proficiency, (int, float)) 
-                            else (language_proficiency.get("value", 0) if isinstance(language_proficiency, dict) 
-                                else 0)) * 2.8,  # Dynamic width based on percentage
-                        ),
+                        width=language_proficiency * 2.6,
+                    ),
                 ]),
-                margin=ft.margin.only(top=1,bottom=3),
+                margin=ft.margin.only(top=1, bottom=3),
                 alignment=ft.alignment.center,
             ),
         ],
         alignment=ft.MainAxisAlignment.CENTER,
         spacing=10,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-        bgcolor="#8BC34A",  # Brighter lime green as shown in image
+        bgcolor="#8BC34A",  # Lime green
+        height=95,
+        width=300,
+        padding=ft.padding.symmetric(horizontal=20, vertical=15),
+        border_radius=20,
+        alignment=ft.alignment.center,
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=15,
+            color=ft.Colors.with_opacity(0.2, "grey"),
+            offset=ft.Offset(0, 2),
+        )
+    )
+
+    # ------- SECOND CARD: Vocabulary Mastery -------
+    vocabulary_mastery_card = ft.Container(
+        content=ft.Column([
+            ft.Row(
+                [
+                    ft.Text(
+                        "Vocabulary Mastery",
+                        size=15,
+                        color="#FFFFFF",
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    ft.Text(
+                        f"{vocabulary_mastery:.1f}%",
+                        size=28,
+                        color="#FFFFFF",
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            # Progress bar
+            ft.Container(
+                content=ft.Stack([
+                    ft.Container(
+                        bgcolor="#FFFFFF",
+                        border_radius=10,
+                        height=16,
+                        width=260,  # Full width for the background
+                    ),
+                    ft.Container(
+                        bgcolor="#FF9800",  # Orange progress for vocabulary
+                        border_radius=10,
+                        height=16,
+                        width=vocabulary_mastery * 2.6,
+                    ),
+                ]),
+                margin=ft.margin.only(top=1, bottom=3),
+                alignment=ft.alignment.center,
+            ),
+        ],
+        alignment=ft.MainAxisAlignment.CENTER,
+        spacing=10,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+        bgcolor="#E91E63",  # Pink color for vocabulary
         height=95,
         width=300,  # Match width with other elements
         padding=ft.padding.symmetric(horizontal=20, vertical=15),
@@ -480,6 +571,11 @@ def achievement_page(page: ft.Page, image_urls: list):
                     content=language_proficiency_card,
                     alignment=ft.alignment.center,
                     margin=ft.margin.only(top=15),
+                ),
+                ft.Container(
+                content=vocabulary_mastery_card,
+                alignment=ft.alignment.center,
+                margin=ft.margin.only(top=15),
                 ),
             ],
             spacing=0,

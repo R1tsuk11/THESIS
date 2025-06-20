@@ -65,6 +65,37 @@ def batch_update_supermemo(user_id, correct_answers, incorrect_answers):
                 print(f"[DEBUG] Batch updated SuperMemo for {vocab} (incorrect) in {group}: {new_state}")
                 break
 
+def generate_consistent_key(question_data):
+    """Generate a consistent key for tracking questions"""
+    if not question_data:
+        return "unknown_question"
+    
+    # ALWAYS use ID if available (most reliable)
+    if hasattr(question_data, 'id'):
+        return f"q_{question_data.id}"
+    
+    # For special translation questions that may miss IDs 
+    if hasattr(question_data, 'question'):
+        if question_data.question == 'Translate to Waray' and hasattr(question_data, 'word_to_translate'):
+            return f"waray_{question_data.word_to_translate}"
+            
+        if question_data.question == 'Translate to English' and hasattr(question_data, 'word_to_translate'):
+            return f"english_{question_data.word_to_translate}"
+    
+    # Only fall back to question text if needed
+    if hasattr(question_data, 'question') and question_data.question:
+        return question_data.question
+        
+    # Last resort - use vocabulary + type if available
+    vocab = getattr(question_data, 'vocabulary', None)
+    q_type = getattr(question_data, 'type', None)
+    
+    if vocab and q_type:
+        return f"{q_type}_{vocab}"
+        
+    # Final fallback
+    return f"question_{id(question_data)}"
+
 class AttrDict(dict):
     """Allows attribute access to dict keys with better error handling."""
     def __getattr__(self, item):
@@ -100,10 +131,9 @@ def get_review_questions(page):
         return []
     return [AttrDict(q) for q in review_questions]
 
-def build_imgpicker_question(page, question_data, progress_value, on_next, on_back):
+def build_imgpicker_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
-    
     m_one_image = [
 
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V1_fzmf6o.png", # 0 - M1V1
@@ -123,43 +153,69 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V15_nnsh6x.png", # 14 - M1V15
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712837/M1V16_yuxzyw.png", # 15 - M1V16
     ]
-
     question = question_data.question
     correct_answer = question_data.correct_answer
+    global user_library
 
+   # Define image variables
+    img1 = None
+    img2 = None
+    
     # Try to get image URLs based on the indices in choices
     try:
         # Check if choices contains numeric indices
         if all(str(choice).isdigit() for choice in question_data.choices):
-            img1 = m_one_image[int(question_data.choices[0])]
-            img2 = m_one_image[int(question_data.choices[1])]
-            if len(question_data.choices) > 2:
-                img3 = m_one_image[int(question_data.choices[2])]
-            else:
-                img3 = None
+            try:
+                # Try cloudinary URLs first
+                img1 = m_one_image[int(question_data.choices[0])]
+                img2 = m_one_image[int(question_data.choices[1])]
+
+                print("Using cloudinary URLs for images")
+            except (ValueError, IndexError) as e:
+                print(f"Cloudinary URL error: {e}")
+                raise  # Re-raise to trigger the fallback
         else:
             # Fall back to direct URLs in choices
             img1 = question_data.choices[0]
             img2 = question_data.choices[1]
-            img3 = question_data.choices[2] if len(question_data.choices) > 2 else None
-    except (ValueError, IndexError) as e:
+            
+    except Exception as e:
         print(f"Error loading images: {e}")
-        # Fallback to local files as last resort
+        # Fallback to local files
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         ASSETS_PATH = os.path.join(BASE_DIR, "assets")
-        img1 = os.path.join(ASSETS_PATH, os.path.basename(str(question_data.choices[0])))
-        img2 = os.path.join(ASSETS_PATH, os.path.basename(str(question_data.choices[1])))
-        img3 = os.path.join(ASSETS_PATH, os.path.basename(str(question_data.choices[2]))) if len(question_data.choices) > 2 else None
+        
+        # For each choice, try different ways to find the image
+        def find_image(choice):
+            # Try direct filename
+            path = os.path.join(ASSETS_PATH, os.path.basename(str(choice)))
+            if os.path.exists(path):
+                return path
+                
+            # Try with extension
+            for ext in ['.jpg', '.png', '.jpeg']:
+                path = os.path.join(ASSETS_PATH, f"{str(choice)}{ext}")
+                if os.path.exists(path):
+                    return path
+                    
+            # Try with underscores instead of spaces
+            path = os.path.join(ASSETS_PATH, f"{str(choice).replace(' ', '_')}.png")
+            if os.path.exists(path):
+                return path
+                
+            # Last resort - return the choice as is (might be a URL or path)
+            return str(choice)
+            
+        img1 = find_image(question_data.choices[0])
+        img2 = find_image(question_data.choices[1])
         
     print("Image 1 src:", img1)
     print("Image 2 src:", img2)
-    if img3:
-        print("Image 3 src:", img3)
 
     def on_option_click(e, option_index):
         selected_option["value"] = option_index
 
-        for i, option in enumerate([image_option1, image_option2, image_option3]):
+        for i, option in enumerate([image_option1, image_option2]):
             if i == selected_option["value"]:
                 option.border = ft.border.all(3, "#0078D7")  # Blue border for selected
             else:
@@ -171,25 +227,29 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         question_data.response_time = response_time
         global total_response_time
         total_response_time += response_time
-        if selected_option["value"] == 0:
-            print("User selected Choice 1")
-        elif selected_option["value"] == 1:
-            print("User selected Choice 2")
-        elif selected_option["value"] == 2:
-            print("User selected Choice 3")
-        else:
-            print("User did not select any image")
+        
+        # Get the user's answer
+        if selected_option["value"] is None:
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
             page.update()
             return
-
-        question_data.answer = question_data.choices[selected_option["value"]]
-
-        if question_data.choices[selected_option["value"]] == correct_answer:
-            print("Correct answer!")
+            
+        user_answer = question_data.choices[selected_option["value"]]
+        question_data.answer = user_answer
+        
+        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
+        vocab_key = getattr(question_data, 'vocabulary', None)
+        if not vocab_key:
+            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
+            
+        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
+        
+        # Check answer and store result using the vocab key
+        if user_answer == correct_answer:
+            print(f"Correct answer for '{vocab_key}'!")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green",
+                color="green", 
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
@@ -199,27 +259,28 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
-
+            correct_answers[vocab_key] = question_data
         else:
-            print("Incorrect answer.")
+            print(f"Incorrect answer for '{vocab_key}'.")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CLOSE,
                 color="red",
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect",
+                "Incorrect", 
                 color="black",
-                size=20,
+                size=20, 
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data
-            
+            incorrect_answers[vocab_key] = question_data
+
         page.open(correctDlg)
         await asyncio.sleep(1.5)
         page.close(correctDlg)
+
+        page.update()
 
         if on_next:
             on_next(e)
@@ -256,22 +317,6 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         on_click=lambda e: on_option_click(e, 1)
     )
 
-    image_option3 = ft.Container(
-        content=ft.Image(
-            src=img3,
-            width=320,
-            height=180,
-            fit=ft.ImageFit.COVER,
-            border_radius=ft.border_radius.all(10),
-        ),
-        width=320,
-        height=180,
-        border=ft.border.all(1, "#E0E0E0"),
-        border_radius=ft.border_radius.all(10),
-        margin=ft.margin.only(bottom=15),
-        on_click=lambda e: on_option_click(e, 2)
-    )
-
     # Create content for scrollable area
     scrollable_content = ft.Column(
         [
@@ -294,6 +339,17 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
                 padding=ft.padding.only(top=10, right=10)
             ),
 
+            ft.Container(
+                content=ft.Text(
+                    "Which image best represents the word?",
+                    color="#0078D7",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER
+                ),
+                margin=ft.margin.only(top=20, bottom=15)
+            ),
+
             # Instruction text
             ft.Container(
                 content=ft.Text(
@@ -309,7 +365,7 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
             # Image choices
             ft.Container(
                 content=ft.Column(
-                    [image_option1, image_option2, image_option3],
+                    [image_option1, image_option2],
                     spacing=0
                 )
             ),
@@ -403,7 +459,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         global total_response_time
         total_response_time += response_time
         
-        # Make sure selected_option has a value
+        # Get the user's answer
         if selected_option["value"] is None:
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
             page.update()
@@ -412,18 +468,19 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         user_answer = question_data.choices[selected_option["value"]]
         question_data.answer = user_answer
         
-        # FIX: Create a unique key using vocabulary if question is empty
-        dict_key = question_data.question
-        if not dict_key or dict_key.strip() == "":
-            # Use vocabulary or word_to_translate as fallback key
-            dict_key = f"Word Select: {question_data.vocabulary or question_data.word_to_translate}"
+        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
+        vocab_key = getattr(question_data, 'vocabulary', None)
+        if not vocab_key:
+            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
+            
+        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
         
-        # Check answer and save with proper key
+        # Check answer and store result using the vocab key
         if user_answer == correct_answer:
-            print(f"Correct answer for '{dict_key}'!")
+            print(f"Correct answer for '{vocab_key}'!")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green",
+                color="green", 
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
@@ -433,22 +490,22 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[dict_key] = question_data
+            correct_answers[vocab_key] = question_data
         else:
-            print(f"Incorrect answer for '{dict_key}'.")
+            print(f"Incorrect answer for '{vocab_key}'.")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CLOSE,
                 color="red",
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect",
+                "Incorrect", 
                 color="black",
-                size=20,
+                size=20, 
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[dict_key] = question_data
+            incorrect_answers[vocab_key] = question_data
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -573,7 +630,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -617,23 +674,29 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
         question_data.response_time = response_time
         global total_response_time
         total_response_time += response_time
-        if selected_option["value"] == 0:
-            print("Selected option: True")
-        elif selected_option["value"] == 1:
-            print("Selected option: False")
-        else:
-            print("No option selected")
+        
+        # Get the user's answer
+        if selected_option["value"] is None:
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
             page.update()
             return
-
-        question_data.answer = question_data.choices[selected_option["value"]]
-
-        if question_data.choices[selected_option["value"]] == correct_answer:
-            print("Correct answer!")
+            
+        user_answer = question_data.choices[selected_option["value"]]
+        question_data.answer = user_answer
+        
+        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
+        vocab_key = getattr(question_data, 'vocabulary', None)
+        if not vocab_key:
+            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
+            
+        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
+        
+        # Check answer and store result using the vocab key
+        if user_answer == correct_answer:
+            print(f"Correct answer for '{vocab_key}'!")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green",
+                color="green", 
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
@@ -643,22 +706,22 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
+            correct_answers[vocab_key] = question_data
         else:
-            print("Incorrect answer.")
+            print(f"Incorrect answer for '{vocab_key}'.")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CLOSE,
                 color="red",
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect",
+                "Incorrect", 
                 color="black",
-                size=20,
+                size=20, 
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data    
+            incorrect_answers[vocab_key] = question_data
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -794,7 +857,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -843,25 +906,29 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
         question_data.response_time = response_time
         global total_response_time
         total_response_time += response_time
-        if selected_option["value"] == 0:
-            print("User selected Choice 1")
-        elif selected_option["value"] == 1:
-            print("User selected Choice 2")
-        elif selected_option["value"] == 2:
-            print("User selected Choice 3")
-        else:
-            print("User did not select any image")
+        
+        # Get the user's answer
+        if selected_option["value"] is None:
             page.open(ft.SnackBar(ft.Text("Please select an answer option."), bgcolor="#FF0000"))
             page.update()
             return
-
-        question_data.answer = question_data.choices[selected_option["value"]]
-
-        if question_data.choices[selected_option["value"]] == correct_answer:
-            print("Correct answer!")
+            
+        user_answer = question_data.choices[selected_option["value"]]
+        question_data.answer = user_answer
+        
+        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
+        vocab_key = getattr(question_data, 'vocabulary', None)
+        if not vocab_key:
+            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
+            
+        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
+        
+        # Check answer and store result using the vocab key
+        if user_answer == correct_answer:
+            print(f"Correct answer for '{vocab_key}'!")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green",
+                color="green", 
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
@@ -871,23 +938,22 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            correct_answers[question_data.question] = question_data
-
+            correct_answers[vocab_key] = question_data
         else:
-            print("Incorrect answer.")
+            print(f"Incorrect answer for '{vocab_key}'.")
             correctDlg.content.controls[0].content = ft.Icon(
                 name=ft.icons.CLOSE,
                 color="red",
                 size=60
             )
             correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect",
+                "Incorrect", 
                 color="black",
-                size=20,
+                size=20, 
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER
             )
-            incorrect_answers[question_data.question] = question_data
+            incorrect_answers[vocab_key] = question_data
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -1012,7 +1078,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -1257,15 +1323,22 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
         global total_response_time
         total_response_time += response_time
         
+        # SIMPLE KEY APPROACH: Just use the vocabulary word
+        vocab_key = getattr(question_data, 'vocabulary', None)
+        if not vocab_key:
+            vocab_key = f"pronunciation_{getattr(question_data, 'id', 0)}"
+        
+        print(f"Using vocabulary key: '{vocab_key}' for tracking pronunciation")
+        
         if not question_data.accuracy:
             question_data.accuracy = 0.0
-            
+        
         if question_data.accuracy >= accuracy_threshold:
             print(f"Pronunciation accepted with accuracy: {question_data.accuracy:.2f}")
-            correct_answers[question_data.question] = question_data
+            correct_answers[vocab_key] = question_data
         else:
             print(f"Pronunciation below threshold: {question_data.accuracy:.2f}")
-            incorrect_answers[question_data.question] = question_data
+            incorrect_answers[vocab_key] = question_data
             
         if on_next:
             on_next(e)
@@ -1676,50 +1749,68 @@ def review_session(page, image_urls: list):
     
     def next_question(e=None):
         current_question_index["value"] += 1
-        # When calculating progress_value, add a safety check:
+        
+        # Calculate progress safely
         if total_questions > 0:
             progress_value = (current_question_index["value"] + 1) / total_questions
         else:
-            progress_value = 1.0  # Default to 100% if no questions
+            progress_value = 1.0
             
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:
-            print("DEBUG correct_answers:", correct_answers)
-            print("DEBUG incorrect_answers:", incorrect_answers)
-            print("DEBUG correct_answers keys:", list(correct_answers.keys()))
-            print("DEBUG incorrect_answers keys:", list(incorrect_answers.keys()))
-            print("DEBUG correct_answers values:", list(correct_answers.values()))
-            print("DEBUG incorrect_answers values:", list(incorrect_answers.values()))
-            print(len(correct_answers))
-
-            print(f"[DEBUG] Questions total: {len(questions)}")
-            print(f"[DEBUG] correct_answers: {len(correct_answers)}, incorrect_answers: {len(incorrect_answers)}")
-            print(f"[DEBUG] Total answers recorded: {len(correct_answers) + len(incorrect_answers)}")
-
-            # If we're still missing questions, do a final check
-            if len(correct_answers) + len(incorrect_answers) != len(questions):
-                print("[WARNING] Question count mismatch - fixing before score calculation")
-                # Find any questions that weren't recorded
-                for q in questions:
-                    dict_key = q.question
-                    if not dict_key or dict_key.strip() == "":
-                        dict_key = f"Word Select: {q.vocabulary or q.word_to_translate}"
-                        
-                    # If this question isn't in either dictionary, add it to incorrect (safer default)
-                    if dict_key not in correct_answers and dict_key not in incorrect_answers:
-                        print(f"[RECOVERED] Adding missing question: {dict_key}")
-                        incorrect_answers[dict_key] = q
-
-            grade_percentage = round((len(correct_answers) / len(questions)) * 100, 2)
+            # Debug what's happening with the counts
+            print("\n--- QUESTION COUNT DIAGNOSTIC ---")
+            print(f"Total questions: {len(questions)}")
+            
+            # Track question types to ensure proper counting
+            question_types = {}
+            for q in questions:
+                q_type = getattr(q, "type", "Unknown")
+                question_types[q_type] = question_types.get(q_type, 0) + 1
+            print(f"Questions by type: {question_types}")
+            
+            # Get raw question data - base all calculations on this
+            raw_questions = page.session.get("daily_review_questions") 
+            if not raw_questions:
+                raw_questions = questions
+            
+            print(f"Actual questions in session: {len(raw_questions)}")
+            print(f"Correct answers: {len(correct_answers)}")
+            print(f"Incorrect answers: {len(incorrect_answers)}")
+            
+            # Create user-friendly score - use the expected question count
+            total_answered = len(correct_answers) + len(incorrect_answers)
+            expected_questions = len(raw_questions)
+            
+            if total_answered < expected_questions:
+                print(f"[WARNING] {expected_questions - total_answered} questions weren't answered properly")
+                
+            # Calculate grade percentage based only on answered questions
+            if total_answered > 0:
+                grade_percentage = round((len(correct_answers) / total_answered) * 100)
+            else:
+                grade_percentage = 0
+                
+            print(f"Final grade percentage: {grade_percentage}%")
+                
+            # Format the response time
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
+            
+            # Save answers to session for use in score page
+            page.session.set("correct_answers", correct_answers)
+            page.session.set("incorrect_answers", incorrect_answers)
+            
+            # Schedule SuperMemo updates in background
             user_id = page.session.get("user_id")
             threading.Thread(
                 target=batch_update_supermemo,
                 args=(user_id, correct_answers.copy(), incorrect_answers.copy()),
                 daemon=True
             ).start()
-            lesson_score(page, grade_percentage, correct_answers, incorrect_answers, formatted_time)
+            
+            # Show score page
+            lesson_score(page, grade_percentage, len(correct_answers), len(incorrect_answers), formatted_time)
             reset_var()
 
     def reset_var():

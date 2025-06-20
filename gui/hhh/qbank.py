@@ -7879,33 +7879,78 @@ module_bank = {
     5: module_5,
 }
 
+# Add this to qbank.py (replacing or updating the existing achievement_bank)
 achievement_bank = {
-    "achv_1": {
-        "id": 1,
-        "name": "First Level Completed",
-        "description": "Complete the first level.",
-        "icon": "STAR",
+    "first_lesson": {
+        "id": "first_lesson",
+        "name": "First Steps",
+        "description": "Complete your first lesson",
+        "icon": "SCHOOL",
+        "requirement": 1,
+        "type": "lesson_completion",
         "completed": False
     },
-    "achv_2": {
-        "id": 2,
-        "name": "First Module Completed",
-        "description": "Complete the first module.",
-        "icon": "STAR",
+    "lesson_master": {
+        "id": "lesson_master",
+        "name": "Lesson Master",
+        "description": "Complete 5 lessons",
+        "icon": "WORKSPACE_PREMIUM",
+        "requirement": 5, 
+        "type": "lesson_completion",
         "completed": False
     },
-    "achv_3": {
-        "id": 3,
-        "name": "All Modules Completed",
-        "description": "Complete all modules.",
-        "icon": "STAR",
+    "module_complete": {
+        "id": "module_complete",
+        "name": "Module Champion",
+        "description": "Complete your first module",
+        "icon": "MILITARY_TECH",
+        "requirement": 1,
+        "type": "module_completion",
         "completed": False
     },
-    "achv_4": {
-        "id": 4,
-        "name": "All Achievements Completed",
-        "description": "Complete all achievements.",
-        "icon": "STAR",
+    "vocabulary_beginner": {
+        "id": "vocabulary_beginner",
+        "name": "Word Collector",
+        "description": "Learn 10 vocabulary words",
+        "icon": "MENU_BOOK",
+        "requirement": 10,
+        "type": "vocabulary",
+        "completed": False
+    },
+    "vocabulary_intermediate": {
+        "id": "vocabulary_intermediate",
+        "name": "Vocabulary Builder",
+        "description": "Learn 25 vocabulary words",
+        "icon": "AUTO_STORIES",
+        "requirement": 25,
+        "type": "vocabulary",
+        "completed": False
+    },
+    "perfect_score": {
+        "id": "perfect_score",
+        "name": "Perfect Scholar",
+        "description": "Get 100% on a lesson",
+        "icon": "GRADE",
+        "requirement": 100,
+        "type": "score",
+        "completed": False
+    },
+    "first_review": {
+        "id": "first_review",
+        "name": "Review Champion",
+        "description": "Complete your first daily review",
+        "icon": "REPEAT",
+        "requirement": 1,
+        "type": "review",
+        "completed": False
+    },
+    "fast_learner": {
+        "id": "fast_learner",
+        "name": "Quick Learner",
+        "description": "Complete a lesson in under 60 seconds",
+        "icon": "TIMER",
+        "requirement": 60,
+        "type": "time",
         "completed": False
     }
 }
@@ -7915,7 +7960,7 @@ word_library = {
     "Maupay nga aga": "Good morning",
     "gihapon": "too/also",
     "kamusta ka": "How are you?",
-    "ikaw?": "How about you?",
+    "ikaw": "How about you?",
     "la": "just/only",
     "okay la ako": "I'm just okay",
     "kulop": "afternoon",

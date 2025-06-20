@@ -11,8 +11,14 @@ from achievements_manager import check_and_unlock_achievements
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
-def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answers):
-    update_bkt(user_id, correct_answers, incorrect_answers)
+def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answers, is_daily_review=False):
+    if is_daily_review:
+        print("[PROFICIENCY] Daily review detected - applying gentler impact")
+        review_scale_factor = 0.3  # Reviews have 30% impact compared to lessons
+    else:
+        review_scale_factor = 1.0  # Full impact for lessons
+    
+    update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=review_scale_factor)
 
     # 1. Gather current bkt mastery values
     current_bkt_sequence = get_all_p_masteries()  # Current mastery values as list
@@ -187,6 +193,36 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
         # Get LSTM confidence from the display result
         lstm_confidence = lstm_display_result.get("confidence", result.get("confidence", 0.5))
         print(f"[DEBUG] Using LSTM display confidence: {lstm_confidence}")
+
+        if is_daily_review and 'proficiency' in result:
+            # For daily reviews, limit how much the proficiency can change
+            current_prof = page.session.get("proficiency") or 0
+            if isinstance(current_prof, dict) and "proficiency" in current_prof:
+                current_prof = float(current_prof["proficiency"])
+            
+            # Convert to float if needed
+            try:
+                current_prof = float(current_prof)
+            except (TypeError, ValueError):
+                current_prof = 0
+                
+            # Calculate new proficiency with limited change for daily reviews
+            new_prof = current_prof + ((result["proficiency"] - current_prof) * review_scale_factor)
+            result["proficiency"] = new_prof
+            print(f"[LSTM] Daily review - original prediction: {result['proficiency']:.4f}, scaled: {new_prof:.4f}")
+
+        # After LSTM prediction is complete, save values to session
+        if result and 'proficiency' in result and page:
+            # Save raw LSTM values for achievements page
+            page.session.set("lstm_proficiency", result["proficiency"])
+            page.session.set("lstm_mastery", result.get("mastery", result["proficiency"] * 0.7))
+            
+            # Also update achievement_data if it exists
+            achievement_data = page.session.get("achievement_data")
+            if achievement_data:
+                achievement_data["language_proficiency"] = result["proficiency"] * 100
+                page.session.set("achievement_data", achievement_data)
+                print(f"[LSTM] Updated achievement data with proficiency: {result['proficiency'] * 100:.1f}%")
 
         # Calculate system-wide confidence with Bayesian fusion
         try:

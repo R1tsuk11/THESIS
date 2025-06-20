@@ -25,7 +25,7 @@ def settings_page(page: ft.Page):
 
     # Update the perform_logout function in settings.py
     def perform_logout(e):
-        """Handle user logout with vocabulary scheduling"""
+        """Handle user logout with proper database syncing"""
         user_id = page.session.get("user_id")
         if user_id:
             # Schedule vocabulary before logout
@@ -36,18 +36,18 @@ def settings_page(page: ft.Page):
             # Load user data
             user = User().load_data(user_id, page)
             
-            # SYNC ACHIEVEMENTS BEFORE SAVING
-            user.sync_achievements_from_session(page)
+            # EXPLICITLY SYNC ACHIEVEMENTS FROM SESSION
+            session_achievements = page.session.get("user_achievements")
+            if session_achievements:
+                print(f"[Achievements] Syncing {len(session_achievements)} achievements to database")
+                user.achievements = session_achievements
             
-            # Clean up temp files including LSTM files
+            # Clean up temp files
             from mainmenu import clear_all_temp_files
-            clear_all_temp_files(user_id)  # Pass user_id to clean up user-specific files
+            clear_all_temp_files(user_id) 
             
             # Save any changes
             user.save_user(page)
-        
-        page.session.clear()
-        page.go("/login")
 
     # Header with logo and back button
     header = ft.Container(

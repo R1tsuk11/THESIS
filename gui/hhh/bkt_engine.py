@@ -131,6 +131,45 @@ class CustomBKTPredictor:
         # Sort by the 'order' parameter
         vocab_items.sort(key=lambda x: x[1].get('order', 999999))
         return [vocab for vocab, _ in vocab_items]
+    
+    def observe_with_scale(self, vocab, correct, impact_scale=1.0):
+        """Observe a performance with scaled impact (for daily reviews)."""
+        vocab = vocab.lower()  # Ensure lowercase for consistency
+        
+        if vocab not in self.vocab_parameters:
+            self.vocab_parameters[vocab] = {
+                'learn': 0.15,    # Default learning probability
+                'guess': 0.25,    # Default guess probability
+                'slip': 0.1,      # Default slip probability
+                'prior': 0.5      # Default prior probability of mastery
+            }
+        
+        # Get parameters for this vocabulary
+        params = self.vocab_parameters[vocab]
+        learn = params.get('learn', 0.15) * impact_scale  # Scale learning rate
+        guess = params.get('guess', 0.25)
+        slip = params.get('slip', 0.1)
+        
+        # Get current mastery
+        mastery = params.get('prior', 0.5)
+        
+        # Update based on observation
+        if correct:
+            # P(mastered | correct)
+            mastery = (mastery * (1 - slip)) / (mastery * (1 - slip) + (1 - mastery) * guess)
+        else:
+            # P(mastered | incorrect)
+            mastery = (mastery * slip) / (mastery * slip + (1 - mastery) * (1 - guess))
+        
+        # Apply scaled learning rate
+        mastery = mastery + (1 - mastery) * learn
+        
+        # Update parameters
+        params['prior'] = mastery  # Update prior for next observation
+        self.vocab_parameters[vocab] = params
+        
+        print(f"[BKT] Vocab '{vocab}' mastery: {mastery:.2f} (scale: {impact_scale:.1f}, correct: {correct})")
+        return mastery
 
 def get_custom_bkt_path(user_id=None):
     """Get path for user-specific custom BKT predictor"""
@@ -202,17 +241,37 @@ def load_custom_bkt(user_id=None):
     
     return None
 
-def save_custom_bkt(predictor, user_id=None):
+def save_custom_bkt(user_id, predictor):
     """Save the custom BKT predictor for a specific user"""
-    model_path = get_custom_bkt_path(user_id)
     try:
+        # Handle case where arguments are in wrong order
+        if isinstance(user_id, object) and hasattr(user_id, 'vocab_parameters') and not isinstance(predictor, (str, int)):
+            print("[BKT] Warning: Arguments appear to be in wrong order, swapping")
+            user_id, predictor = predictor, user_id
+            
+        # Ensure user_id is valid
+        if user_id is None or str(user_id).lower() == "none":
+            model_path = "custom_bkt_predictor.pkl"
+        else:
+            model_path = f"custom_bkt_predictor_{user_id}.pkl"
+            
+        # Create parent directory if needed
+        os.makedirs(os.path.dirname(model_path) if os.path.dirname(model_path) else '.', exist_ok=True)
+        
         with open(model_path, "wb") as f:
             pickle.dump(predictor, f)
-        print(f"[BKT] Saved custom predictor for user {user_id}")
+        print(f"[BKT] Saved custom predictor to {model_path}")
         return True
     except Exception as e:
         print(f"[BKT] Error saving custom BKT predictor: {e}")
-        return False
+        # Try using a simpler filename as fallback
+        try:
+            with open(f"bkt_{user_id}.pkl", "wb") as f:
+                pickle.dump(predictor, f)
+            print(f"[BKT] Saved with fallback name bkt_{user_id}.pkl")
+            return True
+        except:
+            return False
 
 def create_user_bkt_predictor(user_id):
     """Create a user-specific BKT predictor by cloning the base model"""
@@ -662,7 +721,26 @@ def save_temp_state(state):
     with open(TEMP_FILE, "w") as f:
         json.dump(state, f, indent=4)
 
-def update_bkt(user_id, correct_answers, incorrect_answers):
+def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0):
+    """Update BKT model with new observations, with optional impact scaling."""
+    bkt = load_custom_bkt(user_id)
+    
+    # Process correct answers
+    for key, question in correct_answers.items():
+        vocab = get_vocabulary_from_question(question)
+        if vocab:
+            # Scale the update impact for daily reviews
+            bkt.observe_with_scale(vocab, True, impact_scale)
+    
+    # Process incorrect answers
+    for key, question in incorrect_answers.items():
+        vocab = get_vocabulary_from_question(question)
+        if vocab:
+            # Scale the update impact for daily reviews
+            bkt.observe_with_scale(vocab, False, impact_scale)
+    
+    # Save updated model
+    save_custom_bkt(user_id, bkt)
     global uid
     print(f"[update_bkt] Starting BKT update for user {user_id}...")
     uid = user_id
@@ -843,6 +921,25 @@ def display_bkt_predictions(user_id, filter_vocab=None):
     
     print("└──────────────────────┴─────────────┴──────────┴──────────┴──────────┴───────────┘")
     print("* Mastery levels above 0.85 are considered 'mastered'")
+
+def get_vocabulary_from_question(question):
+    """Extract vocabulary from a question object"""
+    if not question:
+        return None
+    
+    # Try different possible attribute names for vocabulary
+    vocab = None
+    if hasattr(question, 'vocabulary') and question.vocabulary:
+        vocab = question.vocabulary
+    elif hasattr(question, 'word_to_translate') and question.word_to_translate:
+        vocab = question.word_to_translate
+    
+    # Convert dictionary-style objects if needed
+    if isinstance(question, dict):
+        vocab = question.get('vocabulary') or question.get('word_to_translate')
+    
+    # Return lowercase for consistency
+    return vocab.lower() if vocab else None
 
 #########################################################################################
 

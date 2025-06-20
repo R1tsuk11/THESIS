@@ -3,74 +3,7 @@ from datetime import datetime
 import time
 import json
 import os
-
-# Achievement definitions
-ACHIEVEMENTS = {
-    "first_lesson": {
-        "id": "first_lesson",
-        "name": "First Steps",
-        "description": "Complete your first lesson",
-        "icon": "SCHOOL",
-        "requirement": 1,
-        "type": "lesson_completion"
-    },
-    "lesson_master": {
-        "id": "lesson_master",
-        "name": "Lesson Master",
-        "description": "Complete 5 lessons",
-        "icon": "WORKSPACE_PREMIUM",
-        "requirement": 5,
-        "type": "lesson_completion"
-    },
-    "module_complete": {
-        "id": "module_complete",
-        "name": "Module Champion",
-        "description": "Complete your first module",
-        "icon": "MILITARY_TECH",
-        "requirement": 1,
-        "type": "module_completion"
-    },
-    "vocabulary_beginner": {
-        "id": "vocabulary_beginner",
-        "name": "Word Collector",
-        "description": "Learn 10 vocabulary words",
-        "icon": "MENU_BOOK",
-        "requirement": 10,
-        "type": "vocabulary"
-    },
-    "vocabulary_intermediate": {
-        "id": "vocabulary_intermediate",
-        "name": "Vocabulary Builder",
-        "description": "Learn 25 vocabulary words",
-        "icon": "AUTO_STORIES",
-        "requirement": 25,
-        "type": "vocabulary"
-    },
-    "perfect_score": {
-        "id": "perfect_score",
-        "name": "Perfect Scholar",
-        "description": "Get 100% on a lesson",
-        "icon": "GRADE",
-        "requirement": 100,
-        "type": "score"
-    },
-    "first_review": {
-        "id": "first_review",
-        "name": "Review Champion",
-        "description": "Complete your first daily review",
-        "icon": "REPEAT",
-        "requirement": 1,
-        "type": "review"
-    },
-    "fast_learner": {
-        "id": "fast_learner",
-        "name": "Quick Learner",
-        "description": "Complete a lesson in under 60 seconds",
-        "icon": "TIMER",
-        "requirement": 60,
-        "type": "time"
-    }
-}
+from qbank import achievement_bank as ACHIEVEMENTS
 
 def check_and_unlock_achievements(user_id, page=None):
     """Check and unlock achievements based on session data"""
@@ -78,57 +11,71 @@ def check_and_unlock_achievements(user_id, page=None):
         print("Page object is required for session-based achievements")
         return False
         
-    # Get user achievements from session or initialize them
-    user_achievements = page.session.get("user_achievements")
-    if not user_achievements:
-        print("Initializing user achievements in session")
-        user_achievements = {
-            achievement_id: {
-                "id": achievement["id"],
-                "name": achievement["name"],
-                "description": achievement["description"],
-                "icon": achievement["icon"],
-                "completed": False,
-                "date_earned": None
-            }
-            for achievement_id, achievement in ACHIEVEMENTS.items()
-        }
+    # Get modules directly from page.session with proper error handling
+    modules = []
+    raw_modules = page.session.get("modules")
+    if raw_modules:
+        modules = raw_modules
     
-    # Get user data from session - fix all these calls to remove default values
-    modules = page.session.get("modules")
-    if modules is None:
-        modules = []
+    # Get user library with proper error handling
+    user_library = []
+    raw_library = page.session.get("user_library")
+    if raw_library:
+        user_library = raw_library
+        
+    # Get user achievements with proper error handling
+    user_achievements = {}
+    raw_achievements = page.session.get("user_achievements")
+    if raw_achievements:
+        user_achievements = raw_achievements
+    else:
+        # Initialize achievements using the imported achievement_bank
+        user_achievements = {}
+        for achievement_id, achievement in ACHIEVEMENTS.items():
+            user_achievements[achievement_id] = achievement.copy()  # Use copy to avoid modifying original
     
-    user_library = page.session.get("user_library")
-    if user_library is None:
-        user_library = []
-    
-    reviews_completed = page.session.get("reviews_completed")
-    if reviews_completed is None:
-        reviews_completed = 0
+    # Get reviews completed with proper error handling
+    reviews_completed = 0
+    raw_reviews = page.session.get("reviews_completed")
+    if raw_reviews is not None:
+        reviews_completed = raw_reviews
     
     # Track newly unlocked achievements
     newly_unlocked = []
     
-    # Count completed lessons and modules
+    # Count completed lessons and modules - FIXED COUNTING LOGIC
     completed_lessons = 0
     completed_modules = 0
     
     for module in modules:
         module_completed = True
+        module_level_count = 0
+        module_completed_levels = 0
+        
         for level in getattr(module, "levels", []):
-            if getattr(level, "completed", False):
+            module_level_count += 1
+            # Handle both dictionary and object styles
+            level_completed = False
+            
+            if isinstance(level, dict):
+                level_completed = level.get("completed", False)
+            else:
+                level_completed = getattr(level, "completed", False)
+                
+            if level_completed:
                 completed_lessons += 1
+                module_completed_levels += 1
             else:
                 module_completed = False
         
-        if module_completed:
+        # Only count a module as completed if all levels are completed
+        if module_completed and module_level_count > 0 and module_level_count == module_completed_levels:
             completed_modules += 1
-    
+            
     print(f"[Achievements] Found {completed_lessons} completed lessons, {completed_modules} completed modules")
     
     # Count vocabulary words
-    vocabulary_count = len(user_library)
+    vocabulary_count = len(user_library) if user_library else 0
     print(f"[Achievements] Found {vocabulary_count} vocabulary words")
     
     # Check for achievements
@@ -159,7 +106,12 @@ def check_and_unlock_achievements(user_id, page=None):
             # Check if any lesson has perfect score
             for module in modules:
                 for level in getattr(module, "levels", []):
-                    grade_percentage = getattr(level, "grade_percentage", 0)
+                    grade_percentage = None
+                    if isinstance(level, dict):
+                        grade_percentage = level.get("grade_percentage")
+                    else:
+                        grade_percentage = getattr(level, "grade_percentage", None)
+                        
                     if grade_percentage is not None and float(grade_percentage) >= achievement["requirement"]:
                         unlocked = True
                         print(f"[Achievements] Unlocked {achievement['name']} - got perfect score {grade_percentage}%")
@@ -176,7 +128,12 @@ def check_and_unlock_achievements(user_id, page=None):
             # Check for fast completion time
             for module in modules:
                 for level in getattr(module, "levels", []):
-                    completion_time = getattr(level, "completion_time", None)
+                    completion_time = None
+                    if isinstance(level, dict):
+                        completion_time = level.get("completion_time")
+                    else:
+                        completion_time = getattr(level, "completion_time", None)
+                        
                     if completion_time is not None and float(completion_time) <= achievement["requirement"]:
                         unlocked = True
                         print(f"[Achievements] Unlocked {achievement['name']} - completed in {completion_time} seconds")
@@ -205,6 +162,7 @@ def check_and_unlock_achievements(user_id, page=None):
     # Save achievements back to session
     page.session.set("user_achievements", user_achievements)
     
+    # Also save directly to database for immediate persistence
     if newly_unlocked:
         try:
             from mainmenu import connect_to_mongoDB
@@ -216,7 +174,7 @@ def check_and_unlock_achievements(user_id, page=None):
             print(f"[DEBUG] Saved {len(newly_unlocked)} new achievements directly to database")
         except Exception as e:
             print(f"Error saving achievements to database: {e}")
-
+    
     # Cache achievements to file for persistence between sessions
     try:
         with open(f"achievements_{user_id}.json", "w") as f:

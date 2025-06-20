@@ -1,21 +1,40 @@
 import flet as ft
 import os
 from mainmenu import on_daily_review_complete
+import pymongo
+
+uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
 def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorrect=0, responseTime="3:01"):
     """
     Score summary page displaying lesson results
-    
-    Parameters:
-    - accuracyPercentage: int - Percentage of correct answers (0-100)
-    - noOfCorrect: int - Number of correct answers
-    - noOfIncorrect: int - Number of incorrect answers
-    - responseTime: str - Total response time formatted as "M:SS"
     """
-    page.title = "Arami - Lesson Score"
+    page.title = "Arami - Daily Review Score"
     page.padding = 0
-    correct = len(noOfCorrect)
-    incorrect = len(noOfIncorrect)
+    
+    # Handle both integer counts and dictionary objects
+    correct = noOfCorrect if isinstance(noOfCorrect, int) else len(noOfCorrect)
+    incorrect = noOfIncorrect if isinstance(noOfIncorrect, int) else len(noOfIncorrect)
+    
+    # Ensure accuracy percentage matches the counts
+    total_questions = correct + incorrect
+    if total_questions > 0:
+        calculated_accuracy = (correct / total_questions) * 100
+        if abs(calculated_accuracy - accuracyPercentage) > 1:  # If more than 1% difference
+            print(f"[SCORE] Adjusting accuracy from {accuracyPercentage}% to {calculated_accuracy:.0f}%")
+            accuracyPercentage = round(calculated_accuracy)
+    
+    print(f"[SCORE] Questions: {total_questions}, Correct: {correct}, Accuracy: {accuracyPercentage}%")
+    
+    score_image_urls = [
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653930/tryagain_j5tsjw.png",  # tryagain - 0
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653931/goodjob_jbi6dt.png",  # goodjob - 1
+        "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653842/landscape_background_vppv58.png",  # landscape background - 2
+    ]
+
+    img1 = score_image_urls[1]  # goodjob
+    img2 = score_image_urls[0]  # tryagain
+    celebration_image = img1 if accuracyPercentage >= 50 else img2
     
     def go_back(e): # To be voided
         """Navigate back to the previous page"""
@@ -28,64 +47,49 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
         # Existing code
         on_daily_review_complete(e, page, user)
         
-        # NEW CODE: Update proficiency models with review results
+        # IMPROVED: Update proficiency models with review results
         user_id = page.session.get("user_id")
         if user_id:
-            # 1. Get review results from current session
-            correct_answers_dict = page.session.get("correct_answers", {})
-            incorrect_answers_dict = page.session.get("incorrect_answers", {})
-            
-            # 2. Run BKT and LSTM updates - similar to what happens after lessons
-            if correct_answers_dict or incorrect_answers_dict:
-                # Completion percentage should be retrieved from user data
-                from levels import run_bkt_and_lstm
-                from levels import compute_completion
+            # 1. Get review results from session with better error handling
+            try:
+                correct_answers_dict = page.session.get("correct_answers")
+                incorrect_answers_dict = page.session.get("incorrect_answers")
                 
-                # Get completion percentage
-                completion_percentage = compute_completion(page)
-                if completion_percentage is None:
-                    completion_percentage = 0
+                print(f"[DEBUG] Review results - Correct: {len(correct_answers_dict) if correct_answers_dict else 0}, " +
+                    f"Incorrect: {len(incorrect_answers_dict) if incorrect_answers_dict else 0}")
                 
-                # Update the models with review data
-                print(f"[Review] Updating proficiency models with daily review results")
-                print(f"[Review] Correct answers: {len(correct_answers_dict)}, Incorrect: {len(incorrect_answers_dict)}")
-                
-                # Run BKT and LSTM (in background thread to avoid UI freeze)
-                import threading
-                threading.Thread(
-                    target=run_bkt_and_lstm, 
-                    args=(page, completion_percentage, user_id, correct_answers_dict, incorrect_answers_dict)
-                ).start()
-                
-                # 3. Add a proficiency boost for consistent daily reviews
+                # 2. Run BKT and LSTM updates with proper error handling
                 try:
-                    arami = pymongo.MongoClient(uri)["arami"]
-                    users_col = arami["users"]
-                    user_data = users_col.find_one({"user_id": int(user_id)})
+                    print("[DEBUG] Attempting to import prediction functions...")
+                    from levels import run_bkt_and_lstm, compute_completion
+                    print("[DEBUG] Successfully imported prediction functions")
                     
-                    # Calculate review performance
-                    total_questions = len(correct_answers_dict) + len(incorrect_answers_dict)
-                    if total_questions > 0:
-                        accuracy = len(correct_answers_dict) / total_questions
-                        
-                        # Small boost to proficiency based on review performance
-                        current_proficiency = user_data.get("proficiency", 0)
-                        
-                        # Higher accuracy = higher boost (max 2% boost for perfect score)
-                        boost = accuracy * 0.02
-                        
-                        # Apply boost (but don't exceed 100%)
-                        new_proficiency = min(1.0, current_proficiency + boost)
-                        
-                        # Update in database
-                        users_col.update_one(
-                            {"user_id": int(user_id)},
-                            {"$set": {"proficiency": new_proficiency}}
-                        )
-                        
-                        print(f"[Review] Applied proficiency boost: +{boost:.2%}, new value: {new_proficiency:.2%}")
+                    # Get completion percentage
+                    completion_percentage = compute_completion(page)
+                    if completion_percentage is None:
+                        completion_percentage = 0
+                    
+                    print(f"[Review] Updating proficiency models with daily review results")
+                    print(f"[Review] Correct answers: {len(correct_answers_dict) if correct_answers_dict else 0}, " +
+                        f"Incorrect: {len(incorrect_answers_dict) if incorrect_answers_dict else 0}")
+                    
+                    # Run BKT and LSTM (in background thread to avoid UI freeze)
+                    import threading
+                    threading.Thread(
+                        target=run_bkt_and_lstm, 
+                        args=(page, completion_percentage, user_id, correct_answers_dict, incorrect_answers_dict, True)  # Added True to indicate daily review
+                    ).start()
+                    print("[DEBUG] Started prediction algorithm thread")
+                    
+                except ImportError as ie:
+                    print(f"[ERROR] Could not import prediction functions: {str(ie)}")
+                    print("[ERROR] Make sure levels.py has run_bkt_and_lstm and compute_completion functions")
                 except Exception as e:
-                    print(f"[Review] Error applying proficiency boost: {str(e)}")
+                    print(f"[ERROR] Failed to run prediction algorithms: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            except Exception as e:
+                print(f"[ERROR] Error processing review data: {str(e)}")
         
         # Continue with navigation
         page.go("/main-menu")
@@ -368,7 +372,7 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     # Background with landscape image
     background = ft.Container(
         content=ft.Image(
-            src="assets/landscape_background.png",
+            src=score_image_urls[2],
             width=page.width,
             height=page.height,
             fit=ft.ImageFit.COVER

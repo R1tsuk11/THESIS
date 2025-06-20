@@ -260,7 +260,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(
@@ -477,7 +477,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
             ft.Container(bgcolor="white", expand=True),
             ft.Column([
                 # Blue bar on top (fixed)
-                ft.Container(height=10, bgcolor="#0078D7", width=50),
+                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
                 # Main content with three sections
                 ft.Column(

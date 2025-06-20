@@ -91,6 +91,45 @@ class CustomBKTPredictor:
                 result_df.loc[group.index[i], 'state_predictions'] = prob
                 
         return result_df
+    
+    def observe_with_scale(self, vocab, correct, impact_scale=1.0):
+        """Observe a performance with scaled impact (for daily reviews)."""
+        vocab = vocab.lower()  # Ensure lowercase for consistency
+        
+        if vocab not in self.vocab_parameters:
+            self.vocab_parameters[vocab] = {
+                'learn': 0.15,    # Default learning probability
+                'guess': 0.25,    # Default guess probability
+                'slip': 0.1,      # Default slip probability
+                'prior': 0.5      # Default prior probability of mastery
+            }
+        
+        # Get parameters for this vocabulary
+        params = self.vocab_parameters[vocab]
+        learn = params.get('learn', 0.15) * impact_scale  # Scale learning rate
+        guess = params.get('guess', 0.25)
+        slip = params.get('slip', 0.1)
+        
+        # Get current mastery
+        mastery = params.get('prior', 0.5)
+        
+        # Update based on observation
+        if correct:
+            # P(mastered | correct)
+            mastery = (mastery * (1 - slip)) / (mastery * (1 - slip) + (1 - mastery) * guess)
+        else:
+            # P(mastered | incorrect)
+            mastery = (mastery * slip) / (mastery * slip + (1 - mastery) * (1 - guess))
+        
+        # Apply scaled learning rate
+        mastery = mastery + (1 - mastery) * learn
+        
+        # Update parameters
+        params['prior'] = mastery  # Update prior for next observation
+        self.vocab_parameters[vocab] = params
+        
+        print(f"[BKT] Vocab '{vocab}' mastery: {mastery:.2f} (scale: {impact_scale:.1f}, correct: {correct})")
+        return mastery
 
 async def main(page: ft.Page):
     page.title = "User Authentication"

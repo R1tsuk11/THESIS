@@ -74,13 +74,45 @@ def get_lstm_proficiency(bkt_sequence, completion_percentage, user_id=None):
             except json.JSONDecodeError:
                 print(f"[LSTM] Failed to parse JSON output: {stdout}")
         
-        # Fallback to average if no usable output
-        return {
-            "proficiency": average_proficiency(bkt_sequence) * completion_percentage / 100.0,
-            "confidence": 0.3,
-            "method": "fallback",
-            "error": "Failed to parse output"
-        }
+        try:
+            # Get the proficiency value
+            proficiency_value = result["proficiency"] if isinstance(result, dict) and "proficiency" in result else 0
+            
+            # Save to main history file that the app expects
+            history_path = "temp_prof_history.json"
+            
+            if os.path.exists(history_path):
+                with open(history_path, "r") as f:
+                    history = json.load(f)
+                    
+                    # Make sure history is a list
+                    if not isinstance(history, list):
+                        if isinstance(history, dict) and "values" in history:
+                            history = history["values"]
+                        else:
+                            history = []
+            else:
+                history = []
+                
+            # Add the new prediction and save
+            history.append(proficiency_value)
+            with open(history_path, "w") as f:
+                json.dump(history, f)
+            
+            print(f"[LSTM] Saved proficiency {proficiency_value:.4f} to main history file")
+        except Exception as e:
+            print(f"[LSTM] Error saving to main history: {str(e)}")
+            
+        if result:
+            return result
+        else:
+            # Fallback to average if no usable output
+            return {
+                "proficiency": average_proficiency(bkt_sequence) * completion_percentage / 100.0,
+                "confidence": 0.3,
+                "method": "fallback",
+                "error": "Failed to parse output"
+            }
     
     except Exception as e:
         print(f"[LSTM] Error running subprocess: {str(e)}")

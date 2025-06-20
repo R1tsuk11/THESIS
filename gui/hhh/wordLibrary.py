@@ -167,8 +167,11 @@ def word_library_page(page: ft.Page, image_urls: list):
             # Handle both string-only and dictionary formats
             if isinstance(word, str):
                 waray_word = word
-                # Get translation from the global dictionary
-                english_translation = word_library.get(waray_word, "Translation not available")
+                # Case-insensitive lookup in word_library dictionary
+                english_translation = word_library.get(waray_word.lower(), None)
+                if english_translation is None:
+                    # Try original case if lowercase didn't work
+                    english_translation = word_library.get(waray_word, "Translation not available")
             elif isinstance(word, dict) and "waray_word" in word and "english_translation" in word:
                 waray_word = word["waray_word"]
                 english_translation = word["english_translation"]
