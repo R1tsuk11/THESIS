@@ -541,7 +541,7 @@ module_1 = {
         "word_to_translate": "Kulop",
         "choices": ["Morning", "Night", "Afternoon"], 
         "correct_answer": "Afternoon", 
-        "vocabulary": "Kulop", 
+        "vocabulary": "Maupay nga kulop", 
         "difficulty": 3, 
         "response_time": 0
     },
@@ -561,7 +561,7 @@ module_1 = {
         "question": "Maupay nga ______. It's 2:00 PM. What should be the correct term used for the sentence?", 
         "choices": ["Aga", "Kulop"], 
         "correct_answer": "Kulop", 
-        "vocabulary": "Kulop", 
+        "vocabulary": "Maupay nga kulop", 
         "difficulty": 4, 
         "response_time": 0
     },

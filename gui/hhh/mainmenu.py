@@ -4,7 +4,7 @@ from pymongo.errors import ConfigurationError
 import sys
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from supermemo_engine import prepare_daily_review
 import time
 import threading
@@ -13,10 +13,185 @@ from achievements_manager import check_and_unlock_achievements
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
+# Constants for usage tracking
+IDLE_THRESHOLD = 120  # 2 minutes in seconds
+SAVE_INTERVAL = 300   # Save usage data every 5 minutes
+
+# Global variables for tracking
 user_active = True
 usage_time_seconds = 0
 idle_seconds = 0
-IDLE_THRESHOLD = 120  # 2 minutes
+last_save_time = 0
+session_start_time = None
+
+def sync_user_progress(page, user_id):
+    """Synchronize user progress data between session, objects, and database"""
+    try:
+        # Get current session data
+        user_library = page.session.get("user_library") or []
+        modules = page.session.get("modules") or []
+        
+        # ENHANCED: If modules data from session is incomplete, load directly from database
+        if not modules or not any(hasattr(module, 'levels') for module in modules):
+            print("[Progress] Modules data incomplete in session, loading from database")
+            try:
+                # Connect to database
+                arami = pymongo.MongoClient(uri)["arami"]
+                user_col = arami["users"]
+                
+                # Get user document
+                user_doc = user_col.find_one({"user_id": int(user_id)})
+                if user_doc and "modules" in user_doc:
+                    # Load modules directly from database
+                    from mainmenu import Module
+                    modules = [Module(m) for m in user_doc["modules"]]
+                    page.session.set("modules", modules)
+            except Exception as e:
+                print(f"[Error] Failed to load modules from database: {e}")
+        
+        # IMPROVED: Count completed lessons with better detection
+        lessons_completed = 0
+        for module in modules:
+            for level in getattr(module, "levels", []):
+                # Check all possible ways a level might be marked as completed
+                level_completed = False
+                
+                # If level is a dictionary
+                if isinstance(level, dict):
+                    level_completed = level.get("completed", False)
+                # If level is an object with completed attribute
+                elif hasattr(level, "completed"):
+                    level_completed = level.completed
+                # If level has grade_percentage that indicates completion
+                elif hasattr(level, "grade_percentage") and getattr(level, "grade_percentage", 0) > 0:
+                    level_completed = True
+                    
+                if level_completed:
+                    lessons_completed += 1
+                    print(f"[DEBUG] Found completed level: {getattr(level, 'lesson_id', 'unknown')}")
+        
+        # Debug output to verify lesson count
+        print(f"[Progress] Found {lessons_completed} completed lessons")
+        
+        # Get vocabulary count (case-insensitive unique words)
+        unique_words = set(word.lower() for word in user_library if word)
+        words_learned = len(unique_words)
+        
+        # Calculate progress percentage based on lessons completed
+        # Find total lessons count
+        total_lessons = 0
+        for module in modules:
+            if hasattr(module, 'levels'):
+                total_lessons += len(module.levels)
+                
+        # Avoid division by zero
+        progress_percentage = 0
+        if total_lessons > 0:
+            progress_percentage = int((lessons_completed / total_lessons) * 100)
+            print(f"[Progress] Calculated: {lessons_completed}/{total_lessons} = {progress_percentage}%")
+            
+        # Update achievement_data in session with progress percentage
+        achievement_data = page.session.get("achievement_data") or {}
+        achievement_data.update({
+            "lessons_completed": lessons_completed,
+            "words_learned": words_learned,
+            "progress_percentage": progress_percentage  # Add this line!
+        })
+        page.session.set("achievement_data", achievement_data)
+        
+        # Save to database
+        usercol = connect_to_mongoDB()
+        usercol.update_one(
+            {"user_id": int(user_id)},
+            {"$set": {
+                "library": list(user_library),
+                "lessons_completed": lessons_completed,
+                "words_learned": words_learned
+            }}
+        )
+        print(f"[Database] Updated user profile with {words_learned} words and {lessons_completed} lessons")
+        
+        return True
+    except Exception as e:
+        print(f"[Error] Failed to sync user progress: {e}")
+        return False
+
+def calculate_completion_percentage(user):
+    """Calculate accurate completion percentage"""
+    if not hasattr(user, 'modules') or not user.modules:
+        return 0
+        
+    total_lessons = 0
+    completed_lessons = 0
+    
+    # Count all lessons across all modules with better completion detection
+    for module in user.modules:
+        if hasattr(module, 'levels'):
+            for level in module.levels:
+                total_lessons += 1
+                
+                # Check all possible ways a level might be marked as completed
+                level_completed = False
+                
+                if hasattr(level, "completed"):
+                    level_completed = level.completed
+                elif isinstance(level, dict):
+                    level_completed = level.get("completed", False)
+                elif hasattr(level, "grade_percentage") and getattr(level, "grade_percentage", 0) > 0:
+                    level_completed = True
+                    
+                if level_completed:
+                    completed_lessons += 1
+                    print(f"[DEBUG] Counting completed level: {getattr(level, 'lesson_id', 'unknown')}")
+    
+    # Print detailed breakdown
+    print(f"[Progress] Detailed calculation: {completed_lessons} completed of {total_lessons} total lessons")
+    
+    # Calculate percentage with proper float division and bounds
+    if total_lessons > 0:
+        percentage = int((float(completed_lessons) / float(total_lessons)) * 100)
+        percentage = min(100, max(0, percentage))  # Cap between 0-100%
+        return percentage
+    return 0
+
+def debug_achievement_progress(page):
+    """Print debugging info about user's achievement progress"""
+    user_id = page.session.get("user_id")
+    if not user_id:
+        return
+        
+    user = page.session.get("user")
+    if not user:
+        return
+        
+    print("\n=== ACHIEVEMENT DEBUG INFO ===")
+    
+    # Count completed lessons
+    lessons_completed = 0
+    modules_completed = 0
+    
+    for module in user.modules:
+        module_complete = True
+        level_count = 0
+        completed_level_count = 0
+        
+        for level in module.levels:
+            level_count += 1
+            if getattr(level, "completed", False):
+                completed_level_count += 1
+                lessons_completed += 1
+            else:
+                module_complete = False
+                
+        print(f"Module {module.id}: {completed_level_count}/{level_count} levels completed")
+        
+        if module_complete:
+            modules_completed += 1
+    
+    print(f"Total completed lessons: {lessons_completed}")
+    print(f"Total completed modules: {modules_completed}")
+    print(f"Vocabulary count: {len(user.library)}")
+    print("============================\n")
 
 def calculate_completion_percentage(user):
     """Calculate the correct completion percentage based on completed lessons"""
@@ -75,86 +250,204 @@ def debug_achievement_progress(page):
     print("============================\n")
 
 def start_usage_timer(page):
+    """Start a background thread to track usage time."""
+    global session_start_time
+    session_start_time = time.time()
+    
     def timer_loop():
-        global usage_time_seconds, idle_seconds, user_active
+        global usage_time_seconds, idle_seconds, user_active, last_save_time
         while True:
-            time.sleep(1)
+            time.sleep(1)  # Update every second
+            
             if user_active:
+                # Increment usage time when user is active
                 usage_time_seconds += 1
                 idle_seconds += 1
-                # Optionally update UI or save to session/db periodically
+                
+                # Check if user has been idle too long
                 if idle_seconds >= IDLE_THRESHOLD:
-                    user_active = False  # User is now idle
-                    print("[DEBUG] User is idle, pausing usage timer.")
+                    user_active = False
+                    print(f"[Usage] User idle for {IDLE_THRESHOLD} seconds, pausing timer")
+                    # Update UI to show paused state
+                    if hasattr(page, 'usage_indicator') and page.usage_indicator:
+                        page.usage_indicator.bgcolor = "#FF9800"  # Orange for paused
+                        page.usage_indicator.tooltip = "Usage tracking paused - you're inactive"
+                        page.update()
+                
+                # Periodically save usage data while active
+                if usage_time_seconds - last_save_time >= SAVE_INTERVAL:
+                    save_usage_data(page)
+                    last_save_time = usage_time_seconds
+            
             else:
-                # Wait for activity to resume
+                # Just wait when inactive
                 time.sleep(1)
-    threading.Thread(target=timer_loop, daemon=True).start()
+    
+    # Start background thread
+    tracking_thread = threading.Thread(target=timer_loop, daemon=True)
+    tracking_thread.start()
+    
+    # Add activity event listeners to the page
+    page.on_keyboard_event = reset_idle_timer
+    page.on_mouse_event = reset_idle_timer
+    
+    # Create usage indicator
+    page.usage_indicator = ft.Container(
+        width=12,
+        height=12,
+        border_radius=6,
+        bgcolor="#4CAF50",  # Green for active
+        tooltip="Usage tracking active",
+        margin=ft.margin.only(right=5)
+    )
+    
+    # Add indicator to page appbar if it exists
+    if hasattr(page, 'appbar') and page.appbar:
+        if not hasattr(page.appbar, 'actions'):
+            page.appbar.actions = []
+        page.appbar.actions.insert(0, page.usage_indicator)
+    
+    print("[Usage] Usage tracking started")
+    page.update()
 
 def reset_idle_timer(e=None):
+    """Reset the idle timer when user activity is detected."""
     global user_active, idle_seconds
-    user_active = True
+    
+    # If user was inactive and is now active again
+    if not user_active:
+        user_active = True
+        print("[Usage] User activity detected, resuming timer")
+        
+        # Update UI to show active state
+        if hasattr(e, 'page') and hasattr(e.page, 'usage_indicator') and e.page.usage_indicator:
+            e.page.usage_indicator.bgcolor = "#4CAF50"  # Green for active
+            e.page.usage_indicator.tooltip = "Usage tracking active"
+            e.page.update()
+    
+    # Reset idle counter
     idle_seconds = 0
-    print("[DEBUG] User is active again, resuming usage timer.")
 
-def show_daily_review_overlay(page):
-    overlay = ft.Container(
-        content=ft.Column(
-            [
-                ft.Container(
-                    content=ft.Icon(ft.Icons.LIGHTBULB_OUTLINE, color="#0078D7", size=60),
-                    padding=ft.padding.only(top=40)
-                ),
-                ft.Container(
-                    content=ft.Text(
-                        "Daily Review Required!",
-                        size=22,
-                        weight=ft.FontWeight.BOLD,
-                        color="#0078D7",
-                        text_align=ft.TextAlign.CENTER
-                    ),
-                    padding=ft.padding.only(bottom=5)
-                ),
-                ft.Container(
-                    content=ft.Text(
-                        "Please complete your daily review before proceeding.",
-                        size=16,
-                        color="#424242",
-                        text_align=ft.TextAlign.CENTER
-                    ),
-                    padding=ft.padding.only(bottom=20)
-                ),
-                ft.ElevatedButton(
-                    "Start Review",
-                    width=200,
-                    style=ft.ButtonStyle(
-                        bgcolor={"": "#0078D7"},
-                        color={"": "#FFFFFF"},
-                        shape=ft.RoundedRectangleBorder(radius=8)
-                    ),
-                    on_click=lambda e: (
-                        page.overlay.clear(),
-                        page.update(),
-                        page.go("/daily-review")
-                    )
-                )
-            ],
-            tight=True,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=10
-        ),
-        alignment=ft.alignment.center,
-        bgcolor="#F5F5F5",
-        width=page.width,
-        height=page.height,
-        border_radius=0,
-        opacity=0.98,
-        animate_opacity=200,
-        padding=40
+def save_usage_data(page):
+    """Save usage data to the database."""
+    global usage_time_seconds
+    
+    user_id = page.session.get("user_id")
+    if not user_id:
+        print("[Usage] Cannot save usage data - no user ID")
+        return
+    
+    try:
+        # Get database connection
+        usercol = connect_to_mongoDB()
+        
+        # Get existing usage data
+        user_data = usercol.find_one({"user_id": user_id})
+        if not user_data:
+            print(f"[Usage] User {user_id} not found in database")
+            return
+            
+        # Update total usage time
+        total_usage = user_data.get("total_usage_seconds", 0) + usage_time_seconds
+        
+        # Create usage history record
+        today = datetime.now().strftime("%Y-%m-%d")
+        usage_history = user_data.get("usage_history", {})
+        
+        if today in usage_history:
+            usage_history[today] += usage_time_seconds
+        else:
+            usage_history[today] = usage_time_seconds
+            
+        # Save to database
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "total_usage_seconds": total_usage,
+                "usage_history": usage_history,
+                "last_active": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }}
+        )
+        
+        print(f"[Usage] Saved usage data: {usage_time_seconds} seconds")
+        
+        # Reset session counter after saving
+        usage_time_seconds = 0
+        
+    except Exception as e:
+        print(f"[Usage] Error saving usage data: {e}")
+
+def format_usage_time(seconds):
+    """Format seconds into a readable time string."""
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
+def show_usage_stats(page):
+    """Show a dialog with usage statistics."""
+    global usage_time_seconds, session_start_time
+    
+    # Calculate current session time
+    session_duration = int(time.time() - session_start_time)
+    
+    # Get user data
+    user_id = page.session.get("user_id")
+    if not user_id:
+        return
+        
+    usercol = connect_to_mongoDB()
+    user_data = usercol.find_one({"user_id": user_id})
+    
+    if not user_data:
+        return
+        
+    total_usage = user_data.get("total_usage_seconds", 0) + usage_time_seconds
+    usage_history = user_data.get("usage_history", {})
+    
+    # Calculate stats
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_usage = usage_history.get(today, 0) + usage_time_seconds
+    
+    # Get usage for the last 7 days
+    last_7_days = {}
+    for i in range(7):
+        date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        if date in usage_history:
+            last_7_days[date] = usage_history[date]
+    
+    # Create content for dialog
+    content = ft.Column([
+        ft.Text("Usage Statistics", weight=ft.FontWeight.BOLD, size=20),
+        ft.Divider(),
+        ft.Text(f"Current session: {format_usage_time(session_duration)}"),
+        ft.Text(f"Today's usage: {format_usage_time(today_usage)}"),
+        ft.Text(f"Total usage: {format_usage_time(total_usage)}"),
+        ft.Divider(),
+        ft.Text("Last 7 days:", weight=ft.FontWeight.BOLD)
+    ])
+    
+    # Add last 7 days stats
+    for date, time_used in sorted(last_7_days.items(), reverse=True):
+        content.controls.append(
+            ft.Text(f"{date}: {format_usage_time(time_used)}")
+        )
+    
+    # Show dialog
+    dialog = ft.AlertDialog(
+        content=content,
+        actions=[
+            ft.TextButton("Close", on_click=lambda e: page.close(dialog))
+        ]
     )
-    page.overlay.clear()
-    page.overlay.append(overlay)
-    page.update()
+    
+    page.open(dialog)
 
 def is_first_login_today(last_login=None):
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -218,7 +511,67 @@ def on_daily_review_complete(e, page, user):
         print(f"[ERROR] Failed to update review data: {str(e)}")
         import traceback
         traceback.print_exc()
-
+    
+def show_daily_review_overlay(page):
+    overlay = ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Icon(ft.Icons.LIGHTBULB_OUTLINE, color="#0078D7", size=60),
+                    padding=ft.padding.only(top=40)
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "Daily Review Required!",
+                        size=22,
+                        weight=ft.FontWeight.BOLD,
+                        color="#0078D7",
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    padding=ft.padding.only(bottom=5)
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "Please complete your daily review before proceeding.",
+                        size=16,
+                        color="#424242",
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    padding=ft.padding.only(bottom=20)
+                ),
+                ft.ElevatedButton(
+                    "Start Review",
+                    width=200,
+                    style=ft.ButtonStyle(
+                        bgcolor={"": "#0078D7"},
+                        color={"": "#FFFFFF"},
+                        shape=ft.RoundedRectangleBorder(radius=8)
+                    ),
+                    on_click=lambda e: (
+                        page.overlay.clear(),
+                        page.update(),
+                        page.go("/daily-review")
+                    )
+                )
+            ],
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10
+        ),
+        alignment=ft.alignment.center,
+        bgcolor="#F5F5F5",
+        width=page.width,
+        height=page.height,
+        border_radius=0,
+        opacity=0.98,
+        animate_opacity=200,
+        padding=40
+    )
+    
+    # Add the overlay to the page
+    page.overlay.append(overlay)
+    page.update()
+    
 def cache_modules_to_temp(modules):
     def module_to_dict(module):
         return {
@@ -320,6 +673,7 @@ class Question:
         self.response_time = question_data.get("response_time")
         self.word_to_translate = question_data.get("word_to_translate")
         self.image = question_data.get("image", None) 
+        self.audio_file = question_data.get("audio_file", None)  # Optional audio field
 
     def to_dict(self):
         return {
@@ -332,7 +686,8 @@ class Question:
             "difficulty": self.difficulty,
             "response_time": self.response_time,
             "word_to_translate": self.word_to_translate,
-            "image": self.image
+            "image": self.image,
+            "audio_file": self.audio_file  # Include audio file if it exists
         }
 
 class Level:  # Level class
@@ -695,7 +1050,38 @@ class User:  # User class
         self.save_bkt_data()
         self.save_prof_history()
         self.save_lstm_counter()
+        
+        # Add code to save LSTM mastery and proficiency to database
+        lstm_proficiency = page.session.get("lstm_proficiency")
+        lstm_mastery = page.session.get("lstm_mastery")
+        
+        if lstm_proficiency is not None or lstm_mastery is not None:
+            print(f"[LSTM] Saving mastery ({lstm_mastery:.4f}) and proficiency ({lstm_proficiency:.4f}) to database")
+            
+            # Update the user object
+            if lstm_proficiency is not None:
+                self.proficiency = lstm_proficiency
+            
+            # Also save directly to database
+            usercol = connect_to_mongoDB()
+            update_data = {}
+            if lstm_proficiency is not None:
+                update_data["proficiency"] = lstm_proficiency
+                update_data["lstm_proficiency"] = lstm_proficiency
+            if lstm_mastery is not None:
+                update_data["lstm_mastery"] = lstm_mastery
+                
+            if update_data:
+                usercol.update_one(
+                    {"user_id": self.user_id},
+                    {"$set": update_data}
+                )
 
+        # Save usage data before logout
+        global usage_time_seconds
+        if usage_time_seconds > 0:
+            save_usage_data(page)
+            
         # NEW: Sync achievements from session before saving to database
         self.sync_achievements_from_session(page)
         
@@ -715,7 +1101,7 @@ class User:  # User class
         from supermemo_engine import schedule_pending_vocabulary
         schedule_pending_vocabulary(self.user_id)
 
-        print(f"[TEST] Usage time (seconds): {usage_time_seconds}, (minutes): {usage_time_seconds // 60}")
+        print(f"[Usage] Session usage time: {format_usage_time(usage_time_seconds)}")
         
         usercol = connect_to_mongoDB()
         user_data = self.to_dict()
@@ -782,29 +1168,27 @@ def main_menu_page(page: ft.Page, image_urls: list):
     """Main menu page with module cards"""
 
     # ----- HEADER with image -----
+    header_column = ft.Column(
+        controls=[
+            ft.Container(
+                content=ft.Row([], alignment=ft.MainAxisAlignment.CENTER),
+                gradient=ft.LinearGradient(
+                    begin=ft.alignment.top_left,
+                    end=ft.alignment.bottom_right,
+                    colors=["#0066FF", "#9370DB"],
+                ),
+                height=70,
+            ),
+        ],
+        spacing=0
+    )
     header = ft.Container(
         content=ft.Stack(
             controls=[
-                ft.Column(
-                    controls=[
-                        ft.Container(
-                            content=ft.Row([], alignment=ft.MainAxisAlignment.CENTER),
-                            gradient=ft.LinearGradient(
-                                begin=ft.alignment.top_left,
-                                end=ft.alignment.bottom_right,
-                                colors=["#0066FF", "#9370DB"],
-                            ),
-                            height=70,
-                            # padding=10,
-                        ),
-                    ],
-                    spacing=0
-                ),
+                header_column,
                 ft.Container(
                     content=ft.Image(
-                        src=image_urls[1], #purple logo
-                        width=120,
-                        # height=65,
+                        src=image_urls[1], width=120,
                         fit=ft.ImageFit.COVER
                     ),
                     alignment=ft.alignment.top_center,
@@ -812,7 +1196,6 @@ def main_menu_page(page: ft.Page, image_urls: list):
                 )
             ]
         ),
-        # width=500
     )
 
     # Create modules title
@@ -1076,7 +1459,7 @@ def main_menu_page(page: ft.Page, image_urls: list):
         
         # Calculate percentage (prevent division by zero)
         if total_lessons > 0:
-            percentage = int((completed_lessons / total_lessons + 5) * 100)
+            percentage = int((completed_lessons / (total_lessons + 5)) * 100)
             print(f"[Progress] Calculated: {completed_lessons}/{total_lessons} = {percentage}%")
             return percentage
         return 0
@@ -1136,9 +1519,11 @@ def main_menu_page(page: ft.Page, image_urls: list):
         # Create the achievement data dictionary with the fixed proficiency value
         achievement_data = {
             "username": user.user_name,
-            "progress_percentage": user.completion_percentage,
-            "lessons_completed": len([l for m in user.modules for l in m.levels if l.completed]),
-            "words_learned": len(set(w.lower() for w in user.library)),  # Case-insensitive count
+            "progress_percentage": completion_percentage,
+            "lessons_completed": len([l for m in user.modules for l in m.levels if 
+                                    (hasattr(l, "completed") and l.completed) or 
+                                    (isinstance(l, dict) and l.get("completed", False))]),
+            "words_learned": len(set(w.lower() for w in user.library if w)),  # Ensure non-empty words
             "language_proficiency": prof_value,
             "achievements": user.achievements
         }
@@ -1305,3 +1690,14 @@ def main_menu_page(page: ft.Page, image_urls: list):
         page.session.set("daily_review_questions", review_questions)
         page.session.set("daily_review_needed", True)
         show_daily_review_overlay(page)
+
+    # Add Usage Statistics button to toolbar (or header)
+    stats_button = ft.ElevatedButton(
+        "Usage Statistics",
+        icon=ft.icons.TIMER,
+        on_click=lambda e: show_usage_stats(page)
+    )
+    # Add the stats button to the header_column
+    header_column.controls.append(stats_button)
+
+    page.update()

@@ -9,9 +9,37 @@ def achievement_page(page: ft.Page, image_urls: list):
     page.bgcolor = "#f0f8ff"  # Light blue background
     page.theme_mode = ft.ThemeMode.LIGHT    
 
+    # Get user ID
+    user_id = page.session.get("user_id")
+    
+    # Force sync progress data from database if needed
+    if user_id:
+        from mainmenu import sync_user_progress
+        sync_user_progress(page, user_id)
+
     # Get data from session
     achievement_data = page.session.get("achievement_data")
     
+    if achievement_data:
+        # Check data consistency
+        if achievement_data.get("lessons_completed", 0) == 0:
+            # Double-check from modules data if available
+            modules = page.session.get("modules")
+            if modules:
+                # Count completed lessons directly from modules
+                lessons_count = 0
+                for module in modules:
+                    for level in getattr(module, "levels", []):
+                        if (hasattr(level, "completed") and level.completed) or \
+                        (isinstance(level, dict) and level.get("completed", False)):
+                            lessons_count += 1
+                
+                # Update if we found lessons but achievement data shows 0
+                if lessons_count > 0 and achievement_data.get("lessons_completed", 0) == 0:
+                    print(f"[Achievements] Fixing inconsistent lesson count: 0 → {lessons_count}")
+                    achievement_data["lessons_completed"] = lessons_count
+                    page.session.set("achievement_data", achievement_data)
+
     if achievement_data:
         # Use session data
         username = achievement_data.get("username", "Guest")
@@ -398,17 +426,28 @@ def achievement_page(page: ft.Page, image_urls: list):
         )
     )
 
+    # FIX
     vocabulary_mastery = 0
     try:
-        # Get mastery directly from session (no default parameter)
+        # First try to get from session
         raw_mastery = page.session.get("lstm_mastery")
         if raw_mastery is not None:
             vocabulary_mastery = float(raw_mastery) * 100
-            print(f"[Vocab] Using LSTM mastery: {vocabulary_mastery:.1f}%")
+            print(f"[Vocab] Using session LSTM mastery: {vocabulary_mastery:.1f}%")
         else:
-            # Fallback for new users
-            vocabulary_mastery = float(language_proficiency) * 0.7
-            print(f"[Vocab] No LSTM mastery found, using fallback: {vocabulary_mastery:.1f}%")
+            # Try to get from database
+            from mainmenu import connect_to_mongoDB
+            usercol = connect_to_mongoDB()
+            user_data = usercol.find_one({"user_id": user_id})
+            
+            if user_data and "lstm_mastery" in user_data:
+                raw_mastery = user_data["lstm_mastery"]
+                vocabulary_mastery = float(raw_mastery) * 100
+                print(f"[Vocab] Using database LSTM mastery: {vocabulary_mastery:.1f}%")
+            else:
+                # Fallback for new users
+                vocabulary_mastery = float(language_proficiency) * 0.7
+                print(f"[Vocab] No LSTM mastery found, using fallback: {vocabulary_mastery:.1f}%")
     except Exception as e:
         print(f"[Vocab] Error getting LSTM mastery: {e}")
         vocabulary_mastery = 0
@@ -429,17 +468,21 @@ def achievement_page(page: ft.Page, image_urls: list):
         print(f"[Proficiency] Error getting LSTM proficiency: {e}")
         raw_proficiency = float(language_proficiency) if isinstance(language_proficiency, (int, float)) else 0
 
+    if isinstance(progress_percentage, (int, float)) and progress_percentage > 100:
+        print(f"[WARNING] Abnormal progress percentage detected: {progress_percentage}%, capping at 100%")
+        progress_percentage = 100
+
     # Calculate combined proficiency (70% proficiency + 30% completion)
     combined_proficiency = (raw_proficiency * 0.7) + (progress_percentage * 0.3)
     print(f"[Combined] Proficiency: {raw_proficiency:.1f}% * 0.7 + {progress_percentage:.1f}% * 0.3 = {combined_proficiency:.1f}%")
-
+   
     # ------- FIRST CARD: LSTM Language Proficiency -------
     language_proficiency_card = ft.Container(
         content=ft.Column([
             ft.Row(
                 [
                     ft.Text(
-                        "Overall Progress",  # Changed from "Overall Progress"
+                        "Overall Proficiency",  # Changed from "Overall Progress"
                         size=15,
                         color="#FFFFFF",
                         weight=ft.FontWeight.BOLD,
@@ -467,7 +510,7 @@ def achievement_page(page: ft.Page, image_urls: list):
                         bgcolor="#4CAF50",  # Green progress 
                         border_radius=10,
                         height=16,
-                        width=language_proficiency * 2.6,
+                        width=combined_proficiency * 2.6,
                     ),
                 ]),
                 margin=ft.margin.only(top=1, bottom=3),

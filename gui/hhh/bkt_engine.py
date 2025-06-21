@@ -50,9 +50,17 @@ def save_predictions_file():
 class CustomBKTPredictor:
     """Custom BKT predictor that directly uses the vocabulary parameters"""
     
-    def __init__(self, vocab_parameters):
-        """Initialize with vocabulary parameters"""
-        self.vocab_parameters = vocab_parameters
+    def __init__(self, vocab_parameters=None):
+        """Initialize with optional vocab parameters"""
+        # Initialize with empty parameters if none provided
+        self.vocab_parameters = vocab_parameters or {}
+        # Default BKT parameters for new vocabulary items
+        self.default_params = {
+            "p_init": 0.4,      # Initial probability of mastery
+            "p_transit": 0.12,  # Probability of transitioning from not mastered to mastered
+            "p_guess": 0.15,    # Probability of guessing correctly when not mastered
+            "p_slip": 0.05      # Probability of answering incorrectly when mastered
+        }
     
     def predict(self, vocab, correct_history=None):
         """
@@ -126,11 +134,16 @@ class CustomBKTPredictor:
         return result_df
     
     def get_vocabulary_in_order(self):
-        """Return vocabulary items in their original qbank order"""
-        vocab_items = list(self.vocab_parameters.items())
-        # Sort by the 'order' parameter
-        vocab_items.sort(key=lambda x: x[1].get('order', 999999))
-        return [vocab for vocab, _ in vocab_items]
+        """Get vocabulary ordered by mastery level (lowest first)"""
+        if not self.vocab_parameters:
+            return []  # Return empty list if no vocabulary
+            
+        # Sort vocabulary by mastery (p_mastery) in ascending order
+        sorted_vocab = sorted(
+            self.vocab_parameters.keys(),
+            key=lambda v: self.vocab_parameters[v].get('p_mastery', 0.5)
+        )
+        return sorted_vocab
     
     def observe_with_scale(self, vocab, correct, impact_scale=1.0):
         """Observe a performance with scaled impact (for daily reviews)."""
@@ -177,101 +190,66 @@ def get_custom_bkt_path(user_id=None):
         return f"custom_bkt_predictor_{user_id}.pkl"
     return "custom_bkt_predictor.pkl"
 
-def load_custom_bkt(user_id=None):
-    """Load the custom BKT predictor for a specific user"""
-    model_path = get_custom_bkt_path(user_id)
+def load_custom_bkt(user_id):
+    """Load custom BKT predictor for a specific user"""
     try:
+        # Ensure valid user_id type
+        if not isinstance(user_id, (int, str)) or user_id is None:
+            print("[BKT] Invalid user_id provided to load_custom_bkt")
+            return CustomBKTPredictor()  # Return new empty predictor
+            
+        model_path = f"custom_bkt_predictor_{user_id}.pkl"
+        
+        # Try to load existing predictor
         if os.path.exists(model_path):
-            print(f"[BKT] Loading custom predictor for user {user_id}")
-            
             with open(model_path, "rb") as f:
-                try:
-                    # Try normal loading first
-                    predictor = pickle.load(f)
-                    
-                    # Check if the loaded predictor has the required method
-                    if not hasattr(predictor, 'get_vocabulary_in_order'):
-                        print(f"[BKT] Adding missing get_vocabulary_in_order method to predictor")
-                        # Add the method dynamically
-                        def get_vocabulary_in_order(self):
-                            """Return vocabulary items in their original qbank order"""
-                            vocab_items = list(self.vocab_parameters.items())
-                            # Sort by the 'order' parameter
-                            vocab_items.sort(key=lambda x: x[1].get('order', 999999))
-                            return [vocab for vocab, _ in vocab_items]
-                        
-                        # Bind the method to the instance
-                        import types
-                        predictor.get_vocabulary_in_order = types.MethodType(get_vocabulary_in_order, predictor)
-                    
-                    return predictor
-                    
-                except (AttributeError, pickle.UnpicklingError):
-                    # If that fails, reload and recreate object
-                    f.seek(0)  # Go back to start of file
-                    raw_data = pickle.load(f)
-                    
-                    # Extract parameters if possible
-                    if hasattr(raw_data, 'vocab_parameters'):
-                        vocab_params = raw_data.vocab_parameters
-                        # Create a new CustomBKTPredictor with those parameters
-                        return CustomBKTPredictor(vocab_params)
-                    else:
-                        print("[BKT] Could not extract parameters from predictor")
-                        return None
-        else:
-            print(f"[BKT] No custom predictor found for user {user_id}, creating new one")
-            
-            # CHANGE: Explicitly create a user-specific predictor first
-            user_predictor = create_user_bkt_predictor(user_id)
-            if user_predictor:
-                print(f"[BKT] Successfully created custom BKT predictor for user {user_id}")
-                return user_predictor
+                predictor = pickle.load(f)
                 
-            # Fall back to default if creation failed
-            print(f"[BKT] Failed to create custom predictor, checking default")
-            if os.path.exists("custom_bkt_predictor.pkl"):
-                with open("custom_bkt_predictor.pkl", "rb") as f:
-                    predictor = pickle.load(f)
-                    # Save as user-specific model
-                    save_custom_bkt(predictor, user_id)
+                # Verify it's the right type of object
+                if hasattr(predictor, 'vocab_parameters'):
+                    print(f"[BKT] Loaded custom predictor for user {user_id}")
                     return predictor
+                else:
+                    print(f"[BKT] Invalid predictor format in {model_path}")
+        
+        # Create new predictor if we couldn't load one
+        print(f"[BKT] No custom predictor found for user {user_id}, creating new one")
+        new_predictor = CustomBKTPredictor()
+        save_custom_bkt(user_id, new_predictor)
+        return new_predictor
+        
     except Exception as e:
         print(f"[BKT] Error loading custom BKT predictor: {e}")
-    
-    return None
+        # Return a new predictor rather than user_id when there's an error
+        return CustomBKTPredictor()
 
 def save_custom_bkt(user_id, predictor):
     """Save the custom BKT predictor for a specific user"""
     try:
-        # Handle case where arguments are in wrong order
-        if isinstance(user_id, object) and hasattr(user_id, 'vocab_parameters') and not isinstance(predictor, (str, int)):
+        # Check if arguments are swapped
+        if hasattr(user_id, 'vocab_parameters') and not hasattr(predictor, 'vocab_parameters'):
             print("[BKT] Warning: Arguments appear to be in wrong order, swapping")
             user_id, predictor = predictor, user_id
+        
+        # Verify predictor is the right type
+        if not hasattr(predictor, 'vocab_parameters'):
+            print(f"[BKT] Error: Invalid predictor object: {type(predictor)}")
+            return False
             
-        # Ensure user_id is valid
-        if user_id is None or str(user_id).lower() == "none":
+        # Get a valid filename
+        if user_id is None:
             model_path = "custom_bkt_predictor.pkl"
         else:
             model_path = f"custom_bkt_predictor_{user_id}.pkl"
             
-        # Create parent directory if needed
-        os.makedirs(os.path.dirname(model_path) if os.path.dirname(model_path) else '.', exist_ok=True)
-        
         with open(model_path, "wb") as f:
             pickle.dump(predictor, f)
         print(f"[BKT] Saved custom predictor to {model_path}")
         return True
+        
     except Exception as e:
         print(f"[BKT] Error saving custom BKT predictor: {e}")
-        # Try using a simpler filename as fallback
-        try:
-            with open(f"bkt_{user_id}.pkl", "wb") as f:
-                pickle.dump(predictor, f)
-            print(f"[BKT] Saved with fallback name bkt_{user_id}.pkl")
-            return True
-        except:
-            return False
+        return False
 
 def create_user_bkt_predictor(user_id):
     """Create a user-specific BKT predictor by cloning the base model"""

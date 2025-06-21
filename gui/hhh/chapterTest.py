@@ -17,6 +17,7 @@ grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
 id = 0
+user_library = []  # Add this line
 
 correctDlg = ft.AlertDialog(
     content=ft.Column(
@@ -73,7 +74,6 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
     start_time = time.time()
     selected_option = {"value": None}  # Use a dict to allow nonlocal mutation in nested functions
     m_one_image = [
-
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V1_fzmf6o.png", # 0 - M1V1
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712836/M1V2_ebbvj7.png", # 1 - M1V2
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747712835/M1V3_fca0i3.png", # 2 - M1V3
@@ -714,7 +714,6 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
         margin=ft.margin.only(bottom=20),
     )
 
-    # Bottom navigation
     bottom_nav = ft.Container(
         content=ft.Row(
             [
@@ -1083,13 +1082,28 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             
             if predicted_word:
                 txt_transcription.value = f"You said: {predicted_word}"
-                
-                # Get any pronunciation errors from the NLTK analysis that was performed
+                  # Get any pronunciation errors from the NLTK analysis that was performed
                 nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
                 
                 if predicted_word.lower() == vocabulary.lower():
                     accuracy = confidence if confidence else 0.75
-                    txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
+                    
+                    # Convert numerical accuracy to qualitative rating
+                    if accuracy >= 0.9:  # 90%
+                        accuracy_rating = "Outstanding!"
+                        txt_accuracy.color = "#3A5D30"  # Dark green
+                    elif accuracy >= 0.7:  # 70%
+                        accuracy_rating = "Good"
+                        txt_accuracy.color = "#0078D7"  # Blue
+                    elif accuracy >= 0.6:  # 60%
+                        accuracy_rating = "Needs Improvement"
+                        txt_accuracy.color = "#FFC107"  # Amber
+                    else:
+                        accuracy_rating = "Keep Practicing"
+                        txt_accuracy.color = "#95353A"  # Red
+                        
+                    # Display both the rating and percentage
+                    txt_accuracy.value = f"{accuracy_rating} ({accuracy:.0%})"
                     
                     if accuracy >= accuracy_threshold:
                         txt_accuracy.color = "green"
@@ -1455,12 +1469,27 @@ def chapter_test_page(page, image_urls: list):
             page.update()
 
     def next_question(e=None):
+        # Get the current question
+        current_question = questions[current_question_index["value"]]
+        
+        # Track vocabulary for library
+        if hasattr(current_question, "vocabulary") and current_question.vocabulary:
+            vocab = current_question.vocabulary
+            global user_library
+            if vocab not in user_library:
+                user_library.append(vocab)
+                # Update the session library
+                page.session.set("user_library", user_library)
+        
         current_question_index["value"] += 1
         progress_value = (current_question_index["value"] + 1) / total_questions
 
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:
+            # Update user library file
+            update_user_library()
+            
             grade_percentage = (len(correct_answers) / total_questions) * 100
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
 
@@ -1508,4 +1537,30 @@ def chapter_test_page(page, image_urls: list):
         correct_answers.clear()
         incorrect_answers.clear()
 
+    # Load user library
+    global user_library
+    user_library = get_user_library() or []
+    
+    # Get user library from session if available
+    session_library = page.session.get("user_library")
+    if session_library:
+        user_library = session_library
+        print(f"Loaded user library from session with {len(user_library)} items")
+
     render_current_question(progress_value)
+
+def get_user_library():
+    try:
+        with open("temp_library.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("Temp library cache not found.")
+        return []
+    
+def update_user_library():
+    global user_library
+    try:
+        with open("temp_library.json", "w") as f:
+            json.dump(user_library, f)
+    except Exception as e:
+        print(f"Error updating library: {e}")

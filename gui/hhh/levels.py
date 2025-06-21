@@ -481,10 +481,22 @@ def levels_page(page: ft.Page, image_urls: list):
                 
                 # Now check for achievements after the database update
                 check_and_unlock_achievements(user_id, page)
+                
+                # ADD CODE HERE to sync word counts properly
+                # Sync user vocabulary and progress stats
+                from mainmenu import sync_user_progress
+                sync_user_progress(page, user_id)
+                
             except Exception as e:
                 print(f"[ERROR] Failed to update level completion in database: {str(e)}")
                 # Still try to check achievements with the session data
                 check_and_unlock_achievements(user_id, page)
+                # Also try to sync progress even if DB update failed
+                try:
+                    from mainmenu import sync_user_progress
+                    sync_user_progress(page, user_id)
+                except Exception as e2:
+                    print(f"[ERROR] Failed to sync user progress: {str(e2)}")
 
     completion = compute_completion(page)
 
@@ -638,7 +650,24 @@ def levels_page(page: ft.Page, image_urls: list):
         # MOVED HERE: Get vocabulary in proper order using BKT engine
         from bkt_engine import load_custom_bkt
         custom_bkt = load_custom_bkt(user_id)
-        ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
+
+        # Ensure custom_bkt is the right type
+        if hasattr(custom_bkt, 'get_vocabulary_in_order'):
+            ordered_vocab = custom_bkt.get_vocabulary_in_order()
+            print(f"[DEBUG] Found {len(ordered_vocab)} vocabularies in BKT order")
+        else:
+            print(f"[WARNING] Invalid BKT predictor returned: {type(custom_bkt).__name__}")
+            ordered_vocab = []  # Empty list as fallback
+            
+            # Try to create a new predictor if possible
+            from bkt_engine import CustomBKTPredictor, save_custom_bkt
+            try:
+                new_predictor = CustomBKTPredictor()
+                if save_custom_bkt(user_id, new_predictor):
+                    ordered_vocab = new_predictor.get_vocabulary_in_order()
+                    print("[BKT] Created new predictor and retrieved vocabulary order")
+            except Exception as e:
+                print(f"[BKT] Could not create new predictor: {e}")
         
         # Create vocabulary dictionary from questions
         vocab_dict = {}

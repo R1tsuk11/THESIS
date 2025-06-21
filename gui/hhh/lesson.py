@@ -5,6 +5,7 @@ import sys
 import time
 import json
 from lessonScore import lesson_score
+from flet_audio import Audio # CHECHANGE
 import asyncio
 import matplotlib.pyplot as plt  # Import for visualization
 import base64  # Import for encoding visualization images
@@ -82,11 +83,68 @@ def update_user_library():
     except Exception as e:
         print(f"Error updating library: {e}")
 
-def build_lesson_question(question_data, progress_value, on_next, on_back):
+def build_lesson_question(page, question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
     # Dynamic image selection based on vocabulary
     vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
     lessonImg = question_data.image if hasattr(question_data, 'image') else None
+    audioFile = question_data.audio_file if hasattr(question_data, 'audio_file') else None #CHECHANGE
+    
+    # Print lesson ID for debugging
+    print(f"Lesson ID: {getattr(question_data, 'lesson_id')}")
+    print(f"Vocabulary: {vocabulary}")
+
+    # START OF CHECHANGE
+    m1_audio_urls = [
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572609/maupay_nga_aga_urhv6g.mp3", # Maupay nga aga - 0
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572617/aga_yrse5r.mp3", # Aga - 1
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572604/gihapon_qd9eky.mp3", # Gihapon - 2
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572607/kamusta_ka_tjidng.mp3", # Kamusta ka - 3
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572605/ikaw_h70yiy.mp3", # Ikaw - 4
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572614/okay_la_ako_r9uavj.mp3", # Okay la ako - 5
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572611/maupay_nga_kulop_vdaxud.mp3", # Maupay nga kulop - 6
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572612/maupay_eix9qv.mp3", # Maupay - 7
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572626/diri_brlstl.mp3", # Diri - 8
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572605/it_drrhnr.mp3", # It - 9
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572610/maupay_nga_gabi_nhfibv.mp3", # Maupay nga gabi - 10
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572627/gab-i_e17xsu.mp3", # Gab-i - 11
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572622/ano_it_imo_ngaran_jf1rih.mp3", # Ano it imo ngaran - 12
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572613/ngaran_zuesqm.mp3", # Ngaran - 13
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572618/ako_hi_ovqdlr.mp3", # Ako hi - 14
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572621/damo_nga_salamat_hgathz.mp3", # Damo nga salamat - 15
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749573317/waray_sapayan_qixfxl.mp3", # Waray sapayan - 16
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572616/pasylo-a_ako_l0cvux.mp3", # Pasylo-a ako - 17
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572608/maaram_ka_mag_english_iuws71.mp3", # Maaram ka mag English - 18
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572623/diri_ako_makarit_ha_waray_xoofdv.mp3", # Diri ako makarita ha waray - 19
+            "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572620/ambot_ws7epc.mp3" # Ambot - 20
+        ]
+
+    # Create hidden audio instances to force browser preloading
+    preloaded_audios = []
+    for url in m1_audio_urls:
+        preloaded = Audio(src=url)
+        preloaded_audios.append(preloaded)
+    
+    # Autoplay audio for initial load
+    autoplay_audio = Audio(src="https://res.cloudinary.com/djm2qhi9f/video/upload/v1749580135/silent_pwwtrp.mp3", autoplay=True)
+    
+    # Main audio player
+    # current_audio_index = 0
+    audio_player = Audio(src=audioFile)
+    
+    # Create overlay with audio components (hidden)
+    page.overlay.extend([
+        autoplay_audio,     # Add autoplay audio
+        *preloaded_audios,  # Add preloaded audio instances
+        audio_player,       # Add main audio player
+    ])
+
+    def play_audio(e):
+        print(f"Playing audio for vocabulary: {vocabulary}")
+        print(f"Audio file: {audioFile}")
+        audio_player.play()
+
+    # END OF CHECHANGE
     
     print(f"Selected image for '{vocabulary}': {lessonImg}")
     
@@ -204,10 +262,11 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
                 ft.Container(
                     content=ft.Row(
                         [
-                            ft.IconButton(
+                            ft.IconButton( #CHECHANGE Button with function
                                 icon=ft.Icons.VOLUME_UP,
                                 icon_color="#0078D7",
                                 icon_size=24,
+                                on_click=play_audio
                             ),
                             ft.Text(
                                 waray_phrase,
@@ -320,7 +379,7 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
 
     return ft.Column(
         [
-            header,  # Added header with close button
+            header,  # Added header with close button  
             # Scrollable content area (takes available space)
             ft.Container(
                 content=scrollable_content,
@@ -329,7 +388,8 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
                 width=312  # Keep the width constrained
             ),
             progress,
-            bottom_nav
+            bottom_nav,
+    
         ],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -806,15 +866,21 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
     # Progress bar (fixed position)
     progress_bar = ft.Container(
         content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=20)
     )
 
-    bottom_nav = ft.Container(
+    # Navigation buttons (fixed position)
+    nav_buttons = ft.Container(
         content=ft.Row(
             [
                 ft.Container(
                     content=ft.ElevatedButton(
-                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        content=ft.Text(
+                            "NEXT",
+                            color="white",
+                            weight=ft.FontWeight.BOLD,
+                            size=16
+                        ),
                         style=ft.ButtonStyle(
                             bgcolor={"": "#0078D7"},
                             shape=ft.RoundedRectangleBorder(radius=30),
@@ -825,44 +891,30 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                     )
                 )
             ],
-            alignment=ft.MainAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER
         ),
-        padding=ft.padding.only(bottom=30),
+        padding=ft.padding.only(bottom=30)
     )
-    
-    # Main layout with fixed top bar, scrollable content, and fixed bottom elements
-    return ft.Stack(
-        [
-            ft.Container(bgcolor="white", expand=True),
-            ft.Column([
-                # Blue bar on top (fixed)
-                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
-                # Main content with three sections
-                ft.Column(
-                    [
-                        # 1. Scrollable content area
-                        ft.Container(
-                            content=scrollable_area,
-                            expand=True,
-                            width=320,  # Fixed width
-                            alignment=ft.alignment.center
-                        ),
-                        
-                        # 2. Fixed progress bar
-                        progress_bar,
-                        
-                        # 3. Fixed bottom navigation
-                        bottom_nav
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    expand=True
-                )
-            ], spacing=0, expand=True)
-        ],
-        expand=True
-    )
+    return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Container(
+                        content=scrollable_area,
+                        expand=True,
+                        width=320,
+                        alignment=ft.alignment.center
+                    ),
+                    progress_bar,
+                    nav_buttons
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                expand=True
+            ),
+            bgcolor="#FFFFFF",  # Set background color to white
+            expand=True
+        )
 
 def build_tf_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
@@ -1012,7 +1064,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back, cur
     # Progress bar
     progress_bar = ft.Container(
         content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=20)
     )
 
     # Bottom navigation
@@ -1365,7 +1417,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
     # Progress bar (fixed position)
     progress_bar = ft.Container(
         content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=20)
     )
 
     bottom_nav = ft.Container(
@@ -1423,7 +1475,8 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
         expand=True
     )
 
-def build_pronounce_question(question_data, progress_value, on_next, on_back, current_question_index):
+def build_pronounce_question(page, question_data, progress_value, on_next, on_back, current_question_index):
+    """Builds the layout for a 'Pronunciation' type question with audio playback support."""
     start_time = time.time()
     question_text = question_data.question
     vocabulary = question_data.vocabulary.lower() if hasattr(question_data, 'vocabulary') else ""
@@ -1439,13 +1492,42 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         quoted_parts = re.findall(r"'([^']+)'", question_text)
         if quoted_parts:
             target_word = quoted_parts[0].lower()
-            print(f"Pronunciation target extracted from question: '{target_word}'")
+    
+    # Find the audio URL for this word
+    from wordLibrary import AUDIO_URLS  # Import the dictionary
+    audio_url = AUDIO_URLS.get(target_word.lower())
+    audio_player = None
+    
+    if audio_url:
+        print(f"Found audio URL for '{target_word}': {audio_url}")
+        audio_player = Audio(src=audio_url)
+        page.overlay.append(audio_player)
+    
+    def play_example_audio(e):
+        """Play example audio when button is clicked"""
+        if audio_player:
+            print(f"Playing example audio for: {target_word}")
+            audio_player.play()
+            # Visual feedback
+            listen_button.bgcolor = "#FFA000"  # Darker color during playback
+            page.update()
+            
+            # Reset button color after playback
+            def reset_button():
+                import time
+                time.sleep(1)  # Wait for audio to likely finish
+                listen_button.bgcolor = "#FFD700"  # Reset to original color
+                page.update()
+                
+            import threading
+            threading.Thread(target=reset_button).start()
     
     # Set the actual word to recognize
     recognition_target = target_word
     print(f"Will recognize pronunciation for: '{recognition_target}'")
     accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.6)
     
+    # Initialize speech recognition
     try:
         # Use explicit paths to ensure files are found
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1463,23 +1545,35 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
     recording = {"is_recording": False, "audio_data": None, "file_path": None}
     transcription = {"text": "", "accuracy": 0.0}
 
-    # Create UI components
+    # Create UI components - Text displays
     txt_transcription = ft.Text("Tap the microphone to start recording", color="grey", size=16)
     txt_accuracy = ft.Text("", size=16)
     pronunciation_tips = ft.Text("", size=14, color="orange", visible=False)
     pronunciation_chart = ft.Image(visible=False)
+    attempts_text = ft.Text("Attempt 0/3", size=14, color="grey")
+    txt_attempts_remaining = ft.Text("3 attempts remaining", size=14, color="grey")
     
-    # Define mic_icon as a mutable container
+    # Define UI elements in proper order (mic icon first)
     mic_icon = ft.Container(
-        content=ft.Icon(
-            name=ft.Icons.MIC,
-            color="black",
-            size=40
-        ),
+        content=ft.Icon(name=ft.Icons.MIC, color="black", size=40),
         alignment=ft.alignment.center,
     )
 
-    # Yellow Microphone Button
+    # Recording button
+    def start_recording(e):
+        button_mic.disabled = True
+        button_mic.bgcolor = "#FF9800"  # Darker yellow when recording
+        mic_icon.content = ft.ProgressRing(width=40, height=40, color="black")
+        txt_transcription.value = "Loading..."
+        txt_accuracy.value = ""
+        pronunciation_tips.visible = False
+        pronunciation_chart.visible = False
+        e.page.update()
+    
+        recording["is_recording"] = True
+        threading.Thread(target=lambda: record_audio(e.page)).start()
+
+    # Main mic button
     button_mic = ft.Container(
         content=mic_icon,
         width=120,
@@ -1496,33 +1590,35 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         )
     )
 
-    # Create a mutable text for attempts tracking
-    attempts_text = ft.Text("Attempt 0/3", size=14, color="grey")
-    txt_attempts_remaining = ft.Text("3 attempts remaining", size=14, color="grey")
-
-    def start_recording(e):
-        button_mic.disabled = True
-        button_mic.bgcolor = "#FF9800"  # Darker yellow when recording
-        mic_icon.content = ft.ProgressRing(width=40, height=40, color="black")  # Show loading spinner
-        txt_transcription.value = "Loading..."
-        txt_accuracy.value = ""
-        pronunciation_tips.visible = False
-        pronunciation_chart.visible = False
-        e.page.update()
+    # Listen button for audio playback
+    listen_button = ft.Container(
+        content=ft.Icon(
+            name=ft.Icons.VOLUME_UP,
+            color="black",
+            size=30
+        ),
+        width=60,
+        height=60,
+        bgcolor="#FFD700",  # Gold color
+        border_radius=30,
+        alignment=ft.alignment.center,
+        visible=audio_url is not None,  # Only show if audio is available
+        on_click=lambda e: play_example_audio(e)
+    )
     
-        recording["is_recording"] = True
-        threading.Thread(target=lambda: record_audio(e.page)).start()
-
+    # Button row with both mic and listen buttons
+    audio_button_row = ft.Row(
+        [button_mic, listen_button] if audio_url else [button_mic],
+        alignment=ft.MainAxisAlignment.CENTER,
+        spacing=20
+    )
+    
     def record_audio(page):
         # Shorter initialization delay
-        time.sleep(1.0)  # Reduced from 2.5
+        time.sleep(1.0)
         
         # Update UI to show listening state
-        mic_icon.content = ft.Icon(
-            name=ft.Icons.MIC,
-            color="black",
-            size=40
-        )  # Restore mic icon
+        mic_icon.content = ft.Icon(name=ft.Icons.MIC, color="black", size=40)
         txt_transcription.value = "Listening..."
         page.update()
 
@@ -1538,27 +1634,20 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             return
             
         try:
-            # During the "Loading..." phase, perform initialization and ambient adjustment
-            # The user already sees the loading spinner and "Loading..." text at this point
-            
-            # Wait a very short time to ensure UI updates
+            # Short wait for UI update
             time.sleep(0.4)
             
-            # After initialization, show "Listening..." and start actual recording
-            mic_icon.content = ft.Icon(
-                name=ft.Icons.MIC,
-                color="black",
-                size=40
-            )
+            # After initialization, start actual recording
+            mic_icon.content = ft.Icon(name=ft.Icons.MIC, color="black", size=40)
             txt_transcription.value = "Listening..."
             page.update()
             
-            # NOW start recording - this should match when the terminal says "Speak now"
+            # Start recording
             recording["file_path"] = capture_audio(duration=3)
             
-            # Process the recording as before
+            # Process the recording
             if recording["file_path"] and os.path.exists(recording["file_path"]):
-                # Only count as an attempt if audio is detected
+                # Count as an attempt
                 attempts["count"] += 1
                 attempts_text.value = f"Attempt {attempts['count']}/{attempts['max']}"
                 page.update()
@@ -1577,7 +1666,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             page.update()
         finally:
             recording["is_recording"] = False
-            
+    
     def process_recording(page):
         if not model_available:
             return
@@ -1587,18 +1676,16 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
             predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
                 recording["file_path"], recognition_target
             )
-
-            # Special case for "Gab-i"
-            if recognition_target.lower() == "gab-i":
-                if predicted_word and predicted_word.lower() in ["gabby", "gab e", "gabi", "gab-i"]:
-                    predicted_word = "gab-i"
             
-            # Track the best accuracy attempt
+            # Compare with the specific target word not the full vocabulary
             if predicted_word:
-                current_accuracy = confidence if confidence else 0.0
+
+                if predicted_word:
+                    # Track the best accuracy attempt
+                    current_accuracy = confidence if confidence else 0.0
                 if current_accuracy > attempts["best_accuracy"]:
                     attempts["best_accuracy"] = current_accuracy
-                
+                    
                 # Show attempts remaining
                 remaining = attempts["max"] - attempts["count"]
                 if remaining <= 0:
@@ -1641,7 +1728,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                                 pronunciation_tips.visible = False
                                 
                             # Generate and display visualization
-                            viz_buffer = visualize_pronunciation_feedback(target_word, phoneme_confidence)
+                            viz_buffer = visualize_pronunciation_feedback(vocabulary, phoneme_confidence)
                             if viz_buffer:
                                 pronunciation_chart.src_base64 = base64.b64encode(viz_buffer.read()).decode('utf-8')
                                 pronunciation_chart.visible = True
@@ -1653,7 +1740,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                         if phoneme_confidence:
                             problem_syllables = speech_processor._identify_problem_syllables(
                                 [(p, s) for p, s in phoneme_confidence.items() if s < 0.7],
-                                speech_processor._map_phonemes_to_syllables(target_word.lower())
+                                speech_processor._map_phonemes_to_syllables(vocabulary.lower())
                             )
                             
                             feedback_text = ""
@@ -1670,7 +1757,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                             pronunciation_tips.value = feedback_text
                             pronunciation_tips.visible = bool(feedback_text)
                 else:
-                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{target_word}'"
+                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{vocabulary}'"
                     txt_accuracy.value = f"Incorrect word detected"
                     txt_accuracy.color = "red"
                     question_data.accuracy = 0.0
@@ -1713,11 +1800,11 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
     
     def auto_submit_after_attempts(page):
         if attempts["count"] >= attempts["max"]:
-            # Use the best accuracy achieved in any attempt
+            # Use the best accuracy achieved
             question_data.accuracy = attempts["best_accuracy"]
-            # Highlight the next button to draw attention
+            # Highlight next button
             next_button.style = ft.ButtonStyle(
-                bgcolor={"": "#ff9800"},  # Change to orange to draw attention
+                bgcolor={"": "#ff9800"},
                 shape=ft.RoundedRectangleBorder(radius=30),
             )
             page.update()
@@ -1758,10 +1845,11 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         on_click=handle_next
     )
 
-    # Create the main UI layout
+    # Create the main UI layout - Now that all components exist
     card_content = ft.Container(
         content=ft.Column(
             [
+                # Header row
                 ft.Row(
                     [
                         ft.Container(ft.Divider(color="grey", thickness=1), width=60),
@@ -1773,6 +1861,8 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                     ],
                     alignment=ft.MainAxisAlignment.CENTER
                 ),
+                
+                # Question text
                 ft.Container(
                     ft.Text(
                         question_text,
@@ -1782,13 +1872,17 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                     ),
                     margin=ft.margin.only(bottom=10, top=10)
                 ),
+                
+                # Attempt counter
                 ft.Container(
-                    attempts_text,  # Using the mutable Text object
+                    attempts_text,
                     margin=ft.margin.only(bottom=10, top=10)
                 ),
+                
+                # Word to pronounce
                 ft.Container(
                     ft.Text(
-                        target_word,  # Changed from vocabulary to target_word
+                        target_word,
                         color="#0078D7",
                         size=28,
                         weight=ft.FontWeight.BOLD,
@@ -1796,11 +1890,15 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
                     ),
                     margin=ft.margin.only(bottom=20)
                 ),
+                
+                # Audio buttons (mic + listen)
                 ft.Container(
-                    button_mic,
+                    audio_button_row,  # Using row with both buttons
                     alignment=ft.alignment.center,
                     margin=ft.margin.only(bottom=20, top=10)
                 ),
+                
+                # Result displays
                 ft.Container(
                     txt_transcription,
                     alignment=ft.alignment.center,
@@ -1838,6 +1936,7 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back, cu
         margin=ft.margin.only(top=20, bottom=20)
     )
 
+    # Progress and navigation
     progress = ft.Container(
         ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
         margin=ft.margin.only(bottom=20)
@@ -1924,7 +2023,7 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
     question_type = question_data.type
     
     if question_type == "Lesson":
-        return build_lesson_question(question_data, progress_value, on_next, on_back)
+        return build_lesson_question(page, question_data, progress_value, on_next, on_back)
     elif question_type == "Image Picker":
         return build_imgpicker_question(page, question_data, progress_value, on_next, on_back, current_index)
     elif question_type == "Word Select":
@@ -1934,7 +2033,7 @@ def render_question_layout(page, question_data, progress_value, on_next, on_back
     elif question_type == "Cultural Trivia":
         return build_trivia_question(question_data, progress_value, on_next, on_back)
     elif question_type == "Pronunciation":
-        return build_pronounce_question(question_data, progress_value, on_next, on_back, current_index)
+        return build_pronounce_question(page, question_data, progress_value, on_next, on_back, current_index)
     elif question_type == "Translate Sentence":
         return build_translate_sentence_question(page, question_data, progress_value, on_next, on_back, current_index)
     else:

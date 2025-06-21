@@ -1220,13 +1220,28 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             # Compare with the specific target word not the full vocabulary
             if predicted_word:
                 txt_transcription.value = f"You said: {predicted_word}"
-                
-                # Get any pronunciation errors from the NLTK analysis that was performed
+                  # Get any pronunciation errors from the NLTK analysis that was performed
                 nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
                 
                 if predicted_word.lower() == recognition_target.lower():
                     accuracy = confidence if confidence else 0.75
-                    txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
+                    
+                    # Convert numerical accuracy to qualitative rating
+                    if accuracy >= 0.9:  # 90%
+                        accuracy_rating = "Outstanding!"
+                        txt_accuracy.color = "#3A5D30"  # Dark green
+                    elif accuracy >= 0.7:  # 70%
+                        accuracy_rating = "Good"
+                        txt_accuracy.color = "#0078D7"  # Blue
+                    elif accuracy >= 0.6:  # 60%
+                        accuracy_rating = "Needs Improvement"
+                        txt_accuracy.color = "#FFC107"  # Amber
+                    else:
+                        accuracy_rating = "Keep Practicing"
+                        txt_accuracy.color = "#95353A"  # Red
+                        
+                    # Display both the rating and percentage
+                    txt_accuracy.value = f"{accuracy_rating} ({accuracy:.0%})"
                     
                     if accuracy >= accuracy_threshold:
                         txt_accuracy.color = "green"

@@ -1,5 +1,30 @@
 import flet as ft
 from qbank import word_library
+from flet_audio import Audio
+
+AUDIO_URLS = {
+    "maupay nga aga": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572609/maupay_nga_aga_urhv6g.mp3",
+    "aga": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572617/aga_yrse5r.mp3",
+    "gihapon": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572604/gihapon_qd9eky.mp3",
+    "kamusta ka": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572607/kamusta_ka_tjidng.mp3",
+    "ikaw": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572605/ikaw_h70yiy.mp3",
+    "okay la ako": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572614/okay_la_ako_r9uavj.mp3",
+    "maupay nga kulop": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572611/maupay_nga_kulop_vdaxud.mp3",
+    "maupay": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572612/maupay_eix9qv.mp3",
+    "diri": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572626/diri_brlstl.mp3",
+    "it": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572605/it_drrhnr.mp3",
+    "maupay nga gabi": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572610/maupay_nga_gabi_nhfibv.mp3",
+    "gab-i": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572627/gab-i_e17xsu.mp3",
+    "ano it imo ngaran": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572622/ano_it_imo_ngaran_jf1rih.mp3",
+    "ngaran": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572613/ngaran_zuesqm.mp3",
+    "ako hi": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572618/ako_hi_ovqdlr.mp3",
+    "damo nga salamat": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572621/damo_nga_salamat_hgathz.mp3",
+    "waray sapayan": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749573317/waray_sapayan_qixfxl.mp3",
+    "pasylo-a ako": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572616/pasylo-a_ako_l0cvux.mp3",
+    "maaram ka mag english": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572608/maaram_ka_mag_english_iuws71.mp3",
+    "diri ako makarit ha waray": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572623/diri_ako_makarit_ha_waray_xoofdv.mp3",
+    "ambot": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572620/ambot_ws7epc.mp3"
+}
 
 def word_library_page(page: ft.Page, image_urls: list):
     """Word library page showing saved vocabulary words"""
@@ -7,7 +32,24 @@ def word_library_page(page: ft.Page, image_urls: list):
     page.padding = 0
     page.bgcolor = "#FFFFFF"
 
+    # Create audio players in advance
+    audio_players = {}
+    preloaded_audios = []
     
+    # Create a silent audio for preload initialization WITH AUTOPLAY
+    silent_audio = Audio(src="https://res.cloudinary.com/djm2qhi9f/video/upload/v1749580135/silent_pwwtrp.mp3", autoplay=True)
+    preloaded_audios.append(silent_audio)
+    
+    # Preload all audio URLs to initialize the audio system
+    for word, url in AUDIO_URLS.items():
+        audio_player = Audio(src=url)
+        audio_players[word] = audio_player
+        preloaded_audios.append(audio_player)
+    
+    # Add all preloaded audios to page overlay right away
+    page.overlay.extend(preloaded_audios)
+
+
     header = ft.Container(
         content=ft.Stack(
             controls=[
@@ -94,9 +136,37 @@ def word_library_page(page: ft.Page, image_urls: list):
         """Handles profile icon click event."""
         print("Profile icon clicked")
     
+    # FIX
+    # Function to play audio
     def on_audio_click(e, word):
         """Handles audio icon click event."""
+        word_lower = word.lower()
         print(f"Playing audio for {word}")
+        
+        # Get audio player from our preloaded dictionary
+        audio_player = audio_players.get(word_lower)
+        
+        if audio_player:
+            # Change button color for visual feedback
+            e.control.bgcolor = "#FFA000"  # Darker color during playback
+            page.update()
+            
+            # Play audio
+            audio_player.play()
+            
+            # Reset button color after short delay
+            def reset_button():
+                import time
+                time.sleep(0.8)
+                e.control.bgcolor = "#FFCF32"  # Original color
+                page.update()
+                
+            import threading
+            threading.Thread(target=reset_button).start()
+        else:
+            # No audio found
+            print(f"No audio found for word: {word}")
+            page.open(ft.SnackBar(ft.Text(f"No audio available for '{word}'"), bgcolor="#FF9800"))
 
     # Function to create a word card that exactly matches the reference image
     def create_word_card(waray_word, english_translation):
