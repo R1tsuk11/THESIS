@@ -82,6 +82,52 @@ def update_user_library():
     except Exception as e:
         print(f"Error updating library: {e}")
 
+def build_audio_controls(question_data):
+    """Reusable helper to build audio playback controls for any question type."""
+    import flet as ft
+    import re, uuid
+
+    audio_file = getattr(question_data, 'audio_file', None)
+    if not audio_file:
+        return ft.Container()
+    # URL-based audio
+    if re.match(r'^https?://', audio_file):
+        audio_id = f"audio_{uuid.uuid4().hex}"
+        html_audio = ft.HtmlElement(
+            tag_name="audio",
+            attributes={
+                "id": audio_id,
+                "src": audio_file,
+                "preload": "auto",
+                "controls": "true"
+            },
+            visible=True
+        )
+        def on_play(e):
+            try:
+                e.page.run_javascript(f"document.getElementById('{audio_id}').play();")
+            except Exception as ex:
+                print(f"Audio playback error: {ex}")
+        play_btn = ft.IconButton(
+            icon=ft.Icons.VOLUME_UP,
+            icon_color="#0078D7",
+            icon_size=24,
+            tooltip="Play audio",
+            on_click=on_play
+        )
+        return ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    play_btn,
+                    ft.Text("Play audio", color="#0078D7", size=14)
+                ], alignment=ft.MainAxisAlignment.CENTER),
+                html_audio
+            ], spacing=5),
+            margin=ft.margin.only(bottom=10)
+        )
+    # fallback: no audio controls
+    return ft.Container()
+
 def build_lesson_question(question_data, progress_value, on_next, on_back):
     """Builds the layout for a 'Lesson' type question."""
     # Dynamic image selection based on vocabulary
@@ -200,31 +246,23 @@ def build_lesson_question(question_data, progress_value, on_next, on_back):
                     ],
                     alignment=ft.MainAxisAlignment.CENTER
                 ),
-                # Waray phrase with volume icon - now wrapping enabled
+                # Waray phrase display replaced with audio controls
+                # Show phrase text
                 ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.IconButton(
-                                icon=ft.Icons.VOLUME_UP,
-                                icon_color="#0078D7",
-                                icon_size=24,
-                            ),
-                            ft.Text(
-                                waray_phrase,
-                                color="#0078D7",
-                                size=24,
-                                weight=ft.FontWeight.BOLD,
-                                text_align=ft.TextAlign.CENTER,
-                                max_lines=3,  # Allow up to 3 lines
-                                overflow=ft.TextOverflow.VISIBLE,  # Show all text
-                            )
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=5,
-                        wrap=True  # Enable wrapping
+                    content=ft.Text(
+                        waray_phrase,
+                        color="#0078D7",
+                        size=24,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER,
+                        max_lines=3,
+                        overflow=ft.TextOverflow.VISIBLE
                     ),
                     margin=ft.margin.only(bottom=10)
                 ),
+                # Audio playback controls
+                build_audio_controls(question_data),
+
                 # English translation - now with wrapping
                 ft.Container(
                     content=ft.Text(
@@ -806,15 +844,21 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
     # Progress bar (fixed position)
     progress_bar = ft.Container(
         content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=20)
     )
 
-    bottom_nav = ft.Container(
+    # Navigation buttons (fixed position)
+    nav_buttons = ft.Container(
         content=ft.Row(
             [
                 ft.Container(
                     content=ft.ElevatedButton(
-                        content=ft.Text("NEXT", color="white", weight=ft.FontWeight.BOLD, size=16),
+                        content=ft.Text(
+                            "NEXT",
+                            color="white",
+                            weight=ft.FontWeight.BOLD,
+                            size=16
+                        ),
                         style=ft.ButtonStyle(
                             bgcolor={"": "#0078D7"},
                             shape=ft.RoundedRectangleBorder(radius=30),
@@ -825,44 +869,30 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                     )
                 )
             ],
-            alignment=ft.MainAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER
         ),
-        padding=ft.padding.only(bottom=30),
+        padding=ft.padding.only(bottom=30)
     )
-    
-    # Main layout with fixed top bar, scrollable content, and fixed bottom elements
-    return ft.Stack(
-        [
-            ft.Container(bgcolor="white", expand=True),
-            ft.Column([
-                # Blue bar on top (fixed)
-                # ft.Container(height=10, bgcolor="#0078D7", width=50),
 
-                # Main content with three sections
-                ft.Column(
-                    [
-                        # 1. Scrollable content area
-                        ft.Container(
-                            content=scrollable_area,
-                            expand=True,
-                            width=320,  # Fixed width
-                            alignment=ft.alignment.center
-                        ),
-                        
-                        # 2. Fixed progress bar
-                        progress_bar,
-                        
-                        # 3. Fixed bottom navigation
-                        bottom_nav
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    expand=True
-                )
-            ], spacing=0, expand=True)
-        ],
-        expand=True
-    )
+    return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Container(
+                        content=scrollable_area,
+                        expand=True,
+                        width=320,
+                        alignment=ft.alignment.center
+                    ),
+                    progress_bar,
+                    nav_buttons
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                expand=True
+            ),
+            bgcolor="#FFFFFF",  # Set background color to white
+            expand=True
+        )
 
 def build_tf_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
@@ -1012,7 +1042,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back, cur
     # Progress bar
     progress_bar = ft.Container(
         content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=20)
     )
 
     # Bottom navigation
@@ -1365,7 +1395,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
     # Progress bar (fixed position)
     progress_bar = ft.Container(
         content=ft.ProgressBar(value=progress_value, bgcolor="#e0e0e0", color="#0078D7", width=300),
-        margin=ft.margin.only(bottom=20),
+        margin=ft.margin.only(bottom=20)
     )
 
     bottom_nav = ft.Container(
