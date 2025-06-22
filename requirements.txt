@@ -12,7 +12,9 @@ g2p-en>=2.1.0
 eng-to-ipa>=0.0.2
 SpeechRecognition>=3.8.1
 flet==0.27.6
+flet_audio>=0.2.0
+flet_audio_recorder>=0.1.0
 pyBkt
 pyMongo
 fastdtw
-PyAudio 
+PyAudio

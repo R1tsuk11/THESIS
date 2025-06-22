@@ -1,0 +1,11 @@
+{
+    "package": "com.arami.waray",
+    "version": "1.0.0",
+    "appName": "Arami",
+    "permissions": [
+        "RECORD_AUDIO",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+    ],
+    "orientation": "portrait"
+}

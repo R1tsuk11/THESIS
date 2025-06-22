@@ -1,0 +1,196 @@
+"""
+Audio recording utilities that handle different versions of flet_audio
+and provide a consistent interface for both desktop and mobile platforms.
+"""
+
+import os
+import time
+import logging
+import tempfile
+import importlib
+import sys
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class AudioRecorderManager:
+    """
+    Provides a unified interface for audio recording across different 
+    flet_audio versions and platforms.
+    """
+    
+    def __init__(self):
+        """Initialize the audio recorder manager."""
+        self._recorder = None
+        self._api_version = None
+        self._is_mobile = 'ANDROID_DATA' in os.environ or 'IOS_APP' in os.environ
+        self._initialized = False
+        
+    def initialize(self):
+        """Initialize the appropriate recorder based on available APIs."""
+        if self._initialized:
+            return True
+            
+        try:
+            # Try to import flet_audio - handle reloading if needed
+            if 'flet_audio' in sys.modules:
+                importlib.reload(sys.modules['flet_audio'])
+                flet_audio = sys.modules['flet_audio']
+            else:
+                import flet_audio
+                
+            logger.info(f"Found flet_audio: {getattr(flet_audio, '__file__', 'unknown')}")
+            logger.info(f"flet_audio dir: {dir(flet_audio)}")
+            
+            # Check which API is available
+            if hasattr(flet_audio, 'record_audio'):
+                self._api_version = 'new'
+                self._recorder = flet_audio
+                logger.info("Using new record_audio API")
+            elif hasattr(flet_audio, 'Audio'):
+                self._api_version = 'middle'
+                self._recorder = flet_audio.Audio()
+                logger.info("Using middle Audio class API")
+            elif hasattr(flet_audio, 'AudioRecorder'):
+                self._api_version = 'recorder'
+                self._recorder = flet_audio.AudioRecorder()
+                logger.info("Using AudioRecorder class API")
+            else:
+                self._api_version = 'old'
+                self._recorder = flet_audio
+                logger.info("Using old module-level API")
+            
+            logger.info(f"Using flet_audio with API version: {self._api_version}")
+            self._initialized = True
+            return True
+        except ImportError as e:
+            logger.warning(f"flet_audio not available: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error initializing audio recorder: {e}")
+            return False
+    
+    def record(self, duration_seconds=3):
+        """Start recording audio for the specified duration.
+        
+        Args:
+            duration_seconds: Recording duration in seconds
+            
+        Returns:
+            temp_path: Path to the temporary audio file
+        """
+        if not self._initialized:
+            if not self.initialize():
+                logger.error("Failed to initialize audio recorder")
+                return None
+        
+        # Create temp path with proper directory handling for mobile
+        if self._is_mobile:
+            # On Android, ensure we use a writable directory
+            temp_dir = os.environ.get('TMPDIR', '/data/data/com.example.arami/cache/')
+            if not os.path.exists(temp_dir):
+                temp_dir = os.path.dirname(os.path.abspath(__file__))
+                if not os.access(temp_dir, os.W_OK):
+                    temp_dir = os.getcwd()
+            
+            # Create a unique filename
+            temp_path = os.path.join(temp_dir, f"recording_{int(time.time())}.wav")
+        else:
+            # On desktop, use tempfile module
+            temp_path = tempfile.mktemp(suffix=".wav")
+        
+        logger.info(f"Recording to temp path: {temp_path}")
+        
+        try:
+            if self._api_version == 'new':
+                logger.info(f"Recording with new API to {temp_path}")
+                self._recorder.record_audio(
+                    temp_path, 
+                    duration_ms=duration_seconds * 1000
+                )
+            elif self._api_version == 'middle':
+                logger.info("Recording with middle API")
+                try:
+                    # Different Audio class methods depending on version
+                    if hasattr(self._recorder, 'record_audio'):
+                        self._recorder.record_audio(duration_seconds=duration_seconds)
+                    elif hasattr(self._recorder, 'record'):
+                        self._recorder.record()
+                    else:
+                        # Try directly calling the audio method
+                        import flet_audio
+                        flet_audio.record()
+                        logger.info("Used flet_audio.record() as fallback")
+                    
+                    time.sleep(duration_seconds + 0.5)  # Allow recording to complete
+                    
+                    # Different ways to get audio data
+                    audio_data = None
+                    if hasattr(self._recorder, 'get_audio_data'):
+                        audio_data = self._recorder.get_audio_data()
+                    elif hasattr(self._recorder, 'get_bytes'):
+                        audio_data = self._recorder.get_bytes()
+                    elif hasattr(self._recorder, 'stop_recording'):
+                        audio_data = self._recorder.stop_recording()
+                    else:
+                        # Try direct module
+                        import flet_audio
+                        audio_data = flet_audio.stop_recording()
+                        logger.info("Used flet_audio.stop_recording() as fallback")
+                    
+                    if audio_data:
+                        logger.info(f"Got audio data, size: {len(audio_data)} bytes")
+                        with open(temp_path, "wb") as f:
+                            f.write(audio_data)
+                    else:
+                        logger.error("No audio data received")
+                        return None
+                except Exception as e:
+                    logger.error(f"Error with middle API: {e}")
+                    return None
+            elif self._api_version == 'recorder':
+                logger.info("Recording with AudioRecorder API")
+                self._recorder.start()
+                time.sleep(duration_seconds)
+                self._recorder.stop()
+                audio_data = self._recorder.get_bytes()
+                logger.info(f"Got audio data, size: {len(audio_data) if audio_data else 0} bytes")
+                with open(temp_path, "wb") as f:
+                    f.write(audio_data)
+            else:  # old API
+                logger.info("Recording with old API")
+                self._recorder.record()
+                time.sleep(duration_seconds)
+                audio_data = self._recorder.stop_recording()
+                logger.info(f"Got audio data, size: {len(audio_data) if audio_data else 0} bytes")
+                with open(temp_path, "wb") as f:
+                    f.write(audio_data)
+            
+            if not os.path.exists(temp_path):
+                logger.error(f"Failed to create audio file at {temp_path}")
+                return None
+                
+            if os.path.getsize(temp_path) == 0:
+                logger.error(f"Audio file is empty: {temp_path}")
+                return None
+                
+            logger.info(f"Successfully saved audio to {temp_path}, size: {os.path.getsize(temp_path)} bytes")
+            return temp_path
+        except Exception as e:
+            logger.error(f"Error recording audio: {e}")
+            return None
+            
+    def record_audio(self, duration=3):
+        """Alias for record method to maintain backward compatibility."""
+        return self.record(duration_seconds=duration)
+
+# Global recorder manager instance
+recorder_manager = AudioRecorderManager()
+
+if __name__ == "__main__":
+    # Simple test when run directly
+    print("Testing audio recorder...")
+    recorder_manager.initialize()
+    audio_file = recorder_manager.record(duration_seconds=3)
+    print(f"Recorded audio to: {audio_file}")

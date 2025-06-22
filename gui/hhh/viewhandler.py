@@ -1,5 +1,6 @@
 import flet as ft
 import asyncio
+import os
 from login import login_page
 from register import register_page
 from setUpProficiency import set_up_proficiency_page, pretest_landing_page, pretest_score
@@ -132,21 +133,57 @@ class CustomBKTPredictor:
         return mastery
 
 async def main(page: ft.Page):
-    page.title = "User Authentication"
-    page.bgcolor = "#FFFFFF"
-    page.fonts = {
-        "Poppins": "fonts/Poppins-Regular.ttf"
-    }
-
-    page.theme = ft.Theme(font_family="Poppins", 
-        page_transitions=ft.PageTransitionsTheme(
-            android=ft.PageTransitionTheme.OPEN_UPWARDS,
-            ios=ft.PageTransitionTheme.CUPERTINO,
-            macos=ft.PageTransitionTheme.FADE_UPWARDS,
-            windows=ft.PageTransitionTheme.FADE_UPWARDS
-        )
-    )
-
+    """Main app function to handle application startup and routing."""
+    page.title = "Arami"
+    
+    # Make sure os is imported
+    import os
+    
+    # Detect if running on Android
+    is_android = 'ANDROID_DATA' in os.environ
+    
+    if is_android:
+        print("Running on Android platform")
+        # Configure flet_audio for Android
+        try:
+            import flet_audio
+            print(f"flet_audio successfully imported for Android: {dir(flet_audio)}")
+            
+            # Also initialize our audio recorder manager
+            try:
+                # First try to import with package name
+                try:
+                    from gui.hhh.voice_recognition.audio_recorder import recorder_manager
+                except ImportError:
+                    # Try with simpler import
+                    from voice_recognition.audio_recorder import recorder_manager
+                
+                initialized = recorder_manager.initialize()
+                print(f"Audio recorder manager initialized: {initialized}")
+                
+                # Make recorder_manager available globally
+                import sys
+                sys.modules['global_recorder_manager'] = recorder_manager
+                print("Made recorder_manager available globally")
+            except ImportError as e:
+                print(f"Could not initialize audio recorder manager: {e}")
+                # Try to add voice_recognition to path
+                try:
+                    import sys
+                    import os
+                    voice_recog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_recognition")
+                    if os.path.exists(voice_recog_path):
+                        sys.path.append(voice_recog_path)
+                        from audio_recorder import recorder_manager
+                        initialized = recorder_manager.initialize()
+                        print(f"Audio recorder manager initialized from path: {initialized}")
+                except Exception as e2:
+                    print(f"Final attempt to load recorder_manager failed: {e2}")
+        except ImportError as e:
+            print(f"Failed to import flet_audio - audio recording may not work: {e}")
+    else:
+        print("Running on desktop platform")
+    
     image_urls = [
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747639160/logo1_tkfwwq.png", #blue logo - 0
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747639363/logo_roygvs.png", #purple logo - 1
