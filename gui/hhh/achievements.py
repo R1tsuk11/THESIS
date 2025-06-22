@@ -442,31 +442,60 @@ def achievement_page(page: ft.Page, image_urls: list):
             
             if user_data and "lstm_mastery" in user_data:
                 raw_mastery = user_data["lstm_mastery"]
-                vocabulary_mastery = float(raw_mastery) * 100
+                vocabulary_mastery = float(raw_mastery)
                 print(f"[Vocab] Using database LSTM mastery: {vocabulary_mastery:.1f}%")
             else:
                 # Fallback for new users
-                vocabulary_mastery = float(language_proficiency) * 0.7
+                vocabulary_mastery = float(language_proficiency)
                 print(f"[Vocab] No LSTM mastery found, using fallback: {vocabulary_mastery:.1f}%")
     except Exception as e:
         print(f"[Vocab] Error getting LSTM mastery: {e}")
         vocabulary_mastery = 0
         
     # Get overall proficiency directly from LSTM
-    raw_proficiency = 0
+    raw_proficiency = 0.0
     try:
-        # Get proficiency directly from session (no default parameter)
-        raw_proficiency = page.session.get("lstm_proficiency") 
-        if raw_proficiency is not None:
-            raw_proficiency = float(raw_proficiency) * 100
-            print(f"[Proficiency] Raw LSTM proficiency: {raw_proficiency:.1f}%")
+        # First check session
+        session_proficiency = page.session.get("lstm_proficiency")
+        if session_proficiency is not None:
+            raw_proficiency = float(session_proficiency) * 100
+            print(f"[Proficiency] Using session proficiency: {raw_proficiency:.1f}%")
         else:
-            # Use the value we already extracted from achievement_data
-            raw_proficiency = float(language_proficiency)
-            print(f"[Proficiency] Using extracted proficiency: {raw_proficiency:.1f}%")
+            # Try database
+            from mainmenu import connect_to_mongoDB
+            usercol = connect_to_mongoDB()
+            user_data = usercol.find_one({"user_id": user_id})
+            
+            if user_data:
+                # Try different field names for backward compatibility
+                db_proficiency = user_data.get("lstm_proficiency")
+                if db_proficiency is None:
+                    db_proficiency = user_data.get("proficiency")
+                    
+                if db_proficiency is not None:
+                    raw_proficiency = float(db_proficiency)
+                    print(f"[Proficiency] Using database proficiency: {raw_proficiency:.1f}%")
+                    
+                    # Also store in session for future use
+                    page.session.set("lstm_proficiency", float(db_proficiency))
+                else:
+                    # Use vocabulary mastery as fallback for proficiency
+                    # (mastery was already loaded above)
+                    raw_proficiency = vocabulary_mastery
+                    print(f"[Proficiency] No proficiency in database, using mastery: {raw_proficiency:.1f}%")
+            else:
+                # Use extracted (likely 0.0)
+                print(f"[Proficiency] No user data found, using extracted: {language_proficiency:.1f}%")
+                raw_proficiency = float(language_proficiency) * 100
     except Exception as e:
-        print(f"[Proficiency] Error getting LSTM proficiency: {e}")
-        raw_proficiency = float(language_proficiency) if isinstance(language_proficiency, (int, float)) else 0
+        print(f"[Proficiency] Error getting proficiency: {e}")
+        # Use vocabulary mastery as fallback
+        raw_proficiency = vocabulary_mastery
+        print(f"[Proficiency] Using mastery as fallback: {raw_proficiency:.1f}%")
+
+    # Calculate combined proficiency (70% proficiency + 30% completion)
+    combined_proficiency = (raw_proficiency * 0.7) + (progress_percentage * 0.3)
+    print(f"[Combined] Proficiency: {raw_proficiency:.1f}% * 0.7 + {progress_percentage:.1f}% * 0.3 = {combined_proficiency:.1f}%")
 
     if isinstance(progress_percentage, (int, float)) and progress_percentage > 100:
         print(f"[WARNING] Abnormal progress percentage detected: {progress_percentage}%, capping at 100%")

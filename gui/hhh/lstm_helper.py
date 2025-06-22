@@ -34,6 +34,22 @@ def get_lstm_proficiency(bkt_sequence, completion_percentage, user_id=None):
         }, f)
     
     try:
+        with open(input_file, 'r') as f:
+            input_data = json.load(f)
+            if not input_data.get("bkt_sequence"):
+                # Try to recover from database directly as last resort
+                from bkt_engine import ensure_bkt_data_loaded
+                bkt_sequence = ensure_bkt_data_loaded(user_id, force_db_refresh=True)
+                if bkt_sequence:
+                    print(f"[LSTM] Recovered sequence with {len(bkt_sequence)} values from database")
+                    input_data["bkt_sequence"] = bkt_sequence
+                    # Re-save the file with recovered data
+                    with open(input_file, 'w') as f_fix:
+                        json.dump(input_data, f_fix)
+    except Exception as e:
+        print(f"[LSTM] Error validating input file: {e}")
+
+    try:
         # Run subprocess with timeout
         cmd = [
             sys.executable, 

@@ -23,7 +23,14 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
     ]
     
     def return_to_levels(e):
-        """Navigate back to the levels page"""
+        """Navigate back to the levels page with refreshed status"""
+        # Refresh chapter test status before returning
+        try:
+            from levels import refresh_chapter_test_status
+            refresh_chapter_test_status(page)
+        except Exception as e:
+            print(f"[RETURN] Error refreshing status: {e}")
+        
         page.go("/levels")
     
     # Create top header with close button

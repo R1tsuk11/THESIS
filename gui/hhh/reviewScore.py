@@ -50,21 +50,42 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
         # IMPROVED: Update proficiency models with review results
         user_id = page.session.get("user_id")
         if user_id:
-            # 1. Get review results from session with better error handling
+            # Get review results from session
             try:
-                correct_answers_dict = page.session.get("correct_answers")
-                incorrect_answers_dict = page.session.get("incorrect_answers")
+                correct_answers_dict = page.session.get("correct_answers") or {}
+                incorrect_answers_dict = page.session.get("incorrect_answers") or {}
                 
-                print(f"[DEBUG] Review results - Correct: {len(correct_answers_dict) if correct_answers_dict else 0}, " +
-                    f"Incorrect: {len(incorrect_answers_dict) if incorrect_answers_dict else 0}")
+                print(f"[DEBUG] Review results - Correct: {len(correct_answers_dict)}, Incorrect: {len(incorrect_answers_dict)}")
                 
-                # 2. Run BKT and LSTM updates with proper error handling
+                # Prepare needed temp files before running prediction algorithms
+                from reviewFrame import prepare_temp_files_for_review
+                prepare_temp_files_for_review(page, user_id)
+                
+                # Run BKT and LSTM updates with proper error handling
                 try:
-                    print("[DEBUG] Attempting to import prediction functions...")
                     from levels import run_bkt_and_lstm, compute_completion
-                    print("[DEBUG] Successfully imported prediction functions")
                     
-                    # Get completion percentage
+                    # Try to restore modules from user object or temp file if needed
+                    modules = page.session.get("modules")
+                    if not modules and user and hasattr(user, "modules"):
+                        # Restore from user object
+                        modules = user.modules
+                        page.session.set("modules", modules)
+                        print(f"[DEBUG] Restored {len(modules)} modules from user object")
+                    
+                    if not modules:
+                        # Try to load from temp file if available
+                        try:
+                            import json
+                            with open("temp_modules.json", "r") as f:
+                                from mainmenu import Module
+                                modules = [Module(m) for m in json.load(f)]
+                                print(f"[DEBUG] Restored {len(modules)} modules from temp file")
+                                page.session.set("modules", modules)
+                        except Exception as e:
+                            print(f"[WARNING] Could not restore modules from temp file: {str(e)}")
+                    
+                    # Now calculate completion percentage safely
                     completion_percentage = compute_completion(page)
                     if completion_percentage is None:
                         completion_percentage = 0
@@ -77,21 +98,19 @@ def lesson_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorr
                     import threading
                     threading.Thread(
                         target=run_bkt_and_lstm, 
-                        args=(page, completion_percentage, user_id, correct_answers_dict, incorrect_answers_dict, True)  # Added True to indicate daily review
+                        args=(page, completion_percentage, user_id, correct_answers_dict, incorrect_answers_dict, True)  # True = daily review
                     ).start()
                     print("[DEBUG] Started prediction algorithm thread")
                     
                 except ImportError as ie:
-                    print(f"[ERROR] Could not import prediction functions: {str(ie)}")
-                    print("[ERROR] Make sure levels.py has run_bkt_and_lstm and compute_completion functions")
+                    print(f"[DEBUG] Could not import prediction functions: {str(ie)}")
                 except Exception as e:
                     print(f"[ERROR] Failed to run prediction algorithms: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
+                    
             except Exception as e:
-                print(f"[ERROR] Error processing review data: {str(e)}")
-        
-        # Continue with navigation
+                print(f"[ERROR] Error processing review results: {str(e)}")
+
+        # Navigate back to main-menu page
         page.go("/main-menu")
     
     # Create top header with close button

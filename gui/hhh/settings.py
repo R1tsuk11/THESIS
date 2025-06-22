@@ -25,29 +25,52 @@ def settings_page(page: ft.Page):
 
     # Update the perform_logout function in settings.py
     def perform_logout(e):
-        """Handle user logout with proper database syncing"""
+        """Handle user logout with proper file cleanup"""
         user_id = page.session.get("user_id")
         if user_id:
-            # Schedule vocabulary before logout
-            from supermemo_engine import schedule_pending_vocabulary
-            print("[SuperMemo] Scheduling vocabulary during logout")
-            schedule_result = schedule_pending_vocabulary(user_id)
-            
-            # Load user data
-            user = User().load_data(user_id, page)
-            
-            # EXPLICITLY SYNC ACHIEVEMENTS FROM SESSION
-            session_achievements = page.session.get("user_achievements")
-            if session_achievements:
-                print(f"[Achievements] Syncing {len(session_achievements)} achievements to database")
-                user.achievements = session_achievements
-            
-            # Clean up temp files
-            from mainmenu import clear_all_temp_files
-            clear_all_temp_files(user_id) 
-            
-            # Save any changes
-            user.save_user(page)
+            try:
+                print(f"[LOGOUT] Saving all data for user {user_id}")
+                
+                # 1. Save lesson BKT data first
+                try:
+                    from bkt_engine import save_lesson_bkt_if_file_exists
+                    lesson_save_result = save_lesson_bkt_if_file_exists(user_id)
+                    print(f"[LOGOUT] Lesson BKT file processing result: {lesson_save_result}")
+                    
+                except Exception as e:
+                    print(f"[LOGOUT] Error processing lesson BKT file: {e}")
+                
+                # 2. Save regular user data
+                from mainmenu import User
+                user = User().load_data(user_id, page)
+                
+                # Sync achievements from session
+                session_achievements = page.session.get("user_achievements")
+                if session_achievements:
+                    print(f"[Achievements] Syncing {len(session_achievements)} achievements to database")
+                    user.achievements = session_achievements
+                
+                # Save user data
+                user.save_user(page)
+                
+                # 3. CRITICAL: Clean up all temp files AFTER saving
+                try:
+                    from mainmenu import clear_all_temp_files
+                    clear_all_temp_files(user_id)
+                    print(f"[LOGOUT] Cleaned up temp files for user {user_id}")
+                except Exception as cleanup_error:
+                    print(f"[LOGOUT] Error cleaning up temp files: {cleanup_error}")
+                
+                print(f"[LOGOUT] Logout completed for user {user_id}")
+                
+            except Exception as e:
+                print(f"[LOGOUT] Error during logout: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # 4. Clear session and navigate
+        page.session.clear()
+        page.go("/login")
 
     # Header with logo and back button
     header = ft.Container(
@@ -339,13 +362,43 @@ def settings_page(page: ft.Page):
     # In a real app, perform actual logout operations      
     # Replace the existing perform_logout function with this:
     def perform_logout(e):
+        """Handle user logout with simplified BKT saving"""
+        user_id = page.session.get("user_id")
         if user_id:
-            user = User().load_data(user_id, page)
-            user.save_user(page)
-        else:
-            # If no user is found, just redirect to login
-            page.session.clear()
-            page.go("/login")
+            try:
+                print(f"[LOGOUT] Saving all data for user {user_id}")
+                
+                # SIMPLIFIED: Just check for lesson BKT file and save if exists
+                try:
+                    from bkt_engine import save_lesson_bkt_if_file_exists
+                    lesson_save_result = save_lesson_bkt_if_file_exists(user_id)
+                    print(f"[LOGOUT] Lesson BKT file processing result: {lesson_save_result}")
+                    
+                except Exception as e:
+                    print(f"[LOGOUT] Error processing lesson BKT file: {e}")
+                
+                # Continue with regular user data save
+                from mainmenu import User
+                user = User().load_data(user_id, page)
+                
+                # Sync achievements from session
+                session_achievements = page.session.get("user_achievements")
+                if session_achievements:
+                    print(f"[Achievements] Syncing {len(session_achievements)} achievements to database")
+                    user.achievements = session_achievements
+                
+                # Save user data
+                user.save_user(page)
+                
+                print(f"[LOGOUT] Logout completed for user {user_id}")
+                
+            except Exception as e:
+                print(f"[LOGOUT] Error during logout: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        page.session.clear()
+        page.go("/login")
         
     # LOGOUT DIALOG ALERT
     logout_dialog = ft.AlertDialog(

@@ -334,11 +334,52 @@ def calculate_confidence(model, X, history):
             print("[LSTM] Using default moderate confidence: 0.7")
             return 0.7
 
+def ensure_global_history_exists():
+    """Ensure the global temp_prof_history.json file exists"""
+    # FIXED: Use the proper directory structure
+    global_history_path = get_lstm_history_path()  # This will give us lstm_history/temp_prof_history.json
+    
+    print(f"[LSTM] Checking global history at: {global_history_path}")
+    
+    if not os.path.exists(global_history_path):
+        print("[LSTM] Creating global history file")
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(global_history_path), exist_ok=True)
+            
+            # Create with some initial data if possible
+            initial_history = [0.3, 0.35, 0.4, 0.45, 0.5]  # Basic progression
+            with open(global_history_path, "w") as f:
+                json.dump(initial_history, f)
+            print(f"[LSTM] Created global history file at {global_history_path}")
+        except Exception as e:
+            print(f"[LSTM] Error creating global history file: {e}")
+    else:
+        # Verify the file is valid
+        try:
+            with open(global_history_path, "r") as f:
+                history = json.load(f)
+                if not isinstance(history, list):
+                    raise ValueError("History is not a list")
+                print(f"[LSTM] Global history file valid with {len(history)} entries at {global_history_path}")
+        except Exception as e:
+            print(f"[LSTM] Global history file corrupted, recreating: {e}")
+            try:
+                initial_history = [0.3, 0.35, 0.4, 0.45, 0.5]
+                with open(global_history_path, "w") as f:
+                    json.dump(initial_history, f)
+                print(f"[LSTM] Recreated global history file at {global_history_path}")
+            except Exception as e2:
+                print(f"[LSTM] Failed to recreate global history file: {e2}")
+
 def predict_proficiency(bkt_sequence, user_id=None):
     """Predict proficiency using appropriate model for the user"""
     print(f"[LSTM] Predicting proficiency for user {user_id}, sequence: {bkt_sequence}")
     
     try:
+        # IMPORTANT: Ensure global history file exists first
+        ensure_global_history_exists()
+        
         # Determine which model to use
         model_path = get_lstm_model_path(user_id)
         history_file = get_lstm_history_path(user_id)
@@ -356,9 +397,10 @@ def predict_proficiency(bkt_sequence, user_id=None):
         global_contribution = 1.0
         if not user_has_enough_data:
             print(f"[LSTM] User {user_id} has insufficient data, using global model")
-            # Check if global model exists and has enough data
-            if os.path.exists(get_lstm_model_path()) and os.path.exists("temp_prof_history.json"):
-                with open("temp_prof_history.json", "r") as f:
+            # FIXED: Check if global model exists and has enough data using proper path
+            global_history_path = get_lstm_history_path()  # Global path (no user_id)
+            if os.path.exists(get_lstm_model_path()) and os.path.exists(global_history_path):
+                with open(global_history_path, "r") as f:
                     global_history = json.load(f)
                     if len(global_history) >= MIN_SEQUENCE_LENGTH:
                         # Use global model for prediction
@@ -368,16 +410,15 @@ def predict_proficiency(bkt_sequence, user_id=None):
                         # Not enough global data either
                         print(f"[LSTM] Not enough global data, using average")
                         avg = average_proficiency(bkt_sequence)
-                        return {"prediction": avg, "confidence": 0.5}  # FIXED: Return dict
+                        return {"prediction": avg, "confidence": 0.5}
             else:
                 # No global model
                 print(f"[LSTM] No global model available, using average")
                 avg = average_proficiency(bkt_sequence)
-                return {"prediction": avg, "confidence": 0.5}  # FIXED: Return dict
+                return {"prediction": avg, "confidence": 0.5}
         else:
             # As user gets more data, reduce global model influence
             data_points = len(history)
-            # Gradually reduce global contribution as user data grows
             if data_points >= MIN_SEQUENCE_LENGTH:
                 global_contribution = max(0.0, min(1.0, 1.0 - (data_points - MIN_SEQUENCE_LENGTH) / 20))
                 print(f"[LSTM] User has {data_points} data points, global contribution: {global_contribution:.2f}")
@@ -389,11 +430,15 @@ def predict_proficiency(bkt_sequence, user_id=None):
         if not os.path.exists(model_path):
             print("[LSTM] Model still not found after force training. Returning average.")
             avg = average_proficiency(bkt_sequence)
-            return {"prediction": avg, "confidence": 0.5}  # FIXED: Return dict
+            return {"prediction": avg, "confidence": 0.5}
         
         # Track the current history length
-        with open(history_file, "r") as f:
-            history = json.load(f)
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                history = json.load(f)
+        else:
+            history = []
+            
         with open(counter_file, "w") as f:
             f.write(str(len(history)))
             
@@ -405,7 +450,7 @@ def predict_proficiency(bkt_sequence, user_id=None):
         user_prediction = float(pred[0][0])
 
         # Always calculate confidence
-        user_confidence = calculate_confidence(model, X, history)  # FIXED: Pass history 
+        user_confidence = calculate_confidence(model, X, history)
         
         # If we're using a blend, compute global prediction too
         if user_has_enough_data and global_contribution > 0:
@@ -424,16 +469,24 @@ def predict_proficiency(bkt_sequence, user_id=None):
                 print(f"[LSTM] Blended prediction: {global_prediction:.3f} (global) * {global_contribution:.2f} + "
                       f"{user_prediction:.3f} (user) * {(1-global_contribution):.2f} = {final_prediction:.3f}")
                 
-                # Get global confidence and blend
-                with open("temp_prof_history.json", "r") as f:
-                    global_history = json.load(f)
-                global_confidence = calculate_confidence(global_model, X_global, global_history)
+                # FIXED: Get global confidence using proper path
+                global_history_path = get_lstm_history_path()  # Global path
+                print(f"[LSTM] Looking for global history at: {global_history_path}")
+                if os.path.exists(global_history_path):
+                    with open(global_history_path, "r") as f:
+                        global_history = json.load(f)
+                    global_confidence = calculate_confidence(global_model, X_global, global_history)
+                    print(f"[LSTM] Found global history with {len(global_history)} entries")
+                else:
+                    print(f"[LSTM] Warning: Global history file missing at {global_history_path}, using default confidence")
+                    global_confidence = 0.7
+                    
                 final_confidence = (global_contribution * global_confidence + 
                                    (1.0 - global_contribution) * user_confidence)
                 
                 return {"prediction": final_prediction, "confidence": final_confidence}
             
-        # FIXED: Always return dict with both values    
+        # Always return dict with both values    
         return {"prediction": user_prediction, "confidence": user_confidence}
         
     except Exception as e:
@@ -443,7 +496,7 @@ def predict_proficiency(bkt_sequence, user_id=None):
         traceback.print_exc()
         return {
             "prediction": 0.0, 
-            "confidence": 0.3,  # Low confidence when error occurs
+            "confidence": 0.3,
             "error": str(e)
         }
 
@@ -604,38 +657,16 @@ def display_lstm_predictions_table(bkt_sequence, user_id=None):
         overall_confidence = 0.8
     
     # Print header
-    print("┌─────────────────────────────────────────────────────────────────────────────────┐")
-    print("│                                 LSTM PREDICTIONS                                │")
-    print("├──────────────────────┬─────────────┬──────────┬──────────┬──────────┬──────────┤")
-    print("│ Vocabulary           │ Proficiency │ Mastery  │ Conf     │ Method   │ History  │")
-    print("├──────────────────────┼─────────────┼──────────┼──────────┼──────────┼──────────┤")
+    print("┌───────────────────────────────────────────────────────────────────────────────┐")
+    print("│                                 LSTM PREDICTIONS                              │")
+    print("├──────────────────────┬─────────────┬──────────┬──────────┬──────────┤")
+    print("│ Vocabulary           │ Proficiency │ Conf     │ Method   │")
+    print("├──────────────────────┼─────────────┼──────────┼──────────┼──────────┤")
     
-    # Print individual vocabulary items
-    # For LSTM we use the same prediction for all items since it's an overall model
-    for vocab in vocab_items:
-        # Truncate long vocabulary names
-        vocab_display = vocab[:18] if len(vocab) > 18 else vocab
-        vocab_display = vocab_display.ljust(18)
-        
-        # Get BKT mastery for this vocabulary item for comparison
-        bkt_mastery = predictions.get(vocab, {}).get("p_mastery", 0)
-        
-        # Mark predictions above threshold with asterisk
-        prof_str = f"{overall_prediction:.2f}*" if overall_prediction >= 0.7 else f"{overall_prediction:.2f} "
-        
-        # Calculate individual score based on overall prediction and BKT mastery
-        # This simulates per-vocabulary predictions
-        individual_score = (overall_prediction * 0.7) + (bkt_mastery * 0.3)
-        individual_score_str = f"{individual_score:.2f}"
-        
-        # Get history count for this vocab
-        history = "Yes" if vocab in predictions else "No"
-        
-        # Method used
-        method = "LSTM"
-        
-        # Print row
-        print(f"│ {vocab_display} │    {prof_str}    │  {individual_score_str}   │  {overall_confidence:.2f}   │ {method:^8} │ {history:^8} │")
+    # Only display overall proficiency, not per-vocabulary rows
+    print("│ Overall Proficiency    │    {:.2f}      │  {:.2f}   │ {:^8} │".format(
+        overall_prediction, overall_confidence, "LSTM"
+    ))
     
     # Print footer
     print("└──────────────────────┴─────────────┴──────────┴──────────┴──────────┴──────────┘")

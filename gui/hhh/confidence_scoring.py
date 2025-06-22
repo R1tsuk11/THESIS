@@ -45,7 +45,7 @@ class BayesianConfidenceSystem:
         self._load_validation_data()
     
     def _load_validation_data(self):
-        """Load existing validation data for modeling"""
+        """Load existing validation data for modeling with fallback to defaults"""
         self.validation_data = {
             "bkt": {"correct": [], "incorrect": []},
             "lstm": {"correct": [], "incorrect": []},
@@ -54,16 +54,53 @@ class BayesianConfidenceSystem:
         }
         
         validation_file = os.path.join(self.validation_data_path, "validation_data.json")
-        if os.path.exists(validation_file):
-            try:
+        try:
+            if os.path.exists(validation_file):
                 with open(validation_file, 'r') as f:
                     self.validation_data = json.load(f)
                 print(f"[Confidence] Loaded validation data from {validation_file}")
                 
-                # Update distribution parameters based on loaded data
-                self._fit_distributions()
-            except Exception as e:
-                print(f"[Confidence] Error loading validation data: {e}")
+                # Check if we have enough data
+                has_sufficient_data = False
+                for model in self.validation_data:
+                    if len(self.validation_data[model]["correct"]) >= 3 and len(self.validation_data[model]["incorrect"]) >= 3:
+                        has_sufficient_data = True
+                        break
+                
+                if not has_sufficient_data:
+                    print("[Confidence] WARNING: Insufficient validation data, using default distributions")
+                    self._init_default_distributions()
+                else:
+                    # Update distribution parameters based on loaded data
+                    self._fit_distributions()
+            else:
+                print(f"[Confidence] No validation data found, using default distributions")
+                self._init_default_distributions()
+        except Exception as e:
+            print(f"[Confidence] Error loading validation data: {e}. Using defaults.")
+            self._init_default_distributions()
+
+    def _init_default_distributions(self):
+        """Initialize default reasonable distribution parameters"""
+        self.distributions = {
+            "bkt": {
+                "correct": {"mean": 0.75, "std": 0.15},
+                "incorrect": {"mean": 0.35, "std": 0.15}
+            },
+            "lstm": {
+                "correct": {"mean": 0.70, "std": 0.15},
+                "incorrect": {"mean": 0.30, "std": 0.15}
+            },
+            "supermemo": {
+                "correct": {"mean": 0.80, "std": 0.15},
+                "incorrect": {"mean": 0.40, "std": 0.15}
+            },
+            "pronunciation": {
+                "correct": {"mean": 0.70, "std": 0.15},
+                "incorrect": {"mean": 0.30, "std": 0.15}
+            }
+        }
+        print("[Confidence] Initialized default distribution parameters")
     
     def add_validation_point(self, model_name, score, was_correct):
         """
@@ -97,18 +134,37 @@ class BayesianConfidenceSystem:
             print(f"[Confidence] Error saving validation data: {e}")
     
     def _fit_distributions(self):
-        """Fit Gaussian distributions to validation data"""
+        """Fit Gaussian distributions to validation data with safety limits"""
         for model, data in self.validation_data.items():
             for category in ["correct", "incorrect"]:
                 values = data[category]
-                if len(values) >= 5:  # Need minimum sample size
+                if len(values) >= 3:  # Need minimum sample size
                     mean = np.mean(values)
-                    std = max(0.05, np.std(values))  # Ensure minimum std
+                    std = np.std(values)
+                    
+                    # Safety limits to prevent distributions that are too narrow
+                    std = max(0.10, std)  # Minimum std dev of 0.10
+                    
+                    # Ensure the distributions are reasonably separated
+                    if category == "correct":
+                        mean = max(0.55, mean)  # "Correct" mean should be at least 0.55
+                    else:
+                        mean = min(0.45, mean)  # "Incorrect" mean should be at most 0.45
+                    
                     self.distributions[model][category] = {
                         "mean": mean,
                         "std": std
                     }
                     print(f"[Confidence] Updated {model} {category} distribution: mean={mean:.2f}, std={std:.2f}")
+                else:
+                    # Use default values for insufficient data
+                    default_mean = 0.75 if category == "correct" else 0.35
+                    default_std = 0.15
+                    self.distributions[model][category] = {
+                        "mean": default_mean,
+                        "std": default_std
+                    }
+                    print(f"[Confidence] Using default {model} {category} distribution: mean={default_mean:.2f}, std={default_std:.2f}")
     
     def calculate_likelihood(self, model, score, for_correct=True):
         """
@@ -142,49 +198,60 @@ class BayesianConfidenceSystem:
     
     def calculate_system_confidence(self, model_scores, prior=0.5):
         """
-        Calculate overall system confidence using Bayesian fusion
-        
-        Args:
-            model_scores: Dict with keys as model names and values as scores
-            prior: Prior probability of correct prediction (default 0.5)
-        
-        Returns:
-            System confidence score (0-1)
+        Calculate overall system confidence using improved Bayesian fusion
+        to prevent extreme posterior values.
         """
-        # Calculate likelihood products
-        likelihood_correct = 1.0
-        likelihood_incorrect = 1.0
+        # Use log space for calculations to prevent underflow
+        log_likelihood_correct = 0.0
+        log_likelihood_incorrect = 0.0
         
-        # Track individual model likelihoods for reporting
-        model_likelihoods = {}
-        
+        print("[Confidence] Calculating Bayesian fusion with these scores:")
         for model, score in model_scores.items():
             if model in self.distributions:
+                # Calculate likelihoods with smoothing
                 l_correct = self.calculate_likelihood(model, score, True)
                 l_incorrect = self.calculate_likelihood(model, score, False)
                 
-                likelihood_correct *= l_correct
-                likelihood_incorrect *= l_incorrect
+                # Add smoothing to prevent extreme values
+                l_correct = 0.05 + 0.90 * l_correct  # Min 0.05, Max 0.95
+                l_incorrect = 0.05 + 0.90 * l_incorrect
                 
-                model_likelihoods[model] = {
-                    "score": score,
-                    "l_correct": l_correct,
-                    "l_incorrect": l_incorrect
-                }
+                # Normalize to ensure they sum to 1.0
+                total = l_correct + l_incorrect
+                l_correct /= total
+                l_incorrect /= total
+                
+                # Convert to log space
+                log_likelihood_correct += np.log(l_correct)
+                log_likelihood_incorrect += np.log(l_incorrect)
+                
+                print(f"  - {model}: score={score:.2f}, l_correct={l_correct:.4f}, l_incorrect={l_incorrect:.4f}")
+        
+        # Convert back from log space
+        likelihood_correct = np.exp(log_likelihood_correct)
+        likelihood_incorrect = np.exp(log_likelihood_incorrect)
+        
+        # Normalize (this prevents extreme values)
+        total_likelihood = likelihood_correct + likelihood_incorrect
+        likelihood_correct /= total_likelihood
+        likelihood_incorrect /= total_likelihood
+        
+        print(f"[Confidence] Normalized likelihoods - correct: {likelihood_correct:.4f}, incorrect: {likelihood_incorrect:.4f}")
         
         # Apply Bayes' rule
-        evidence = (likelihood_correct * prior) + (likelihood_incorrect * (1 - prior))
+        posterior = (likelihood_correct * prior) / (likelihood_correct * prior + likelihood_incorrect * (1 - prior))
         
-        if evidence > 0:
-            posterior = (likelihood_correct * prior) / evidence
-        else:
-            posterior = prior  # Fallback to prior if evidence is zero
+        # Safety check - this will rarely be triggered now
+        if posterior < 0.05 or posterior > 0.95:
+            print(f"[Confidence] Moderating extreme confidence value {posterior:.4f}")
+            # Moderate extreme values rather than fallback
+            posterior = 0.05 + 0.90 * posterior
+            
+        print(f"[Confidence] Final posterior: {posterior:.4f}")
         
         # Prepare result
         result = {
             "system_confidence": posterior,
-            "model_likelihoods": model_likelihoods,
-            "prior": prior,
             "timestamp": str(datetime.now())
         }
         
@@ -311,10 +378,8 @@ if __name__ == "__main__":
     for model, data in result["model_likelihoods"].items():
         print(f"  {model}: score={data['score']:.2f}, l_correct={data['l_correct']:.2f}, l_incorrect={data['l_incorrect']:.2f}")
 
-def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronunciation_score=None):
-    """
-    Calculate a weighted system-wide confidence score based on component models
-    """
+def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronunciation_score=None, user_id=None):
+    """Calculate a weighted system-wide confidence score based on component models"""
     try:
         # Debug initial input values
         print(f"[DEBUG] Raw confidence inputs - BKT: {bkt_score}, LSTM: {lstm_score}, SuperMemo: {supermemo_score}")
@@ -323,93 +388,90 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
         bkt_score = 0.5 if bkt_score is None else float(bkt_score)
         lstm_score = 0.5 if lstm_score is None else float(lstm_score)
         
-        # Print debug info for bad values
-        if lstm_score < 0.3:
-            print(f"[Confidence] Warning: Very low LSTM score received: {lstm_score}")
-        
-        # Normalize inputs to valid confidence values (ensure minimum of 0.1)
+        # Normalize inputs to valid confidence values
         scores = {
             "bkt": min(0.95, max(0.1, bkt_score)),
             "lstm": min(0.95, max(0.1, lstm_score)),
         }
         
-        # Check if user has completed any daily reviews before using SuperMemo data
+        # Check if supermemo score should be included
         if supermemo_score is not None:
-            # Import here to avoid circular imports
-            from supermemo_engine import has_completed_reviews
-            
-            # Get user_id from context (assuming it's passed through levels.py)
-            user_id = None
-            import inspect
-            frame = inspect.currentframe()
-            while frame:
-                if 'user_id' in frame.f_locals:
-                    user_id = frame.f_locals['user_id']
-                    break
-                frame = frame.f_back
-            
-            # Only use SuperMemo if user has completed reviews
-            if user_id and has_completed_reviews(user_id):
-                try:
-                    scores["supermemo"] = min(0.95, max(0.1, float(supermemo_score)))
-                except (TypeError, ValueError):
-                    print(f"[Confidence] Warning: Invalid supermemo_score: {supermemo_score}")
-            else:
-                print("[Confidence] SuperMemo confidence excluded - user has not completed any daily reviews")
-        
-        if pronunciation_score is not None:
             try:
-                scores["pronunciation"] = min(0.95, max(0.1, float(pronunciation_score)))
-            except (TypeError, ValueError):
-                print(f"[Confidence] Warning: Invalid pronunciation_score: {pronunciation_score}")
+                # IMPORTANT: Import has_completed_reviews from supermemo_engine
+                from supermemo_engine import has_completed_reviews
                 
-        # Define model weights (adjust based on importance)
-        weights = {
-            "bkt": 0.4,
-            "lstm": 0.3,
-            "supermemo": 0.3,
-            "pronunciation": 0.2,
-        }
+                # Check if the user actually has any SuperMemo history with repetitions
+                has_supermemo_data = False
+                
+                if user_id is not None:
+                    try:
+                        from supermemo_engine import connect_to_mongoDB
+                        usercol = connect_to_mongoDB()
+                        user = usercol.find_one({"user_id": int(user_id)})
+                        
+                        if user and "supermemo" in user:
+                            # Check if supermemo has any actual review history where repetition > 0
+                            supermemo_data = user["supermemo"]
+                            
+                            # Count items that have actually been reviewed (not just scheduled)
+                            reviewed_items = 0
+                            
+                            # Check for items with repetition > 0 in needs_practice
+                            if "needs_practice" in supermemo_data:
+                                for vocab_data in supermemo_data["needs_practice"].values():
+                                    if isinstance(vocab_data, dict) and vocab_data.get("repetition", 0) > 0:
+                                        reviewed_items += 1
+                            
+                            # Check for items with repetition > 0 in mastered
+                            if "mastered" in supermemo_data:
+                                for vocab_data in supermemo_data["mastered"].values():
+                                    if isinstance(vocab_data, dict) and vocab_data.get("repetition", 0) > 0:
+                                        reviewed_items += 1
+                            
+                            has_supermemo_data = reviewed_items > 0
+                            print(f"[SuperMemo] Found {reviewed_items} items with review history")
+                    except Exception as e:
+                        print(f"[Confidence] Error checking SuperMemo data: {e}")
+                
+                # Only include SuperMemo if the user has completed reviews
+                if user_id is not None and (has_completed_reviews(user_id) or has_supermemo_data):
+                    scores["supermemo"] = min(0.95, max(0.1, float(supermemo_score)))
+                    print(f"[SuperMemo] Using confidence score: {scores['supermemo']:.2f}")
+                else:
+                    # IMPORTANT CHANGE: Do NOT include SuperMemo score for new users at all
+                    print("[SuperMemo] Not available - user hasn't completed any daily reviews yet")
+            except Exception as e:
+                print(f"[Confidence] Error checking SuperMemo eligibility: {e}")
         
-        # Calculate weighted confidence score
-        total_weight = 0
-        weighted_sum = 0
+        # Add pronunciation score if available
+        if pronunciation_score is not None:
+            scores["pronunciation"] = min(0.95, max(0.1, float(pronunciation_score)))
         
-        for model, score in scores.items():
-            if model in weights:
-                weighted_sum += score * weights[model]
-                total_weight += weights[model]
+        # Calculate final confidence using Bayesian fusion
+        confidence_system = BayesianConfidenceSystem()
+        result = confidence_system.calculate_system_confidence(scores)
+        final_confidence = result["system_confidence"]
+        interpretation = interpret_confidence(final_confidence)
         
-        # Calculate final confidence with safety bounds
-        if total_weight > 0:
-            confidence = weighted_sum / total_weight
-            # Never allow 100% confidence - more data should be better but never perfect
-            confidence = min(0.95, max(0.3, confidence))
-        else:
-            confidence = 0.5  # Default moderate confidence
-        
-        # Generate interpretation
-        interpretation = interpret_confidence(confidence)
-        
-        # Debug output - add more info
+        # Print formatted output
         print(f"\n{'='*70}")
         print(f"SYSTEM-WIDE CONFIDENCE ASSESSMENT")
         print(f"{'='*70}")
         
-        # Only print components that exist in scores dictionary
+        # Print included component scores
         for model, score in scores.items():
             print(f"{model.upper()} Confidence:    {score:.2f}")
         
-        # Print info about missing components for new users
-        if "supermemo" not in scores:
+        # Print explicit note if SuperMemo is not included
+        if supermemo_score is not None and "supermemo" not in scores:
             print("SUPERMEMO: Not available - user hasn't completed any daily reviews yet")
             
-        print(f"Overall System Confidence: {confidence:.2f}")
+        print(f"Overall System Confidence: {final_confidence:.2f}")
         print(f"Interpretation: {interpretation}")
         print(f"{'='*70}")
         
         return {
-            "system_confidence": confidence,
+            "system_confidence": final_confidence,
             "interpretation": interpretation,
             "components": scores
         }

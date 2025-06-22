@@ -5,6 +5,7 @@ import time
 import json
 import sys
 from reviewScore import lesson_score
+import numpy as np
 import asyncio
 from supermemo_engine import has_review_questions, update_supermemo_state, connect_to_mongoDB
 import threading
@@ -19,6 +20,19 @@ incorrect_answers = {}
 grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for numpy data types"""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif hasattr(obj, '__dict__'):
+            return {k: self.default(v) for k, v in obj.__dict__.items()}
+        return super(NumpyEncoder, self).default(obj)
 
 correctDlg = ft.AlertDialog(
     content=ft.Column(
@@ -35,35 +49,43 @@ correctDlg = ft.AlertDialog(
 )
 
 def batch_update_supermemo(user_id, correct_answers, incorrect_answers):
-    usercol = connect_to_mongoDB()
-    user = usercol.find_one({"user_id": user_id})
-    if not user or "supermemo" not in user:
-        print(f"[DEBUG] No supermemo data for user {user_id}")
-        return
-
-    supermemo = user["supermemo"]
-    # Update correct answers
+    """Process SuperMemo updates for all vocabulary items in a batch"""
+    print(f"[SuperMemo] Processing {len(correct_answers)} correct and {len(incorrect_answers)} incorrect answers")
+    
+    # Convert review results to the vocabulary:quality format needed by mark_vocabulary_batch_reviewed
+    vocab_quality_map = {}
+    
+    # Process correct answers with quality=5 (perfect recall)
     for q in correct_answers.values():
-        vocab = q.vocabulary
-        for group in ["needs_practice", "mastered"]:
-            if vocab in supermemo.get(group, {}):
-                state = supermemo[group][vocab]
-                new_state = update_supermemo_state(state, 5)  # 5 = correct
-                supermemo[group][vocab] = new_state
-                usercol.update_one({"user_id": user_id}, {"$set": {f"supermemo.{group}.{vocab}": new_state}})
-                print(f"[DEBUG] Batch updated SuperMemo for {vocab} (correct) in {group}: {new_state}")
-                break
-    # Update incorrect answers
+        vocab = getattr(q, 'vocabulary', None)
+        if vocab:
+            vocab = vocab.lower().strip()
+            vocab_quality_map[vocab] = 5
+            print(f"[SuperMemo] Adding correct vocab: '{vocab}' with quality 5")
+    
+    # Process incorrect answers with quality=2 (difficult recall)
     for q in incorrect_answers.values():
-        vocab = q.vocabulary
-        for group in ["needs_practice", "mastered"]:
-            if vocab in supermemo.get(group, {}):
-                state = supermemo[group][vocab]
-                new_state = update_supermemo_state(state, 2)  # 2 = incorrect
-                supermemo[group][vocab] = new_state
-                usercol.update_one({"user_id": user_id}, {"$set": {f"supermemo.{group}.{vocab}": new_state}})
-                print(f"[DEBUG] Batch updated SuperMemo for {vocab} (incorrect) in {group}: {new_state}")
-                break
+        vocab = getattr(q, 'vocabulary', None)
+        if vocab:
+            vocab = vocab.lower().strip()
+            vocab_quality_map[vocab] = 2
+            print(f"[SuperMemo] Adding incorrect vocab: '{vocab}' with quality 2")
+    
+    # Print summary before processing
+    print(f"[SuperMemo] Total vocabulary items to update: {len(vocab_quality_map)}")
+    for vocab, quality in vocab_quality_map.items():
+        print(f"[SuperMemo] Will update: '{vocab}' with quality {quality}")
+    
+    # Import from supermemo_engine to use the comprehensive function
+    try:
+        from supermemo_engine import mark_vocabulary_batch_reviewed
+        result = mark_vocabulary_batch_reviewed(user_id, vocab_quality_map)
+        if not result:
+            print("[SuperMemo] Error updating vocabulary batch")
+    except Exception as e:
+        print(f"[SuperMemo] Error in batch update: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def generate_consistent_key(question_data):
     """Generate a consistent key for tracking questions"""
@@ -110,6 +132,73 @@ class AttrDict(dict):
     def __setattr__(self, key, value):
         self[key] = value
 
+def process_answer(page, question_data, user_answer, correct_answer):
+    """
+    Process an answer, tracking it in both local and session variables.
+    Returns True if answer was correct, False otherwise.
+    """
+    # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
+    vocab_key = getattr(question_data, 'vocabulary', None)
+    if not vocab_key:
+        vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
+    
+    # Generate a consistent question key for session tracking
+    unique_key = f"{getattr(question_data, 'question', '')}__{getattr(question_data, 'type', '')}"
+    
+    print(f"Using vocabulary key: '{vocab_key}' for tracking question")
+    
+    # Check answer and store result using the vocab key
+    if user_answer == correct_answer:
+        print(f"Correct answer for '{vocab_key}'!")
+        correctDlg.content.controls[0].content = ft.Icon(
+            name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+            color="green", 
+            size=60
+        )
+        correctDlg.content.controls[1].content = ft.Text(
+            "Correct",
+            color="black",
+            size=20,
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER
+        )
+        correct_answers[vocab_key] = question_data
+        
+        # Store keys in session for BKT processing
+        correct_keys = page.session.get("review_correct_keys")
+        if correct_keys is None:
+            correct_keys = []
+        if unique_key not in correct_keys:
+            correct_keys.append(unique_key)
+            page.session.set("review_correct_keys", correct_keys)
+        
+        return True
+    else:
+        print(f"Incorrect answer for '{vocab_key}'.")
+        correctDlg.content.controls[0].content = ft.Icon(
+            name=ft.icons.CLOSE,
+            color="red",
+            size=60
+        )
+        correctDlg.content.controls[1].content = ft.Text(
+            "Incorrect", 
+            color="black",
+            size=20, 
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER
+        )
+        incorrect_answers[vocab_key] = question_data
+        
+        # Store keys in session for BKT processing
+        incorrect_keys = page.session.get("review_incorrect_keys")
+        if incorrect_keys is None:
+            incorrect_keys = []
+        if unique_key not in incorrect_keys:
+            incorrect_keys.append(unique_key)
+            page.session.set("review_incorrect_keys", incorrect_keys)
+        
+        return False
+
 correctDlg = ft.AlertDialog(
     content=ft.Column(
         [
@@ -124,12 +213,71 @@ correctDlg = ft.AlertDialog(
     bgcolor="#F5F5F5"
 )
 
+def get_session_review_questions(user_id=None):
+    try:
+        # Fix for "module 'flet' has no attribute 'page'"
+        # Don't try to access flet.page directly
+        import flet as ft
+        
+        # Use a try-except block to handle the case where page is not accessible
+        try:
+            # Only use page if it's available in the current context
+            page = ft.get_current_page() if hasattr(ft, 'get_current_page') else None
+            
+            if page and page.session:
+                review_questions = page.session.get("review_questions", [])
+                if review_questions:
+                    print(f"[Review] Found {len(review_questions)} in session")
+                    return review_questions
+        except AttributeError:
+            print("[Review] Could not access page attribute - running in non-UI context")
+        except Exception as e:
+            print(f"[Review] Error getting session questions: {e}")
+        
+        # Fall back to cached questions if needed
+        try:
+            import json
+            with open("temp_review_questions.json", "r") as f:
+                review_questions = json.load(f)
+                print(f"[Review] Loaded {len(review_questions)} from temp file")
+                return review_questions
+        except Exception:
+            return []
+    except Exception as e:
+        print(f"[Review] Error in get_session_review_questions: {e}")
+        return []
+
 def get_review_questions(page):
+    """Get review questions for the user."""
+    # Get questions from session
     review_questions = page.session.get("daily_review_questions")
+    
     if not review_questions:
         print("No review questions found in session.")
         return []
-    return [AttrDict(q) for q in review_questions]
+    
+    # Log raw question data first with difficulty value
+    for i, q in enumerate(review_questions):
+        difficulty = q.get("difficulty", "N/A") if isinstance(q, dict) else getattr(q, "difficulty", "N/A")
+        q_type = q.get("type", "Unknown") if isinstance(q, dict) else getattr(q, "type", "Unknown")
+        vocab = q.get("vocabulary", "Unknown") if isinstance(q, dict) else getattr(q, "vocabulary", "Unknown")
+        print(f"[DEBUG] Review Q{i+1}: {q_type} - {vocab} (Difficulty: {difficulty})")
+    
+    print(f"[DEBUG] About to render first question of {len(review_questions)}")
+    
+    converted_questions = []
+    for q in review_questions:
+        # If already an object with attributes, use it
+        if not isinstance(q, dict):
+            converted_questions.append(q)
+            continue
+            
+        # Create AttrDict from dictionary, preserving all fields including difficulty
+        question = AttrDict(q)
+        converted_questions.append(question)
+    
+    # Return the properly converted questions
+    return converted_questions
 
 def build_imgpicker_question(page, question_data, progress_value, on_next, on_back, current_question_index):
     start_time = time.time()
@@ -237,44 +385,8 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
         user_answer = question_data.choices[selected_option["value"]]
         question_data.answer = user_answer
         
-        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
-        vocab_key = getattr(question_data, 'vocabulary', None)
-        if not vocab_key:
-            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
-            
-        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
-        
-        # Check answer and store result using the vocab key
-        if user_answer == correct_answer:
-            print(f"Correct answer for '{vocab_key}'!")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green", 
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Correct",
-                color="black",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            correct_answers[vocab_key] = question_data
-        else:
-            print(f"Incorrect answer for '{vocab_key}'.")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CLOSE,
-                color="red",
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect", 
-                color="black",
-                size=20, 
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            incorrect_answers[vocab_key] = question_data
+        # Use the central process_answer function
+        process_answer(page, question_data, user_answer, correct_answer)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -468,44 +580,8 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
         user_answer = question_data.choices[selected_option["value"]]
         question_data.answer = user_answer
         
-        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
-        vocab_key = getattr(question_data, 'vocabulary', None)
-        if not vocab_key:
-            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
-            
-        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
-        
-        # Check answer and store result using the vocab key
-        if user_answer == correct_answer:
-            print(f"Correct answer for '{vocab_key}'!")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green", 
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Correct",
-                color="black",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            correct_answers[vocab_key] = question_data
-        else:
-            print(f"Incorrect answer for '{vocab_key}'.")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CLOSE,
-                color="red",
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect", 
-                color="black",
-                size=20, 
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            incorrect_answers[vocab_key] = question_data
+        # Use the central process_answer function
+        process_answer(page, question_data, user_answer, correct_answer)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -684,44 +760,8 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back):
         user_answer = question_data.choices[selected_option["value"]]
         question_data.answer = user_answer
         
-        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
-        vocab_key = getattr(question_data, 'vocabulary', None)
-        if not vocab_key:
-            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
-            
-        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
-        
-        # Check answer and store result using the vocab key
-        if user_answer == correct_answer:
-            print(f"Correct answer for '{vocab_key}'!")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green", 
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Correct",
-                color="black",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            correct_answers[vocab_key] = question_data
-        else:
-            print(f"Incorrect answer for '{vocab_key}'.")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CLOSE,
-                color="red",
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect", 
-                color="black",
-                size=20, 
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            incorrect_answers[vocab_key] = question_data
+        # Use the central process_answer function
+        process_answer(page, question_data, user_answer, correct_answer)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -916,44 +956,8 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
         user_answer = question_data.choices[selected_option["value"]]
         question_data.answer = user_answer
         
-        # SIMPLE KEY APPROACH: Just use the vocabulary word (always unique)
-        vocab_key = getattr(question_data, 'vocabulary', None)
-        if not vocab_key:
-            vocab_key = getattr(question_data, 'word_to_translate', f"question_{question_data.id}")
-            
-        print(f"Using vocabulary key: '{vocab_key}' for tracking question")
-        
-        # Check answer and store result using the vocab key
-        if user_answer == correct_answer:
-            print(f"Correct answer for '{vocab_key}'!")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                color="green", 
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Correct",
-                color="black",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            correct_answers[vocab_key] = question_data
-        else:
-            print(f"Incorrect answer for '{vocab_key}'.")
-            correctDlg.content.controls[0].content = ft.Icon(
-                name=ft.icons.CLOSE,
-                color="red",
-                size=60
-            )
-            correctDlg.content.controls[1].content = ft.Text(
-                "Incorrect", 
-                color="black",
-                size=20, 
-                weight=ft.FontWeight.BOLD,
-                text_align=ft.TextAlign.CENTER
-            )
-            incorrect_answers[vocab_key] = question_data
+        # Use the central process_answer function
+        process_answer(page, question_data, user_answer, correct_answer)
 
         page.open(correctDlg)
         await asyncio.sleep(1.5)
@@ -1722,7 +1726,14 @@ def review_session(page, image_urls: list):
             print("[DEBUG] Starting to render question")
             page.views.clear()  # Optional: clear previous view
             question = questions[current_question_index["value"]]
-            print(f"[DEBUG] Rendering question {current_question_index['value'] + 1}: {question.type} - {question.vocabulary}")
+            
+            # Get difficulty value for improved logging
+            difficulty = getattr(question, "difficulty", "N/A")
+            q_type = getattr(question, "type", "Unknown")
+            vocab = getattr(question, "vocabulary", "Unknown")
+            
+            # Enhanced logging with difficulty information
+            print(f"[DEBUG] Rendering question {current_question_index['value'] + 1}: {q_type} - {vocab} (Difficulty: {difficulty})")
             
             content = render_question_layout(
                 page = page,
@@ -1787,7 +1798,7 @@ def review_session(page, image_urls: list):
             
             # Get raw question data - base all calculations on this
             raw_questions = page.session.get("daily_review_questions") 
-            if not raw_questions:
+            if raw_questions is None:
                 raw_questions = questions
             
             print(f"Actual questions in session: {len(raw_questions)}")
@@ -1840,10 +1851,89 @@ def review_session(page, image_urls: list):
     print(f"[DEBUG] About to render first question of {total_questions}")
     render_current_question(progress_value)  # This should now be called
 
+def prepare_temp_files_for_review(page, user_id):
+    """Create necessary temp files needed by prediction algorithms."""
+    print("[Review] Preparing temp files for prediction algorithms")
+    
+    # Get user data
+    try:
+        # Import required modules
+        import pymongo
+        import json
+        
+        uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+        arami = pymongo.MongoClient(uri)["arami"]
+        usercol = arami["users"]
+        user_doc = usercol.find_one({"user_id": int(user_id)})
+        
+        # Cache library
+        if "library" in user_doc:
+            with open("temp_library.json", "w") as f:
+                json.dump(user_doc["library"], f)
+            print(f"[Review] Cached library with {len(user_doc['library'])} items")
+        
+        # Extract daily review questions and answers from session
+        daily_review_questions = page.session.get("daily_review_questions")
+        if daily_review_questions is None:
+            daily_review_questions = []
+        
+        # Get correct answers from session
+        correct_answers = {}
+        incorrect_answers = {}
+        
+        # Extract vocabulary and correctness from daily review questions
+        for q in daily_review_questions:
+            if isinstance(q, dict):
+                vocab = q.get("vocabulary", "").lower()
+                # Extract question unique key
+                unique_id = f"{q.get('question', '')}__{q.get('type', '')}"
+                
+                # Check if this question is in correct_answers
+                correct_keys = page.session.get("review_correct_keys")
+                if correct_keys is None:
+                    correct_keys = []
+                    
+                incorrect_keys = page.session.get("review_incorrect_keys")
+                if incorrect_keys is None:
+                    incorrect_keys = []
+                
+                if unique_id in correct_keys:
+                    correct_answers[unique_id] = q
+                elif unique_id in incorrect_keys:
+                    incorrect_answers[unique_id] = q
+        
+        # Store in session
+        page.session.set("review_correct_answers", correct_answers)
+        page.session.set("review_incorrect_answers", incorrect_answers)
+        print(f"[Review] Cached {len(correct_answers)} correct and {len(incorrect_answers)} incorrect answers for BKT")
+        
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to prepare temp files: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def daily_review_page(page: ft.Page, image_urls):
     """Main entry point for daily review"""
     page.title = "Arami - Daily Review"
     
+        # Cache modules to temp file before daily review
+    modules = page.session.get("modules") 
+    if modules:
+        try:
+            import json
+            def safe_serialize(obj):
+                if hasattr(obj, '__dict__'):
+                    return obj.__dict__
+                return str(obj)
+            
+            with open("temp_modules.json", "w") as f:
+                json.dump([m.__dict__ if hasattr(m, '__dict__') else m for m in modules], f, default=safe_serialize)
+                print(f"[DEBUG] Cached {len(modules)} modules before review")
+        except Exception as e:
+            print(f"[ERROR] Failed to cache modules: {str(e)}")
+
     # Get review questions directly from session or prepare them
     # FIX: Use try/except instead of 'in' operator
     try:

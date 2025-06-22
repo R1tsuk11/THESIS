@@ -21,42 +21,40 @@ def connect_to_mongoDB():
         sys.exit("Terminating the program due to MongoDB connection failure.")
 
 def has_completed_reviews(user_id):
-    """
-    Check if the user has completed at least one daily review
-    
-    Args:
-        user_id: The user ID to check
-        
-    Returns:
-        bool: True if user has completed at least one review, False otherwise
-    """
+    """Check if user has completed any daily reviews."""
     try:
-        # Connect to MongoDB
-        arami = pymongo.MongoClient(uri)["arami"]
-        users_col = arami["users"]
-        
-        # Get user document
-        user_data = users_col.find_one({"user_id": int(user_id)})
-        
-        if not user_data:
+        # Handle None user_id gracefully
+        if user_id is None:
+            print("[SuperMemo] User ID is None, can't check review completion")
             return False
             
-        # Check for reviews_completed counter
-        if "reviews_completed" in user_data and user_data["reviews_completed"] > 0:
-            return True
+        # Convert to int safely - handle string or numeric inputs
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            print(f"[SuperMemo] Invalid user_id format: {user_id}")
+            return False
             
-        # Check for vocabulary items with review data
-        if "library" in user_data:
-            for vocab in user_data["library"]:
-                if isinstance(vocab, dict) and "last_review" in vocab:
-                    # If any vocabulary has been reviewed, return True
-                    return True
+        uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+        arami = pymongo.MongoClient(uri)["arami"]
+        usercol = arami["users"]
         
-        return False
+        user = usercol.find_one({"user_id": user_id})
+        if not user:
+            print(f"[SuperMemo] User {user_id} not found")
+            return False
+            
+        reviews_completed = user.get("reviews_completed", 0)
+        
+        # Debug output to trace what's happening
+        print(f"[SuperMemo] User {user_id} has completed {reviews_completed} reviews - Using confidence: {reviews_completed > 0}")
+        
+        # Explicitly return comparison result
+        return reviews_completed > 0
+        
     except Exception as e:
-        print(f"[SuperMemo] Error checking review completion: {e}")
+        print(f"[SuperMemo] Error checking review completion status: {e}")
         return False
-
 def process_review_items_in_background(user_id, vocab_list, quality_scores):
     """
     Process a batch of review items in a background thread
@@ -562,7 +560,8 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
 
 def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
     """Prepare daily review with improved selection algorithm"""
-    print(f"[DEBUG] Preparing daily review for user: {user_id}")
+    # Reset any outdated review dates first
+    reset_outdated_review_dates()
     
     # Get user data
     usercol = connect_to_mongoDB()
@@ -676,6 +675,101 @@ def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
     print(f"[DEBUG] {len(unselected_due)} due items couldn't be included today")
     
     return review_questions
+
+def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
+    """
+    Process multiple vocabulary items in a single database operation
+    
+    Args:
+        user_id: User ID
+        vocab_quality_map: Dictionary mapping vocabulary words to quality scores
+    """
+    if not vocab_quality_map:
+        return
+        
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
+        
+        if not user:
+            print(f"[ERROR] User {user_id} not found in database")
+            return False
+            
+        # Get review history and SuperMemo data
+        review_history = user.get("review_history", {})
+        supermemo_data = user.get("supermemo", {})
+        
+        # Prepare updates
+        today = datetime.now().date()
+        updates = {}
+        
+        # Track schedule changes for better visibility
+        schedule_changes = []
+        
+        # Process each vocabulary
+        for vocab, quality in vocab_quality_map.items():
+            vocab = normalize_vocab(vocab)
+            
+            # Update review history
+            if vocab not in review_history:
+                review_history[vocab] = {}
+                
+            review_history[vocab]["last_reviewed"] = str(today)
+            review_history[vocab]["last_quality"] = quality
+            review_history[vocab]["times_skipped"] = 0
+            
+            # Update SuperMemo state
+            if vocab in supermemo_data.get("needs_practice", {}):
+                state = supermemo_data["needs_practice"][vocab]
+                old_next_review = state.get("next_review", "unknown")
+                state = update_supermemo_state(state, quality)
+                updates[f"supermemo.needs_practice.{vocab}"] = state
+                
+                # Track schedule change
+                schedule_changes.append({
+                    "vocab": vocab,
+                    "old_next_review": old_next_review,
+                    "new_next_review": state["next_review"],
+                    "interval": state["interval"]
+                })
+                
+            elif vocab in supermemo_data.get("mastered", {}):
+                state = supermemo_data["mastered"][vocab]
+                old_next_review = state.get("next_review", "unknown")
+                state = update_supermemo_state(state, quality)
+                updates[f"supermemo.mastered.{vocab}"] = state
+                
+                # Track schedule change
+                schedule_changes.append({
+                    "vocab": vocab,
+                    "old_next_review": old_next_review,
+                    "new_next_review": state["next_review"],
+                    "interval": state["interval"]
+                })
+        
+        # Add review history to updates
+        updates["review_history"] = review_history
+        
+        # Apply all updates at once
+        usercol.update_one(
+            {"user_id": user_id},
+            {"$set": updates}
+        )
+        
+        print("\n=== SUPERMEMO SCHEDULE SUMMARY ===")
+        for vocab, state in supermemo_data.get("needs_practice", {}).items():
+            if "next_review" in state:
+                print(f"  • {vocab}: Next review on {state['next_review']} (interval: {state.get('interval', 0)} days)")
+        for vocab, state in supermemo_data.get("mastered", {}).items():
+            if "next_review" in state:
+                print(f"  • {vocab}: Next review on {state['next_review']} (interval: {state.get('interval', 0)} days)")
+        print("===================================\n")
+        
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Error in batch update: {str(e)}")
+        return False
 
 def mark_vocabulary_reviewed(user_id, vocab, performance_quality):
     """
@@ -884,19 +978,24 @@ def update_supermemo_state(state, quality):
     if efactor < 1.3:
         efactor = 1.3
         
-    # NEW: Cap interval at 7 days (1 week)
-    MAX_INTERVAL = 7  # 1 week maximum
+    # Cap interval at 7 days (1 week) - per existing code
+    MAX_INTERVAL = 7
     if interval > MAX_INTERVAL:
         print(f"[SuperMemo] Capping interval from {interval} to {MAX_INTERVAL} days")
         interval = MAX_INTERVAL
 
     today = datetime.now().date()
+    next_review_date = today + timedelta(days=interval)
+    
+    # Schedule display for better visibility
+    print(f"[SuperMemo] Scheduling next review for {next_review_date} (interval: {interval} days)")
+    
     state.update({
         "interval": interval,
         "repetition": repetition,
         "efactor": efactor,
         "last_review": str(today),
-        "next_review": str(today + timedelta(days=interval))
+        "next_review": str(next_review_date)
     })
     return state
 
@@ -1159,4 +1258,57 @@ def get_completion_rate(user_id):
         
     except Exception as e:
         print(f"[SuperMemo] Error getting completion rate: {e}")
+        return 0
+    
+def reset_outdated_review_dates():
+    """Reset outdated review dates to today for items that have passed their review date"""
+    try:
+        # Connect to database
+        usercol = connect_to_mongoDB()
+        today = datetime.now().date()
+        today_str = str(today)
+        
+        # Get all users
+        users = usercol.find({})
+        updates_made = 0
+        
+        for user in users:
+            user_id = user.get("user_id")
+            if not user_id or "supermemo" not in user:
+                continue
+                
+            supermemo_data = user["supermemo"]
+            needs_update = False
+            update_ops = {}
+            updated_vocab_count = 0
+            
+            # Check needs_practice items
+            for vocab, state in supermemo_data.get("needs_practice", {}).items():
+                next_review = state.get("next_review")
+                if next_review and next_review < today_str:
+                    state["next_review"] = today_str
+                    update_ops[f"supermemo.needs_practice.{vocab}.next_review"] = today_str
+                    needs_update = True
+                    updated_vocab_count += 1
+            
+            # Check mastered items
+            for vocab, state in supermemo_data.get("mastered", {}).items():
+                next_review = state.get("next_review")
+                if next_review and next_review < today_str:
+                    state["next_review"] = today_str
+                    update_ops[f"supermemo.mastered.{vocab}.next_review"] = today_str
+                    needs_update = True
+                    updated_vocab_count += 1
+            
+            # Update database if needed
+            if needs_update:
+                usercol.update_one({"user_id": user_id}, {"$set": update_ops})
+                updates_made += 1
+                print(f"[SuperMemo] Reset outdated review dates for user {user_id} ({updated_vocab_count} items)")
+        
+        print(f"[SuperMemo] Updated {updates_made} users with outdated review dates")
+        return updates_made
+        
+    except Exception as e:
+        print(f"[SuperMemo] Error resetting review dates: {e}")
         return 0

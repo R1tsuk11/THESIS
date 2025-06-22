@@ -10,6 +10,7 @@ import time
 import threading
 from supermemo_engine import mark_vocabulary_reviewed
 from achievements_manager import check_and_unlock_achievements
+import numpy as np
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -23,6 +24,36 @@ usage_time_seconds = 0
 idle_seconds = 0
 last_save_time = 0
 session_start_time = None
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for numpy data types"""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif hasattr(obj, '__dict__'):
+            return {k: self.default(v) for k, v in obj.__dict__.items()}
+        return super(NumpyEncoder, self).default(obj)
+
+def get_session_library(user_id=None):
+    """Get vocabulary library from session or temp file."""
+    try:
+        # First try temp_library.json
+        if os.path.exists("temp_library.json"):
+            with open("temp_library.json", "r") as f:
+                return json.load(f)
+        
+        # Otherwise look in the database
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": int(user_id)})
+        if user and "library" in user:
+            return user["library"]
+    except Exception as e:
+        print(f"[ERROR] Failed to get session library: {e}")
+    return []
 
 def sync_user_progress(page, user_id):
     """Synchronize user progress data between session, objects, and database"""
@@ -462,7 +493,7 @@ def update_last_login_date(user):
 def on_daily_review_complete(e, page, user):
     """Handle completion of daily review - simplified version without streaks"""
     # Get user_id from context or page
-    user_id = page.session.get("user_id") if page else None
+    user_id = user.user_id if user else page.session.get("user_id")
     
     if not user_id:
         print("[ERROR] Cannot update proficiency - missing user_id")
@@ -470,21 +501,23 @@ def on_daily_review_complete(e, page, user):
     
     try:
         # Connect to MongoDB
+        import pymongo
+        uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
         arami = pymongo.MongoClient(uri)["arami"]
         users_col = arami["users"]
         
-        # Get current user data
+        # Get current user data - FORCE integer conversion
         user_data = users_col.find_one({"user_id": int(user_id)})
         if not user_data:
             print(f"[ERROR] User {user_id} not found")
             return
         
+        # Get current reviews_completed count and increment it
+        reviews_completed = user_data.get("reviews_completed", 0) + 1
+        
         # Update review data
         from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
-        
-        # Track completed reviews (simple counter)
-        reviews_completed = user_data.get("reviews_completed", 0) + 1
         
         # Update critical dates to prevent repeat prompts
         users_col.update_one(
@@ -496,16 +529,9 @@ def on_daily_review_complete(e, page, user):
             }}
         )
         
-        # Also update the session to reflect this change
-        page.session.set("last_login_date", today)
-        page.session.set("last_review_date", today)
-        
         print(f"[Review] Updated last_login_date to {today} to prevent repeat prompts")
         print(f"[Review] Updated review data - completed: {reviews_completed}")
-        
-        # Check for achievements after review completion
-        from achievements_manager import check_and_unlock_achievements
-        check_and_unlock_achievements(user_id, page)
+        print(f"[SuperMemo] User now has completed {reviews_completed} reviews")
         
     except Exception as e:
         print(f"[ERROR] Failed to update review data: {str(e)}")
@@ -572,6 +598,16 @@ def show_daily_review_overlay(page):
     page.overlay.append(overlay)
     page.update()
     
+def safe_float(value, default=0.0):
+    """Convert value to float, handling None values and conversion errors."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+# Then update module_to_dict within cache_modules_to_temp
 def cache_modules_to_temp(modules):
     def module_to_dict(module):
         return {
@@ -585,11 +621,11 @@ def cache_modules_to_temp(modules):
                 {
                     "id": level.lesson_id,
                     "module_id": level.module_name,
-                    "questions_answers": [q.__dict__ for q in level.questions_answers],
+                    "questions_answers": [q.__dict__ if hasattr(q, '__dict__') else q for q in level.questions_answers],
                     "completed": getattr(level, "completed", False),
-                    "grade_percentage": getattr(level, "grade_percentage", 0),
-                    "pass_threshold": getattr(level, "pass_threshold", 0),
-                    "completion_time": getattr(level, "completion_time", 0),
+                    "grade_percentage": safe_float(getattr(level, "grade_percentage", 0)),
+                    "pass_threshold": safe_float(getattr(level, "pass_threshold", 0)),
+                    "completion_time": safe_float(getattr(level, "completion_time", 0)),
                 }
                 for level in module.levels
             ],
@@ -597,19 +633,24 @@ def cache_modules_to_temp(modules):
                 "module_id": module.chapter_test.module_id,
                 "questions_answers": module.chapter_test.questions_answers,
                 "completed": module.chapter_test.completed,
-                "pass_threshold": module.chapter_test.pass_threshold
+                "pass_threshold": safe_float(module.chapter_test.pass_threshold)
             }
         }
-
+    
     with open("temp_modules.json", "w") as f:
-        json.dump([module_to_dict(m) for m in modules], f)
+        # Use the custom encoder for JSON serialization
+        json.dump([module_to_dict(m) for m in modules], f, cls=NumpyEncoder)
 
 def cache_library_to_temp(library):
     with open("temp_library.json", "w") as f:
         json.dump(library, f)
 
 def clear_all_temp_files(user_id=None):
-    """Clear all temporary files including those in the new folder structure"""
+    """Clear all temporary files including BKT files"""
+    import os
+    import glob
+    
+    # Standard temp files
     temp_files = [
         "temp_library.json",
         "temp_modules.json",
@@ -622,35 +663,89 @@ def clear_all_temp_files(user_id=None):
         "temp_lstm_input.json",
     ]
     
-    # Remove standard temp files
-    for file in temp_files:
+    # Add user-specific files
+    if user_id:
+        user_specific_files = [
+            f"lesson_bkt_predictions_{user_id}.json",
+            f"lesson_bkt_predictions_{user_id}_processed.json",
+            f"temp_lesson_bkt_data_{user_id}.json",
+            f"bkt_sequence_{user_id}",
+            f"temp_state_{user_id}.json",
+            f"lesson_session_{user_id}.json",
+            f"achievements_{user_id}.json",
+        ]
+        temp_files.extend(user_specific_files)
+    
+    # Also check for any remaining lesson files without user ID
+    temp_files.extend([
+        "lesson_bkt_predictions.json",
+        "temp_lesson_bkt_data.json",
+        "bkt_sequence",
+        "temp_state.json",
+        "lesson_session.json",
+    ])
+    
+    # Use glob patterns to catch any missed files
+    pattern_files = []
+    if user_id:
+        patterns = [
+            f"*_{user_id}.json",
+            f"*_{user_id}",
+            f"lesson_*_{user_id}*",
+            f"bkt_*_{user_id}*",
+            f"temp_*_{user_id}*",
+            f"achievements_{user_id}.json",
+        ]
+        
+        for pattern in patterns:
+            pattern_files.extend(glob.glob(pattern))
+    
+    # Combine all files and remove duplicates
+    all_files = list(set(temp_files + pattern_files))
+    
+    # Remove all files
+    removed_count = 0
+    for file in all_files:
         if os.path.exists(file):
             try:
                 os.remove(file)
-                print(f"Removed temp file: {file}")
+                print(f"[CLEANUP] Removed temp file: {file}")
+                removed_count += 1
             except Exception as e:
-                print(f"Error removing {file}: {e}")
+                print(f"[CLEANUP] Error removing {file}: {e}")
     
-    # Clean up user-specific files in the new folders
-    if user_id:
-        # Create the new directory paths if they don't exist yet
-        os.makedirs("lstm_history", exist_ok=True)
-        os.makedirs("lstm_counters", exist_ok=True)
-        
-        user_specific_files = [
-            f"lstm_history/temp_prof_history_{user_id}.json",
-            f"lstm_counters/lstm_counter_{user_id}.json",
-            f"temp_bkt_data_{user_id}.json",
-            f"custom_bkt_predictor_{user_id}.pkl"
-        ]
-        
-        for file in user_specific_files:
-            if os.path.exists(file):
-                try:
-                    os.remove(file)
-                    print(f"Removed user-specific file: {file}")
-                except Exception as e:
-                    print(f"Error removing {file}: {e}")
+    print(f"[CLEANUP] Total files removed: {removed_count}")
+    
+    # Also clean up any orphaned BKT files
+    try:
+        cleanup_orphaned_bkt_files()
+    except Exception as e:
+        print(f"[CLEANUP] Error cleaning orphaned BKT files: {e}")
+
+def cleanup_orphaned_bkt_files():
+    """Clean up any orphaned BKT-related files"""
+    import os
+    import glob
+    
+    # Patterns for BKT files that might be left behind
+    bkt_patterns = [
+        "lesson_bkt_predictions_*.json",
+        "lesson_bkt_predictions_*_processed.json",
+        "temp_lesson_bkt_data_*.json",
+        "bkt_sequence_*",
+        "temp_state_*.json",
+        "lesson_session_*.json",
+        "achievements_*.json",
+    ]
+    
+    for pattern in bkt_patterns:
+        files = glob.glob(pattern)
+        for file in files:
+            try:
+                os.remove(file)
+                print(f"[CLEANUP] Removed orphaned BKT file: {file}")
+            except Exception as e:
+                print(f"[CLEANUP] Error removing orphaned file {file}: {e}")
 
 def connect_to_mongoDB():
     try:
@@ -1056,7 +1151,10 @@ class User:  # User class
         lstm_mastery = page.session.get("lstm_mastery")
         
         if lstm_proficiency is not None or lstm_mastery is not None:
-            print(f"[LSTM] Saving mastery ({lstm_mastery:.4f}) and proficiency ({lstm_proficiency:.4f}) to database")
+            # Safe formatting that handles None values
+            prof_str = f"{lstm_proficiency:.4f}" if lstm_proficiency is not None else "None"
+            mastery_str = f"{lstm_mastery:.4f}" if lstm_mastery is not None else "None"
+            print(f"[LSTM] Saving mastery ({mastery_str}) and proficiency ({prof_str}) to database")
             
             # Update the user object
             if lstm_proficiency is not None:
@@ -1166,6 +1264,10 @@ def check_for_unscheduled_vocabulary(user_id):
 
 def main_menu_page(page: ft.Page, image_urls: list):
     """Main menu page with module cards"""
+
+    import bkt_engine
+    bkt_engine.uid = page.session.get("user_id")
+    print(f"[USER] Set global BKT user ID to: {bkt_engine.uid}")
 
     # ----- HEADER with image -----
     header_column = ft.Column(

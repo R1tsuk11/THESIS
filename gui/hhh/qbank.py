@@ -118,7 +118,7 @@ module_1 = {
         "word_to_translate": "gihapon",
         "choices": ["too", "maybe", "later"],
         "correct_answer": "too",
-        "vocabulary": "gihapon",
+        "vocabulary": "Gihapon",
         "difficulty": 1,
         "response_time": 0
     },
@@ -1467,9 +1467,9 @@ module_1 = {
     {
         "id": 139, 
         "type": "True or False", 
-        "question": "'Makarit ako ha Waray' means I'm good at Waray.", 
+        "question": "'Diri makarit ako ha Waray' means I'm good at Waray.", 
         "choices": ["True", "False"],
-        "correct_answer": "True", 
+        "correct_answer": "False", 
         "vocabulary": "Diri ako makarit ha waray", 
         "difficulty": 2, 
         "response_time": 0
@@ -1529,7 +1529,7 @@ module_1 = {
     {
         "id": 145,
         "type": "Lesson",
-        "question": "'Ambot' means 'I don't know' in Waray, the same as 'ewan' in Filipino. Use it when you're uncertain or don't have an answer.",
+        "question": "'Ambot' means 'I do not know' in Waray, the same as 'ewan' in Filipino. Use it when you're uncertain or don't have an answer.",
         "audio_file": "https://res.cloudinary.com/djm2qhi9f/video/upload/v1749572620/ambot_ws7epc.mp3", # Ambot - 20
         "image": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1749728574/assets_22_gf4bpt.png",
         "answer": None,
