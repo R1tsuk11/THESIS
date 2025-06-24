@@ -130,6 +130,76 @@ class CustomBKTPredictor:
         
         print(f"[BKT] Vocab '{vocab}' mastery: {mastery:.2f} (scale: {impact_scale:.1f}, correct: {correct})")
         return mastery
+    
+    def mark_vocabulary_reviewed(self, vocab):
+        """Mark a vocabulary as reviewed in daily review context"""
+        vocab = vocab.lower().strip()
+        if vocab in self.vocab_parameters:
+            # Update the reviewed flag and timestamp
+            self.vocab_parameters[vocab]['reviewed'] = True
+            self.vocab_parameters[vocab]['last_reviewed'] = int(time.time())
+            print(f"[BKT] Marked '{vocab}' as reviewed")
+        else:
+            # Initialize vocabulary if it doesn't exist
+            import time
+            self.vocab_parameters[vocab] = {
+                'prior': 0.5,
+                'guess': 0.25,
+                'slip': 0.1,
+                'learn': 0.15,
+                'reviewed': True,
+                'last_reviewed': int(time.time()),
+                'observations': [],
+                'response_times': []
+            }
+            print(f"[BKT] Initialized and marked '{vocab}' as reviewed")
+
+    def get_mastery(self, vocab):
+        """Get current mastery for a vocabulary"""
+        vocab = vocab.lower().strip()
+        if vocab in self.vocab_parameters:
+            return float(self.vocab_parameters[vocab].get('prior', 0.5))
+        return 0.5
+
+    def is_reviewed(self, vocab):
+        """Check if vocabulary has been reviewed"""
+        vocab = vocab.lower().strip()
+        if vocab in self.vocab_parameters:
+            return self.vocab_parameters[vocab].get('reviewed', False)
+        return False
+
+    def get_vocabulary_in_order(self):
+        """Get vocabulary ordered by mastery level (lowest first)"""
+        if not self.vocab_parameters:
+            return []  # Return empty list if no vocabulary
+        
+        # IMPORTANT: First populate order parameters if not present
+        # This ensures new vocabularies get properly ordered
+        for vocab in self.vocab_parameters.keys():
+            if 'order' not in self.vocab_parameters[vocab]:
+                # Assign a high order number to new vocabulary items
+                self.vocab_parameters[vocab]['order'] = len(self.vocab_parameters) * 10
+            
+        # Try to sort by specified order parameter first
+        try:
+            sorted_vocab = sorted(
+                self.vocab_parameters.keys(),
+                key=lambda v: self.vocab_parameters[v].get('order', 999999)
+            )
+            return sorted_vocab
+        except Exception as e:
+            print(f"[BKT] Error sorting vocabulary by order: {e}")
+            # Fall back to mastery-based sort
+            try:
+                sorted_vocab = sorted(
+                    self.vocab_parameters.keys(),
+                    key=lambda v: float(self.vocab_parameters[v].get('prior', 0.5))
+                )
+                return sorted_vocab
+            except Exception as e:
+                print(f"[BKT] Error sorting vocabulary: {e}")
+                # Last resort - simple alphabetical sort
+                return sorted(self.vocab_parameters.keys())
 
 async def main(page: ft.Page):
     page.title = "User Authentication"

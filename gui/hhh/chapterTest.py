@@ -1343,12 +1343,15 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
         if not question_data.accuracy:
             question_data.accuracy = 0.0
             
+        # CRITICAL FIX: Use the same composite key format as other questions
+        unique_key = f"{question_data.question}__{question_data.type}__{current_index['value']}"
+        
         if question_data.accuracy >= accuracy_threshold:
             print(f"Pronunciation accepted with accuracy: {question_data.accuracy:.2f}")
-            correct_answers[question_data.question] = question_data
+            correct_answers[unique_key] = question_data  # ✅ Now uses composite key
         else:
             print(f"Pronunciation below threshold: {question_data.accuracy:.2f}")
-            incorrect_answers[question_data.question] = question_data
+            incorrect_answers[unique_key] = question_data  # ✅ Now uses composite key
             
         if on_next:
             on_next(e)

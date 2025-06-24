@@ -1,3 +1,5 @@
+from datetime import datetime
+import time
 import traceback
 import flet as ft
 import json
@@ -5,7 +7,7 @@ import os
 from bkt_engine import update_bkt, get_all_p_masteries, get_vocabulary_from_question
 from lstm_engine import display_lstm_predictions_table
 from lstm_helper import get_lstm_proficiency
-from confidence_scoring import get_system_confidence
+from confidence_scoring import get_daily_review_completion_count, get_system_confidence
 from supermemo_engine import get_user_proficiency
 import pymongo
 import threading
@@ -13,6 +15,138 @@ import subprocess
 from achievements_manager import check_and_unlock_achievements
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
+
+def create_lesson_blueprint(lesson_questions, lesson_id):
+    """Create a lesson blueprint instead of pre-selecting specific questions - FIXED for Pronunciation"""
+    
+    # Group questions by vocabulary and type
+    vocab_structure = {}
+    
+    for q in lesson_questions:
+        vocab = q.get('vocabulary', '').lower()
+        q_type = q.get('type', '')
+        
+        if vocab not in vocab_structure:
+            vocab_structure[vocab] = {
+                'lesson': [],
+                'practice': {},
+                'pronunciation': []
+            }
+        
+        if q_type == 'Lesson':
+            vocab_structure[vocab]['lesson'].append(q)
+        elif q_type == 'Pronunciation':
+            vocab_structure[vocab]['pronunciation'].append(q)
+        else:
+            # Group practice questions by type
+            if q_type not in vocab_structure[vocab]['practice']:
+                vocab_structure[vocab]['practice'][q_type] = []
+            vocab_structure[vocab]['practice'][q_type].append(q)
+    
+    # Create the blueprint - defines WHAT should appear, not WHICH questions
+    lesson_blueprint = {
+        'lesson_id': lesson_id,
+        'vocabulary_order': [],  # Order of vocabularies
+        'question_structure': {},  # What types of questions for each vocab
+        'available_questions': lesson_questions,  # All available questions for selection
+        'total_estimated_questions': 0
+    }
+    
+    # Define the question structure for each vocabulary
+    for vocab, data in vocab_structure.items():
+        if data['lesson']:  # Only include vocabularies that have lesson questions
+            lesson_blueprint['vocabulary_order'].append(vocab)
+            
+            # CRITICAL FIX: Include Pronunciation in practice_types if available
+            practice_types = list(data['practice'].keys())
+            
+            # ENHANCED: Add Pronunciation to practice_types if available
+            if data['pronunciation']:  # If pronunciation questions exist
+                # Add Pronunciation to the front of the list (prioritize it)
+                practice_types.insert(0, 'Pronunciation')
+                print(f"[BLUEPRINT] ✅ Added Pronunciation to practice_types for '{vocab}'")
+            
+            # ENHANCED: Adjust practice count if Pronunciation is available
+            base_practice_count = 3
+            if data['pronunciation']:
+                # If we have pronunciation, we want it PLUS 2 other practice questions
+                # This ensures pronunciation is always included
+                practice_count = base_practice_count  # Keep total at 3, but guarantee pronunciation is one of them
+            else:
+                practice_count = base_practice_count
+            
+            # Define structure: 1 Lesson + practice questions
+            structure = {
+                'lesson': 1,  # Always 1 lesson question
+                'practice_count': practice_count,  # Practice questions total
+                'practice_types': practice_types,  # FIXED: Now includes Pronunciation
+                'has_pronunciation': len(data['pronunciation']) > 0,
+                'min_pronunciation': 1 if data['pronunciation'] else 0,  # At least 1 pronunciation if available
+                'mandatory_pronunciation': len(data['pronunciation']) > 0  # NEW: Flag for mandatory inclusion
+            }
+            
+            lesson_blueprint['question_structure'][vocab] = structure
+            lesson_blueprint['total_estimated_questions'] += 4  # 1 lesson + 3 practice
+            
+            # ENHANCED DEBUG: Show what practice types are available
+            print(f"[BLUEPRINT] {vocab}:")
+            print(f"  - Practice types: {practice_types}")
+            print(f"  - Has pronunciation: {structure['has_pronunciation']}")
+            print(f"  - Practice questions available: {sum(len(questions) for questions in data['practice'].values())}")
+            print(f"  - Pronunciation questions available: {len(data['pronunciation'])}")
+    
+    print(f"[BLUEPRINT] Created lesson blueprint with {len(lesson_blueprint['vocabulary_order'])} vocabularies")
+    print(f"[BLUEPRINT] Estimated total questions: {lesson_blueprint['total_estimated_questions']}")
+    print(f"[BLUEPRINT] Vocabulary order: {lesson_blueprint['vocabulary_order']}")
+    
+    return lesson_blueprint
+
+def get_questions_for_lesson(page):
+    """Create a lesson blueprint for the correct module and lesson."""
+    try:
+        # Get module data
+        selected_module_levels, selected_module_desc, selected_module_name, user_id = get_module_data(page)
+        lesson_id = page.session.get("lesson_id")
+        module_id = page.session.get("module_id")  # <-- Ensure this is set in session
+
+        if not lesson_id or not module_id:
+            print("No lesson ID or module ID found in session")
+            return None
+
+        # Import qbank to get ALL questions for this lesson
+        import qbank
+        lesson_key = f"Lesson {lesson_id}"
+
+        # Dynamically select the correct module
+        module_attr = f"module_{module_id}"
+        if hasattr(qbank, module_attr):
+            module = getattr(qbank, module_attr)
+            if lesson_key in module:
+                all_lesson_questions = module[lesson_key]
+                lesson_blueprint = create_lesson_blueprint(all_lesson_questions, lesson_id)
+            else:
+                print(f"[LEVELS] Lesson {lesson_key} not found in {module_attr}")
+                return None
+        else:
+            print(f"[LEVELS] Module {module_attr} not found in qbank")
+            return None
+
+        # Store blueprint in session instead of specific questions
+        from types import SimpleNamespace
+        level_data = SimpleNamespace()
+        level_data.lesson_id = lesson_id
+        level_data.module_name = selected_module_name
+        level_data.lesson_blueprint = lesson_blueprint  # Store blueprint
+        level_data.questions_answers = []  # Empty - will be populated by lesson.py
+
+        page.session.set("level_data", level_data)
+        print(f"[LEVELS] Created lesson blueprint for {lesson_key}")
+
+        return lesson_blueprint
+
+    except Exception as e:
+        print(f"[LEVELS] Error creating lesson blueprint: {e}")
+        return None
 
 def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answers, is_daily_review=False):
     """Run BKT and LSTM models to update proficiency."""
@@ -115,9 +249,15 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
         if not current_bkt_sequence:
             print("[BKT] ERROR: Could not generate any BKT sequence, using default values")
             current_bkt_sequence = [0.5, 0.55, 0.6, 0.65, 0.7]  # Default sequence to prevent LSTM failure
-            
-        print(f"[BKT] Final sequence for LSTM: {current_bkt_sequence}")
-        
+
+        # CRITICAL: Always use the merged BKT sequence for LSTM input
+        try:
+            from bkt_engine import ensure_bkt_data_loaded
+            current_bkt_sequence = ensure_bkt_data_loaded(user_id, force_db_refresh=True)
+            print(f"[BKT] Final sequence for LSTM (merged): {current_bkt_sequence}")
+        except Exception as e:
+            print(f"[BKT] Error loading merged BKT sequence: {e}")
+
         # NEW: Display BKT predictions table BEFORE running LSTM
         try:
             print("\n" + "="*70)
@@ -125,8 +265,29 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
             print("="*70)
             
             if not is_daily_review and lesson_engine_available:
-                current_bkt_sequence = get_session_bkt_sequence(user_id)
-                print(f"[LessonBKT] Generated sequence with {len(current_bkt_sequence)} values")
+                # Process with lesson BKT engine
+                for question_id, question in correct_answers.items():
+                    vocab = get_vocabulary_from_question(question)
+                    if vocab:
+                        process_lesson_question(user_id, question_id, question, True)
+                        
+                for question_id, question in incorrect_answers.items():
+                    vocab = get_vocabulary_from_question(question)
+                    if vocab:
+                        process_lesson_question(user_id, question_id, question, False)
+                
+                # CRITICAL: Save lesson data to database BEFORE getting sequence
+                save_result = save_session_to_database(user_id)
+                print(f"[LessonBKT] Session save result: {save_result}")
+                
+                # CRITICAL: Ensure main BKT engine has the latest data
+                try:
+                    from bkt_engine import ensure_bkt_data_loaded
+                    current_bkt_sequence = ensure_bkt_data_loaded(user_id, force_db_refresh=True)
+                    print(f"[BKT] Refreshed sequence from database: {len(current_bkt_sequence)} values")
+                except Exception as e:
+                    print(f"[BKT] Error refreshing from database: {e}")
+                    current_bkt_sequence = get_session_bkt_sequence(user_id)
                 
                 # Validate sequence quality
                 if len(current_bkt_sequence) < 5:
@@ -218,11 +379,33 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
         
         # Run the LSTM model to get proficiency
         result = get_lstm_proficiency(current_bkt_sequence, completion, user_id)
-        print(f"[LSTM] Result: {result}")
-        
         proficiency = result.get("proficiency", 0)
         lstm_confidence = result.get("confidence", 0)
         method = result.get("method", "none")
+        
+        # CRITICAL FIX: Save LSTM proficiency to database immediately
+        try:
+            arami = pymongo.MongoClient(uri)["arami"]
+            users_col = arami["users"]
+            
+            # Update user document with LSTM proficiency
+            update_result = users_col.update_one(
+                {"user_id": int(user_id)},
+                {"$set": {
+                    "lstm_proficiency": proficiency,
+                    "lstm_confidence": lstm_confidence,
+                    "lstm_last_updated": int(time.time())
+                }}
+            )
+            print(f"[LSTM] Saved proficiency {proficiency:.4f} to database: matched={update_result.matched_count}, modified={update_result.modified_count}")
+            
+        except Exception as e:
+            print(f"[LSTM] Error saving proficiency to database: {e}")
+        
+        # Store in session for immediate use
+        page.session.set("lstm_proficiency", proficiency)
+        page.session.set("lstm_confidence", lstm_confidence)
+        page.session.set("method", method)
         
         print(f"[LSTM] Proficiency: {proficiency:.4f}, Confidence: {lstm_confidence:.2f}, Method: {method}")
         
@@ -261,12 +444,28 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
             # Get SuperMemo data if available
             try:
                 from supermemo_engine import get_average_efactor, get_completion_rate
-                supermemo_score = get_average_efactor(user_id) / 2.5  # Normalize to 0-1 range
-            except:
+                
+                # CRITICAL: Only get SuperMemo score if user has actually completed reviews
+                avg_efactor = get_average_efactor(user_id)
+                if avg_efactor is not None:
+                    supermemo_score = avg_efactor / 2.5  # Normalize to 0-1 range
+                    print(f"[SuperMemo] Using efactor-based score: {supermemo_score:.3f}")
+                else:
+                    # Check daily review completion as alternative
+                    daily_review_count = get_daily_review_completion_count(user_id)
+                    if daily_review_count > 0:
+                        supermemo_score = min(0.9, 0.5 + (daily_review_count * 0.1))
+                        print(f"[SuperMemo] Using daily review count-based score: {supermemo_score:.3f}")
+                    else:
+                        supermemo_score = None
+                        print(f"[SuperMemo] No SuperMemo data available - user hasn't completed any reviews")
+                        
+            except Exception as e:
+                print(f"[SuperMemo] Error getting SuperMemo data: {e}")
                 supermemo_score = None
             
             # Calculate overall system confidence - LET IT HANDLE ALL PRINTING
-            confidence_result = get_system_confidence(bkt_score, lstm_confidence, supermemo_score)
+            confidence_result = get_system_confidence(bkt_score, lstm_confidence, supermemo_score, page=page)
             system_confidence = confidence_result["system_confidence"]
             confidence_interpretation = confidence_result["interpretation"]
             
@@ -293,34 +492,64 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
         return {"proficiency": 0, "confidence": 0, "method": "error", "error": str(e)}
 
 def compute_completion(page):
-    """Calculate completion percentage based on completed lessons"""
-    modules = page.session.get("modules")
-    if not modules:
-        print("[WARNING] No modules found in session")
+    """Calculate user completion percentage with proper session storage"""
+    try:
+        user_id = page.session.get("user_id")
+        if not user_id:
+            return 0
+        
+        # Get modules from session
+        modules = page.session.get("modules")
+        if not modules:
+            print("[Progress] No modules found in session")
+            return 0
+        
+        total_lessons = 0
+        completed_lessons = 0
+        
+        for module in modules:
+            levels = getattr(module, 'levels', [])
+            total_lessons += len(levels)
+            
+            for level in levels:
+                if getattr(level, 'completed', False):
+                    completed_lessons += 1
+        
+        if total_lessons == 0:
+            completion_percentage = 0
+        else:
+            completion_percentage = (completed_lessons / total_lessons) * 100
+        
+        print(f"[Progress] Calculated: {completed_lessons}/{total_lessons} = {completion_percentage:.1f}%")
+        
+        # CRITICAL: Store in session for logout
+        page.session.set("completion_percentage", completion_percentage)
+        
+        # FIXED: Save completion percentage to database WITHOUT triggering logout
+        try:
+            import pymongo
+            arami = pymongo.MongoClient("mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/")["arami"]
+            users_col = arami["users"]
+            
+            # Direct database update without using save_user method
+            update_result = users_col.update_one(
+                {"user_id": int(user_id)},
+                {"$set": {"completion_percentage": completion_percentage}}
+            )
+            
+            if update_result.modified_count > 0:
+                print(f"[Progress] ✅ Updated completion percentage in database: {completion_percentage:.1f}%")
+            else:
+                print(f"[Progress] ⚠️ Database update failed or no change needed")
+                
+        except Exception as e:
+            print(f"[Progress] Error updating completion percentage in database: {e}")
+        
+        return completion_percentage
+        
+    except Exception as e:
+        print(f"[Progress] Error calculating completion: {e}")
         return 0
-    
-    total = 0
-    completed = 0
-    
-    for module in modules:
-        # Handle both Module objects and dictionaries
-        if isinstance(module, dict):
-            if "levels" in module:
-                module_levels = module["levels"]
-                total += len(module_levels)
-                completed += sum(1 for level in module_levels if level.get("completed", False))
-        else:  # Assume it's a Module object
-            if hasattr(module, 'levels'):
-                total += len(module.levels)
-                completed += sum(1 for level in module.levels if getattr(level, "completed", False))
-    
-    print(f"[DEBUG] Completion calculation: {completed}/{total} lessons completed")
-    
-    # Avoid division by zero
-    if total == 0:
-        return 0
-    
-    return round((completed / total) * 100)
 
 def merge_answer_data(existing, new):
     """Merge dictionaries while preserving key structure and merging nested values."""
@@ -605,63 +834,107 @@ def levels_page(page: ft.Page, image_urls: list):
         # Get any question to extract identifying info (safe if list isn't empty)
         first_question = updated["questions"][0]
         
+        # SAFETY FIX: Ensure the question has required attributes
+        if not hasattr(first_question, 'lesson_id'):
+            print("[LEVELS] WARNING: First question missing lesson_id, trying to get from session")
+            first_question.lesson_id = page.session.get("lesson_id", 1)
+            
+        if not hasattr(first_question, 'module_name'):
+            print("[LEVELS] WARNING: First question missing module_name, trying to get from session")
+            level_data = page.session.get("level_data")
+            if level_data and hasattr(level_data, 'module_name'):
+                first_question.module_name = level_data.module_name
+            else:
+                first_question.module_name = "Module 1"  # Fallback
+        
         completion_time = updated["total_response_time"]
         grade_percentage = updated["grade"]
 
+        # FIXED: Find and update the correct level
+        completed_level = None
         for level in selected_module_levels:
             if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
                 level.questions_answers = updated["questions"]
                 level.completed = updated["grade"] >= level.pass_threshold
                 level.completion_time = completion_time
                 level.grade_percentage = grade_percentage
+                completed_level = level  # Store reference to the completed level
                 break
 
-        if level.completed:
+        # FIXED: Only try database update if we found and completed a level
+        if completed_level and completed_level.completed:
             try:
                 # Save the completed level to the database immediately
                 arami = pymongo.MongoClient(uri)["arami"]
                 users_col = arami["users"]
                 
-                # Find the module and level in the database
+                print(f"[LEVELS] Attempting to update lesson {completed_level.lesson_id} for user {user_id}")
+                print(f"[LEVELS] Grade: {grade_percentage}%, Time: {completion_time}s")
+                
+                # Check if lesson was already marked complete by lesson.py
+                user_doc = users_col.find_one({"user_id": int(user_id)})
+                if user_doc:
+                    for module in user_doc.get("modules", []):
+                        if module.get("id") == int(page.session.get("module_id")):
+                            for level in module.get("levels", []):
+                                if level.get("lesson_id") == completed_level.lesson_id:
+                                    current_status = level.get("completed", False)
+                                    print(f"[LEVELS] Current database status for lesson {completed_level.lesson_id}: {current_status}")
+                                    
+                                    if current_status:
+                                        print(f"[LEVELS] ✅ Lesson {completed_level.lesson_id} already marked complete in database")
+                                        return  # Exit early, no need to update again
+                
+                # If we reach here, the lesson wasn't marked complete, so update it
+                print(f"[LEVELS] Lesson not yet marked complete, updating database...")
+                
+                # Rest of your existing database update code...
+                update_query = {
+                    "user_id": int(user_id),
+                    "modules.id": int(page.session.get("module_id"))
+                }
+                
+                update_operation = {
+                    "$set": {
+                        "modules.$[module].levels.$[level].completed": True,
+                        "modules.$[module].levels.$[level].completion_time": completion_time,
+                        "modules.$[module].levels.$[level].grade_percentage": grade_percentage,
+                        "modules.$[module].levels.$[level].last_completed": datetime.datetime.utcnow().isoformat()
+                    }
+                }
+                
+                array_filters = [
+                    {"module.id": int(page.session.get("module_id"))},
+                    {"level.lesson_id": completed_level.lesson_id}
+                ]
+                
                 update_result = users_col.update_one(
-                    {
-                        "user_id": int(user_id),
-                        "modules.id": int(page.session.get("module_id")),
-                        "modules.levels.lesson_id": level.lesson_id
-                    },
-                    {
-                        "$set": {
-                            "modules.$[module].levels.$[level].completed": True,
-                            "modules.$[module].levels.$[level].completion_time": completion_time,
-                            "modules.$[module].levels.$[level].grade_percentage": grade_percentage
-                        }
-                    },
-                    array_filters=[
-                        {"module.id": int(page.session.get("module_id"))},
-                        {"level.lesson_id": level.lesson_id}
-                    ]
+                    update_query,
+                    update_operation,
+                    array_filters=array_filters
                 )
                 
-                print(f"[DEBUG] Updated level completion in database: {update_result.modified_count} document(s) modified")
+                print(f"[LEVELS] Database update result:")
+                print(f"  - Matched: {update_result.matched_count}")
+                print(f"  - Modified: {update_result.modified_count}")
                 
-                # Now check for achievements after the database update
-                check_and_unlock_achievements(user_id, page)
-                
-                # ADD CODE HERE to sync word counts properly
-                # Sync user vocabulary and progress stats
-                from mainmenu import sync_user_progress
-                sync_user_progress(page, user_id)
-                
+                if update_result.modified_count > 0:
+                    print(f"[LEVELS] ✅ Successfully updated lesson {completed_level.lesson_id} completion")
+                else:
+                    print(f"[LEVELS] ⚠️ No documents modified - lesson may already be complete")
+                    
             except Exception as e:
-                print(f"[ERROR] Failed to update level completion in database: {str(e)}")
-                # Still try to check achievements with the session data
-                check_and_unlock_achievements(user_id, page)
-                # Also try to sync progress even if DB update failed
-                try:
-                    from mainmenu import sync_user_progress
-                    sync_user_progress(page, user_id)
-                except Exception as e2:
-                    print(f"[ERROR] Failed to sync user progress: {str(e2)}")
+                print(f"[LEVELS] ❌ Failed to update level completion: {str(e)}")
+                import traceback
+                traceback.print_exc()
+
+        # FALLBACK: Still try to check achievements with the session data
+        try:
+            check_and_unlock_achievements(user_id, page)
+            from mainmenu import sync_user_progress
+            sync_user_progress(page, user_id)
+        except Exception as e2:
+            print(f"[ERROR] Failed fallback operations: {str(e2)}")
 
     completion = compute_completion(page)
 
@@ -799,111 +1072,26 @@ def levels_page(page: ft.Page, image_urls: list):
 
         # Fetch current proficiency
         user_id = page.session.get("user_id")
-        proficiency = get_user_proficiency(user_id)
+        proficiency = page.session.get("lstm_proficiency")
+        if proficiency is None:
+            proficiency = get_user_proficiency(user_id)
         print(f"[DEBUG] User proficiency: {proficiency}")
 
-        # Use the questions stored in the user's level data
-        all_questions = level_data.questions_answers
-        print(f"[DEBUG] Total questions in level: {len(all_questions)}")
+        # CHANGED: Use blueprint instead of pre-selecting questions
+        page.session.set("lesson_id", level_data.lesson_id)
+        page.session.set("lesson_name", f"Level {level_num}")
         
-        # Debug print some question sample
-        for i, q in enumerate(all_questions[:3]):  # Print first 3 questions for debugging
-            print(f"[DEBUG] Sample question {i+1}: type={getattr(q, 'type', 'unknown')}, "
-                f"vocab={getattr(q, 'vocabulary', 'unknown')}, "
-                f"difficulty={getattr(q, 'difficulty', 'unknown')}")
-
-        # MOVED HERE: Get vocabulary in proper order using BKT engine
-        from bkt_engine import load_custom_bkt
-        custom_bkt = load_custom_bkt(user_id)
-
-        # Ensure custom_bkt is the right type
-        if hasattr(custom_bkt, 'get_vocabulary_in_order'):
-            ordered_vocab = custom_bkt.get_vocabulary_in_order()
-            print(f"[DEBUG] Found {len(ordered_vocab)} vocabularies in BKT order")
+        # Create lesson blueprint instead of selecting specific questions
+        blueprint = get_questions_for_lesson(page)
+        
+        if blueprint:
+            print(f"[LEVELS] Created blueprint for level {level_num} with {len(blueprint['vocabulary_order'])} vocabularies")
+            print(f"[LEVELS] Vocabularies: {blueprint['vocabulary_order']}")
+            page.go("/lesson")
         else:
-            print(f"[WARNING] Invalid BKT predictor returned: {type(custom_bkt).__name__}")
-            ordered_vocab = []  # Empty list as fallback
-            
-            # Try to create a new predictor if possible
-            from bkt_engine import CustomBKTPredictor, save_custom_bkt
-            try:
-                new_predictor = CustomBKTPredictor()
-                if save_custom_bkt(user_id, new_predictor):
-                    ordered_vocab = new_predictor.get_vocabulary_in_order()
-                    print("[BKT] Created new predictor and retrieved vocabulary order")
-            except Exception as e:
-                print(f"[BKT] Could not create new predictor: {e}")
-        
-        # Create vocabulary dictionary from questions
-        vocab_dict = {}
-        for q in all_questions:
-            if q.vocabulary:
-                vocab_key = q.vocabulary.lower()
-                vocab_dict[vocab_key] = q.vocabulary  # Store original case
-        
-        # Create vocabulary list in proper order
-        vocab_list = []
-        
-        # First add vocabularies in their original qbank order
-        for vocab in ordered_vocab:
-            vocab_lower = vocab.lower()
-            if vocab_lower in vocab_dict:
-                vocab_list.append(vocab_dict[vocab_lower])
-        
-        # Add any remaining vocabularies not found in the ordered list
-        for vocab_lower, vocab in vocab_dict.items():
-            if vocab not in vocab_list:
-                vocab_list.append(vocab)
-                
-        print(f"[DEBUG] Vocabularies in this level (ordered by qbank): {vocab_list}")
-
-        def select_lesson_and_practice_questions(all_questions, vocab, proficiency):
-            # Match using lowercase for case-insensitive matching but keep original case for display
-            lesson_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") == "Lesson"]
-            print(f"[DEBUG] Found {len(lesson_q)} lesson questions for vocab '{vocab}'")
-            
-            if proficiency < 40:
-                practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 2]
-            
-            elif proficiency < 70:
-                practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson" and getattr(q, "difficulty", 1) <= 3]
-            
-            else:
-                practice_q = [q for q in all_questions if getattr(q, "vocabulary", "").lower() == vocab.lower() and getattr(q, "type", "") != "Lesson"]
-                
-            practice_q.sort(key=lambda q: getattr(q, "difficulty", 1))
-            
-            # Only take the lesson and practice questions we need
-            selected = []
-            # Always include lesson questions first if available
-            if lesson_q:
-                selected.extend(lesson_q[:1])
-            # Then add practice questions
-            selected.extend(practice_q[:3])
-            
-            print(f"[DEBUG] Selected {len(lesson_q[:1]) if lesson_q else 0} lesson + {min(len(practice_q), 3)} practice questions for vocab '{vocab}'")
-            return selected
-
-        # Process vocabularies in order and keep questions grouped
-        questions = []
-        for vocab in vocab_list:
-            # Get all questions for this vocab
-            vocab_questions = select_lesson_and_practice_questions(all_questions, vocab, proficiency)
-            questions.extend(vocab_questions)
-
-        # Debug final question set
-        for i, q in enumerate(questions):
-            print(f"[DEBUG] Question {i+1}: type={getattr(q, 'type', 'unknown')}, "
-                f"vocab={getattr(q, 'vocabulary', 'unknown')}, "
-                f"difficulty={getattr(q, 'difficulty', 'unknown')}")
-            q.lesson_id = level_data.lesson_id
-            q.module_name = level_data.module_name
-
-        level_data.questions_answers = questions
-
-        page.session.set("level_data", level_data)
-        print(f"Selected level {level_num} (proficiency: {proficiency})")
-        page.go("/lesson")
+            print(f"[LEVELS] Failed to create blueprint for level {level_num}")
+            page.open(ft.SnackBar(ft.Text("Could not load lesson. Please try again."), bgcolor="#FF0000"))
+            page.update()
 
     def chapter_test_select(page):
         # Check if all levels are completed first
@@ -999,8 +1187,8 @@ def levels_page(page: ft.Page, image_urls: list):
             alignment=ft.alignment.center,
             data=level_number,
             # Always keep the click handler, but handle availability inside level_select
-            on_click=lambda e: level_select(e, level_number)
-        )
+            on_click=lambda e, level=level_number: level_select(e, level)  # Fixed lambda capture
+    )
 
     # Get current user and module info
     user_id = page.session.get("user_id")

@@ -645,82 +645,56 @@ def cache_library_to_temp(library):
     with open("temp_library.json", "w") as f:
         json.dump(library, f)
 
-def clear_all_temp_files(user_id=None):
-    """Clear all temporary files including BKT files"""
-    import os
-    import glob
+def clear_all_temp_files(user_id=None, preserve_files=None):
+    """Clear all temporary files with option to preserve specific files"""
+    if preserve_files is None:
+        preserve_files = []
     
-    # Standard temp files
-    temp_files = [
-        "temp_library.json",
+    files_to_remove = [
         "temp_modules.json",
-        "temp_chaptertest_data.json",
-        "temp_bkt_data.json",
-        "temp_prof_history.json",
-        "lstm_counter.json",
+        "temp_lstm_input.json", 
+        "temp_library.json",
         "bkt_predictions.json",
-        "bkt_input.csv",
-        "temp_lstm_input.json",
+        "temp_bkt_data.json",
+        "temp_state.json"
     ]
     
-    # Add user-specific files
+    # Add user-specific files if user_id provided
     if user_id:
-        user_specific_files = [
-            f"lesson_bkt_predictions_{user_id}.json",
-            f"lesson_bkt_predictions_{user_id}_processed.json",
-            f"temp_lesson_bkt_data_{user_id}.json",
-            f"bkt_sequence_{user_id}",
+        user_files = [
+            f"temp_bkt_data_{user_id}.json",
             f"temp_state_{user_id}.json",
             f"lesson_session_{user_id}.json",
-            f"achievements_{user_id}.json",
+            f"achievements_{user_id}.json"
         ]
-        temp_files.extend(user_specific_files)
-    
-    # Also check for any remaining lesson files without user ID
-    temp_files.extend([
-        "lesson_bkt_predictions.json",
-        "temp_lesson_bkt_data.json",
-        "bkt_sequence",
-        "temp_state.json",
-        "lesson_session.json",
-    ])
-    
-    # Use glob patterns to catch any missed files
-    pattern_files = []
-    if user_id:
-        patterns = [
-            f"*_{user_id}.json",
-            f"*_{user_id}",
-            f"lesson_*_{user_id}*",
-            f"bkt_*_{user_id}*",
-            f"temp_*_{user_id}*",
-            f"achievements_{user_id}.json",
+        files_to_remove.extend(user_files)
+        
+        # Only add BKT files to removal list if not in preserve list
+        bkt_files = [
+            f"lesson_bkt_predictions_{user_id}.json",
+            f"bkt_sequence_{user_id}",
+            f"custom_bkt_predictor_{user_id}.pkl"
         ]
         
-        for pattern in patterns:
-            pattern_files.extend(glob.glob(pattern))
+        for bkt_file in bkt_files:
+            if bkt_file not in preserve_files:
+                files_to_remove.append(bkt_file)
     
-    # Combine all files and remove duplicates
-    all_files = list(set(temp_files + pattern_files))
-    
-    # Remove all files
     removed_count = 0
-    for file in all_files:
-        if os.path.exists(file):
+    for file_path in files_to_remove:
+        if os.path.exists(file_path):
             try:
-                os.remove(file)
-                print(f"[CLEANUP] Removed temp file: {file}")
+                os.remove(file_path)
                 removed_count += 1
+                print(f"[CLEANUP] Removed temp file: {file_path}")
             except Exception as e:
-                print(f"[CLEANUP] Error removing {file}: {e}")
+                print(f"[CLEANUP] Error removing {file_path}: {e}")
     
     print(f"[CLEANUP] Total files removed: {removed_count}")
     
-    # Also clean up any orphaned BKT files
-    try:
-        cleanup_orphaned_bkt_files()
-    except Exception as e:
-        print(f"[CLEANUP] Error cleaning orphaned BKT files: {e}")
+    # Separate cleanup for preserved files (after delay)
+    if preserve_files:
+        print(f"[CLEANUP] Preserved {len(preserve_files)} BKT files for user {user_id}")
 
 def cleanup_orphaned_bkt_files():
     """Clean up any orphaned BKT-related files"""
@@ -1057,9 +1031,21 @@ class User:  # User class
         else:
             print("No temp library cache found.")
 
+    def save_completion_percentage(self):
+        try:
+            completion_percentage = calculate_completion_percentage(self)
+            usercol = connect_to_mongoDB()
+            usercol.update_one(
+                {"user_id": self.user_id},
+                {"$set": {"completion_percentage": completion_percentage}}
+            )
+            print(f"[Completion] Saved completion percentage: {completion_percentage}%")
+        except Exception as e:
+            print(f"[ERROR] Failed to save completion percentage: {e}")
+
     def save_bkt_data(self):
-        if os.path.exists("temp_bkt_data.json"):
-            with open("temp_bkt_data.json", "r") as f:
+        if os.path.exists(f"lesson_bkt_predictions_{self.user_id}.json"):
+            with open(f"lesson_bkt_predictions_{self.user_id}.json", "r") as f:
                 self.bkt_data = json.load(f)
         else:
             print("No temp library cache found.")
@@ -1145,6 +1131,7 @@ class User:  # User class
         self.save_bkt_data()
         self.save_prof_history()
         self.save_lstm_counter()
+        self.save_completion_percentage()
         
         # Add code to save LSTM mastery and proficiency to database
         lstm_proficiency = page.session.get("lstm_proficiency")
@@ -1226,12 +1213,12 @@ class User:  # User class
 
 
 def get_user_id(page):
-        """Retrieves user_id from previous page session."""
-        page.session.get("user_id")  # Get user ID from session
-        if page.session.get("user_id") is None:
-            print("No user ID found in session.")
-            return None
-        return page.session.get("user_id")
+    """Retrieves user_id from previous page session."""
+    user_id = page.session.get("user_id")
+    if user_id is None:
+        print("No user ID found in session.")
+        return None
+    return user_id
 
 # Add this to the main_menu_page function or where sessions are initialized
 def check_for_unscheduled_vocabulary(user_id):
@@ -1792,14 +1779,5 @@ def main_menu_page(page: ft.Page, image_urls: list):
         page.session.set("daily_review_questions", review_questions)
         page.session.set("daily_review_needed", True)
         show_daily_review_overlay(page)
-
-    # Add Usage Statistics button to toolbar (or header)
-    stats_button = ft.ElevatedButton(
-        "Usage Statistics",
-        icon=ft.icons.TIMER,
-        on_click=lambda e: show_usage_stats(page)
-    )
-    # Add the stats button to the header_column
-    header_column.controls.append(stats_button)
 
     page.update()

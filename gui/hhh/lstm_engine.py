@@ -447,9 +447,41 @@ def predict_proficiency(bkt_sequence, user_id=None):
         X = pad_sequences([bkt_sequence], maxlen=model.input_shape[1], dtype='float32')
         X = np.expand_dims(X, -1)
         pred = model.predict(X, verbose=0)
-        user_prediction = float(pred[0][0])
+        raw_prediction = float(pred[0][0])
 
-        # Always calculate confidence
+        # ENHANCED: Apply BKT-aware scaling
+        if bkt_sequence:
+            avg_bkt_mastery = sum(bkt_sequence) / len(bkt_sequence)
+            
+            # If BKT shows high mastery (>0.9), boost LSTM prediction significantly
+            if avg_bkt_mastery > 0.9:
+                boost_factor = min(1.4, 1.0 + (avg_bkt_mastery - 0.9) * 3)
+                adjusted_prediction = min(0.95, raw_prediction * boost_factor)
+                print(f"[LSTM] High BKT mastery detected ({avg_bkt_mastery:.3f}), "
+                      f"boosting prediction: {raw_prediction:.3f} → {adjusted_prediction:.3f}")
+                final_prediction = adjusted_prediction
+            elif avg_bkt_mastery > 0.8:
+                # Moderate boost for good mastery
+                boost_factor = 1.0 + (avg_bkt_mastery - 0.8) * 1.5
+                adjusted_prediction = min(0.9, raw_prediction * boost_factor)
+                print(f"[LSTM] Good BKT mastery detected ({avg_bkt_mastery:.3f}), "
+                      f"moderate boost: {raw_prediction:.3f} → {adjusted_prediction:.3f}")
+                final_prediction = adjusted_prediction
+            elif avg_bkt_mastery > 0.7:
+                # Small boost for decent mastery
+                boost_factor = 1.0 + (avg_bkt_mastery - 0.7) * 0.8
+                adjusted_prediction = min(0.85, raw_prediction * boost_factor)
+                print(f"[LSTM] Decent BKT mastery detected ({avg_bkt_mastery:.3f}), "
+                      f"small boost: {raw_prediction:.3f} → {adjusted_prediction:.3f}")
+                final_prediction = adjusted_prediction
+            else:
+                # Keep original prediction for lower mastery
+                final_prediction = raw_prediction
+                print(f"[LSTM] BKT mastery ({avg_bkt_mastery:.3f}) below threshold, keeping original: {raw_prediction:.3f}")
+        else:
+            final_prediction = raw_prediction
+
+        # Calculate confidence
         user_confidence = calculate_confidence(model, X, history)
         
         # If we're using a blend, compute global prediction too
@@ -465,9 +497,9 @@ def predict_proficiency(bkt_sequence, user_id=None):
                 
                 # Blend predictions
                 final_prediction = (global_contribution * global_prediction + 
-                                   (1.0 - global_contribution) * user_prediction)
+                                   (1.0 - global_contribution) * raw_prediction)
                 print(f"[LSTM] Blended prediction: {global_prediction:.3f} (global) * {global_contribution:.2f} + "
-                      f"{user_prediction:.3f} (user) * {(1-global_contribution):.2f} = {final_prediction:.3f}")
+                      f"{raw_prediction:.3f} (user) * {(1-global_contribution):.2f} = {final_prediction:.3f}")
                 
                 # FIXED: Get global confidence using proper path
                 global_history_path = get_lstm_history_path()  # Global path
@@ -487,7 +519,7 @@ def predict_proficiency(bkt_sequence, user_id=None):
                 return {"prediction": final_prediction, "confidence": final_confidence}
             
         # Always return dict with both values    
-        return {"prediction": user_prediction, "confidence": user_confidence}
+        return {"prediction": final_prediction, "confidence": user_confidence, "raw_prediction": raw_prediction, "bkt_adjustment": final_prediction != raw_prediction}
         
     except Exception as e:
         # Proper error handling
@@ -629,50 +661,41 @@ def get_proficiency_level(proficiency):
         return "(Proficient)"
     
 def display_lstm_predictions_table(bkt_sequence, user_id=None):
-    """
-    Display LSTM prediction results in a formatted table
-    
-    Args:
-        bkt_sequence: Current BKT sequence
-        user_id: Optional user ID
-    """
-    # Get vocabulary items from BKT predictions file
-    vocab_items = []
+    """Display LSTM predictions in a formatted table with RAW values"""
     try:
-        with open('bkt_predictions.json', 'r') as f:
-            predictions = json.load(f)
-            vocab_items = list(predictions.keys())
-    except (FileNotFoundError, json.JSONDecodeError):
-        print("[LSTM] Error: Could not load vocabulary from BKT predictions")
-        return
-    
-    # Get LSTM prediction
-    result = predict_proficiency(bkt_sequence, user_id)
-    
-    if isinstance(result, dict):
-        overall_prediction = result["prediction"]
-        overall_confidence = result["confidence"]
-    else:
-        overall_prediction = result
-        overall_confidence = 0.8
-    
-    # Print header
-    print("┌───────────────────────────────────────────────────────────────────────────────┐")
-    print("│                                 LSTM PREDICTIONS                              │")
-    print("├──────────────────────┬─────────────┬──────────┬──────────┬──────────┤")
-    print("│ Vocabulary           │ Proficiency │ Conf     │ Method   │")
-    print("├──────────────────────┼─────────────┼──────────┼──────────┼──────────┤")
-    
-    # Only display overall proficiency, not per-vocabulary rows
-    print("│ Overall Proficiency    │    {:.2f}      │  {:.2f}   │ {:^8} │".format(
-        overall_prediction, overall_confidence, "LSTM"
-    ))
-    
-    # Print footer
-    print("└──────────────────────┴─────────────┴──────────┴──────────┴──────────┴──────────┘")
-    print("* Proficiency levels above 0.70 indicate strong learning progress")
-    
-    # Print overall statistics
-    print(f"\nOverall LSTM Proficiency: {overall_prediction:.2f} (Confidence: {overall_confidence:.2f})")
-
-    return {"confidence": overall_confidence, "prediction": overall_prediction}
+        # Get the prediction result
+        result = predict_proficiency(bkt_sequence, user_id)
+        
+        # Always use raw values for display
+        if isinstance(result, dict):
+            overall_prediction = result.get("raw_prediction", result.get("prediction", 0))
+            overall_confidence = result.get("confidence", 0)
+        else:
+            overall_prediction = result
+            overall_confidence = 0.8
+        
+        # Print header
+        print("┌" + "─" * 79 + "┐")
+        print("│" + " " * 32 + "LSTM PREDICTIONS" + " " * 31 + "│")
+        print("├" + "─" * 20 + "┬" + "─" * 13 + "┬" + "─" * 10 + "┬" + "─" * 10 + "┬" + "─" * 10 + "┤")
+        print("│ Vocabulary           │ Proficiency   │ Conf     │ Method   │")
+        print("├" + "─" * 20 + "┼" + "─" * 13 + "┼" + "─" * 10 + "┼" + "─" * 10 + "┼" + "─" * 10 + "┤")
+        print("│ Overall Proficiency  │    {:.6f}   │  {:.4f}  │ {:^8} │".format(
+            overall_prediction, overall_confidence, "LSTM"
+        ))
+        print("└" + "─" * 20 + "┴" + "─" * 13 + "┴" + "─" * 10 + "┴" + "─" * 10 + "┴" + "─" * 10 + "┘")
+        print("* Proficiency levels above 0.70 indicate strong learning progress")
+        
+        # ENHANCED: Print detailed raw values
+        print(f"\nRAW LSTM PROFICIENCY VALUES:")
+        print(f"  - Raw Prediction: {overall_prediction:.8f}")
+        print(f"  - Raw Confidence: {overall_confidence:.8f}")
+        if bkt_sequence:
+            print(f"  - BKT Sequence Used: {[f'{x:.6f}' for x in bkt_sequence]}")
+            print(f"  - Average BKT Mastery: {sum(bkt_sequence)/len(bkt_sequence):.8f}")
+        
+        return {"confidence": overall_confidence, "prediction": overall_prediction}
+        
+    except Exception as e:
+        print(f"[LSTM] Error displaying predictions table: {e}")
+        return {"confidence": 0.5, "prediction": 0.0}

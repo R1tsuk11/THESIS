@@ -253,6 +253,59 @@ class CustomBKTPredictor:
         print(f"[BKT] Updated '{vocab}': {old_mastery:.3f} → {mastery:.3f} (correct={correct}, scale={impact_scale:.2f}, {changes_str})")
         
         return mastery
+    
+    def mark_vocabulary_reviewed(self, vocab):
+        """Mark a vocabulary as reviewed in daily review context"""
+        vocab = vocab.lower().strip()
+        if vocab in self.vocab_parameters:
+            # Update the reviewed flag and timestamp
+            self.vocab_parameters[vocab]['reviewed'] = True
+            self.vocab_parameters[vocab]['last_reviewed'] = int(time.time())
+            
+            # ENHANCED: Add to observations if this was a review
+            if 'observations' not in self.vocab_parameters[vocab]:
+                self.vocab_parameters[vocab]['observations'] = []
+            
+            # Add review observation
+            self.vocab_parameters[vocab]['observations'].append({
+                'timestamp': int(time.time()),
+                'type': 'daily_review',
+                'reviewed': True
+            })
+            
+            print(f"[BKT] Marked '{vocab}' as reviewed with observation")
+        else:
+            # Initialize vocabulary if it doesn't exist
+            import time
+            self.vocab_parameters[vocab] = {
+                'prior': 0.5,
+                'guess': 0.25,
+                'slip': 0.1,
+                'learn': 0.15,
+                'reviewed': True,
+                'last_reviewed': int(time.time()),
+                'observations': [{
+                    'timestamp': int(time.time()),
+                    'type': 'daily_review_init',
+                    'reviewed': True
+                }],
+                'response_times': []
+            }
+            print(f"[BKT] Initialized and marked '{vocab}' as reviewed")
+
+    def get_mastery(self, vocab):
+        """Get current mastery for a vocabulary"""
+        vocab = vocab.lower().strip()
+        if vocab in self.vocab_parameters:
+            return float(self.vocab_parameters[vocab].get('prior', 0.5))
+        return 0.5
+
+    def is_reviewed(self, vocab):
+        """Check if vocabulary has been reviewed"""
+        vocab = vocab.lower().strip()
+        if vocab in self.vocab_parameters:
+            return self.vocab_parameters[vocab].get('reviewed', False)
+        return False
 
 def get_custom_bkt_path(user_id=None):
     """Get path for user-specific custom BKT predictor"""
@@ -1138,8 +1191,21 @@ def threaded_update_bkt(user_id, correct_answers, incorrect_answers):
         if bkt_thread is not None and bkt_thread.is_alive():
             print("[threaded_update_bkt] Waiting for previous BKT thread to finish...")
             bkt_thread.join()
-        bkt_thread = threading.Thread(target=update_bkt, args=(user_id, correct_answers, incorrect_answers))
-        bkt_thread.start()
+        
+        # COMPLETE THE INCOMPLETE LINE: Check if we have a valid BKT predictor
+        bkt_predictor = get_custom_bkt(user_id)
+        if bkt_predictor and hasattr(bkt_predictor, 'vocab_parameters'):
+            # Process BKT predictor logic here
+            ordered_vocab = bkt_predictor.get_vocabulary_in_order()
+            print(f"[BKT] Found BKT predictor with {len(ordered_vocab)} vocabulary items")
+            
+            # Start the update thread
+            bkt_thread = threading.Thread(target=update_bkt, args=(user_id, correct_answers, incorrect_answers))
+            bkt_thread.start()
+        else:
+            print("[BKT] No valid BKT predictor found, creating new thread anyway")
+            bkt_thread = threading.Thread(target=update_bkt, args=(user_id, correct_answers, incorrect_answers))
+            bkt_thread.start()
 
 def get_user_library(user_id=None):
     """Get vocabulary library for a user"""
@@ -1304,6 +1370,7 @@ def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is
         
         # Start tracking revisions
         print(f"[update_bkt] Processing {len(correct_answers)} correct and {len(incorrect_answers)} incorrect answers")
+        print(f"[BKT] Context: {'DAILY REVIEW' if is_daily_review else 'LESSON'}, impact_scale={impact_scale}")
         
         # Debug the actual vocabulary items being processed
         correct_vocab_list = [get_vocabulary_from_question(q) for q in correct_answers.values()]
@@ -1317,7 +1384,7 @@ def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is
         custom_bkt = get_custom_bkt(user_id)
         if not custom_bkt:
             print("[update_bkt] No custom BKT predictor found. Creating one.")
-            custom_bkt = CustomBKTPredictor()
+            custom_bkt = CustomBKTPredictor({})
         
         # Apply time decay before updates
         if custom_bkt:
@@ -1328,177 +1395,117 @@ def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is
         predictions = state.get("predictions", {})
         history = state.get("history", {})
         
-        # Get daily review questions for better tracking
-        daily_review_vocabs = []
-        try:
-            from reviewFrame import get_session_review_questions
-            review_questions = get_session_review_questions(user_id)
-            if review_questions:
-                daily_review_vocabs = [get_vocabulary_from_question(q) for q in review_questions]
-                daily_review_vocabs = [v for v in daily_review_vocabs if v]
-                print(f"[BKT] Found {len(daily_review_vocabs)} daily review questions")
-                for i, v in enumerate(daily_review_vocabs):
-                    print(f"[BKT] Review question {i+1}: {v}")
-        except Exception as e:
-            print(f"[BKT] Error getting review questions: {e}")
+        # CRITICAL FIX: Process vocabularies from the session answers
+        vocabularies_processed = set()
         
-        # Find all vocabulary items in this session's answers
-        all_vocab = set()
-        for question in list(correct_answers.values()) + list(incorrect_answers.values()):
-            vocab = get_vocabulary_from_question(question)
-            
+        # Process correct answers
+        for question_id, question_data in correct_answers.items():
+            vocab = get_vocabulary_from_question(question_data)
             if vocab:
-                all_vocab.add(vocab)
-                print(f"[BKT] Found valid vocabulary in answer: '{vocab}'")
+                vocab = normalize_vocabulary(vocab)
+                vocabularies_processed.add(vocab)
                 
-                # Extract difficulty if available (for more differentiated updates)
-                difficulty = None
-                if hasattr(question, 'difficulty'):
-                    difficulty = question.difficulty
-                elif isinstance(question, dict) and 'difficulty' in question:
-                    difficulty = question['difficulty']
-                    
-                if difficulty is not None:
-                    print(f"[BKT] Question difficulty for '{vocab}': {difficulty}")
-            else:
-                # Debug what's in the question object
-                debug_question_object(question, prefix="    ")
-        
-        # Now process all vocabulary items
-        processed_count = 0
-        for vocab in all_vocab:
-            try:
-                # Skip empty vocab
-                if not vocab:
-                    continue
+                # Get difficulty
+                difficulty = getattr(question_data, 'difficulty', 1)
                 
-                # Initialize history entry if needed
+                # Update BKT with correct answer
+                print(f"[BKT] Processing correct answer for '{vocab}' (difficulty: {difficulty})")
+                new_mastery = custom_bkt.observe_with_scale(vocab, True, impact_scale, difficulty)
+                
+                # CRITICAL: Mark as reviewed in daily review context
+                if is_daily_review:
+                    custom_bkt.mark_vocabulary_reviewed(vocab)
+                    print(f"[BKT] Marked '{vocab}' as reviewed (daily review)")
+                
+                # Update history
                 if vocab not in history:
                     history[vocab] = {"corrects": [], "incorrects": []}
                 
-                # Get the existing history for this vocabulary
-                vocab_history = history[vocab]
-                
-                # CRITICAL DEBUG: Print vocab parameters before update
-                before_params = custom_bkt.vocab_parameters.get(vocab, {})
-                print(f"[BKT] Before update '{vocab}': prior={before_params.get('prior', 0.5)}")
-                
-                # Check if this vocab was actually answered correctly or incorrectly
-                normalized_vocab = vocab.lower().strip()
-                
-                # Use robust matching to find answers for this vocabulary
-                was_correct = False
-                was_incorrect = False
-                matching_correct = []
-                matching_incorrect = []
-                
-                # Check correct answers
-                for q in correct_answers.values():
-                    q_vocab = get_vocabulary_from_question(q)
-                    if q_vocab and q_vocab.lower().strip() == normalized_vocab:
-                        was_correct = True
-                        matching_correct.append(q)
-                
-                # Check incorrect answers
-                for q in incorrect_answers.values():
-                    q_vocab = get_vocabulary_from_question(q)
-                    if q_vocab and q_vocab.lower().strip() == normalized_vocab:
-                        was_incorrect = True
-                        matching_incorrect.append(q)
-                
-                # Extract difficulty if available
-                difficulty = None
-                if was_correct and matching_correct:
-                    difficulty = getattr(matching_correct[0], 'difficulty', None)
-                elif was_incorrect and matching_incorrect:
-                    difficulty = getattr(matching_incorrect[0], 'difficulty', None)
-                
-                # Add new observations with timestamps
                 timestamp = int(time.time())
-                if was_correct:
-                    processed_count += 1
-                    vocab_history["corrects"].append({
-                        "timestamp": timestamp, 
-                        "is_review": is_daily_review  # Track if this was from a review
-                    })
-                    # Important: Update parameters with the observation
-                    new_mastery = custom_bkt.observe_with_scale(vocab, True, impact_scale, difficulty)
-                    print(f"[BKT] Updated '{vocab}' with CORRECT observation: new mastery = {new_mastery:.2f}")
-                    print(f"[BKT] Context: {'DAILY REVIEW' if is_daily_review else 'LESSON'}, impact_scale={impact_scale}")
-                elif was_incorrect:
-                    processed_count += 1
-                    vocab_history["incorrects"].append({
-                        "timestamp": timestamp,
-                        "is_review": is_daily_review  # Track if this was from a review
-                    })
-                    # Important: Update parameters with the observation
-                    new_mastery = custom_bkt.observe_with_scale(vocab, False, impact_scale, difficulty)
-                    print(f"[BKT] Updated '{vocab}' with INCORRECT observation: new mastery = {new_mastery:.2f}")
-                    print(f"[BKT] Context: {'DAILY REVIEW' if is_daily_review else 'LESSON'}, impact_scale={impact_scale}")
-                    
-                # Debug information after update
-                after_params = custom_bkt.vocab_parameters.get(vocab, {})
-                print(f"[BKT] After update '{vocab}': prior={after_params.get('prior', 0.5)}")
-                
-                # Build observation sequence for BKT
-                all_attempts = []
-                
-                # Add correct answers with timestamps
-                for entry in vocab_history.get("corrects", []):
-                    timestamp = entry.get("timestamp", 0)
-                    all_attempts.append((timestamp, 1))  # 1 for correct
-                    
-                # Add incorrect answers with timestamps
-                for entry in vocab_history.get("incorrects", []):
-                    timestamp = entry.get("timestamp", 0)
-                    all_attempts.append((timestamp, 0))  # 0 for incorrect
-                
-                # Sort by timestamp
-                all_attempts.sort(key=lambda x: x[0])
-                
-                # Extract just the correctness values in chronological order
-                sequence = [attempt[1] for attempt in all_attempts]
-                
-                # Get parameters for this vocabulary
-                params = custom_bkt.vocab_parameters.get(vocab, {})
-                
-                # Calculate mastery with BKT algorithm
-                mastery = custom_bkt.predict(vocab, sequence)
-                
-                # CRITICAL FIX: Get the ACTUAL updated parameters from vocab_parameters
-                latest_params = custom_bkt.vocab_parameters.get(vocab, {})
-                latest_guess = float(latest_params.get('guess', 0.25))
-                latest_slip = float(latest_params.get('slip', 0.1))
-                
-                # For debugging - show parameter changes 
-                print(f"[BKT] Parameter update for '{vocab}': guess={latest_guess:.3f}, slip={latest_slip:.3f}")
-                
-                # Calculate confidence with the latest parameters
-                confidence = calculate_bkt_confidence(
-                    mastery, 
-                    latest_guess,  # Use latest values
-                    latest_slip,   # Use latest values
-                    vocab=vocab,
-                    params=latest_params
-                )
-                
-                # Store the latest values in predictions
-                # IMPORTANT: Use is_daily_review to determine if this should be marked as reviewed
-                predictions[vocab.lower()] = {
-                    'p_mastery': float(mastery),
-                    'guess': latest_guess,
-                    'slip': latest_slip,
-                    'confidence': confidence,
-                    'correct': 1 if sequence and sequence[-1] == 1 else 0,
-                    'reviewed': (was_correct or was_incorrect) and is_daily_review  # Only mark as reviewed if in a review session
-                }
-                
-            except Exception as vocab_error:
-                print(f"[BKT] Error processing vocabulary '{vocab}': {str(vocab_error)}")
-                import traceback
-                traceback.print_exc()
+                history[vocab]["corrects"].append({
+                    "timestamp": timestamp, 
+                    "is_review": is_daily_review
+                })
         
-        print(f"[BKT] Processed {processed_count} vocabulary items with observations")
+        # Process incorrect answers
+        for question_id, question_data in incorrect_answers.items():
+            vocab = get_vocabulary_from_question(question_data)
+            if vocab:
+                vocab = normalize_vocabulary(vocab)
+                vocabularies_processed.add(vocab)
+                
+                # Get difficulty
+                difficulty = getattr(question_data, 'difficulty', 1)
+                
+                # Update BKT with incorrect answer
+                print(f"[BKT] Processing incorrect answer for '{vocab}' (difficulty: {difficulty})")
+                new_mastery = custom_bkt.observe_with_scale(vocab, False, impact_scale, difficulty)
+                
+                # CRITICAL: Mark as reviewed in daily review context
+                if is_daily_review:
+                    custom_bkt.mark_vocabulary_reviewed(vocab)
+                    print(f"[BKT] Marked '{vocab}' as reviewed (daily review)")
+                
+                # Update history
+                if vocab not in history:
+                    history[vocab] = {"corrects": [], "incorrects": []}
+                
+                timestamp = int(time.time())
+                history[vocab]["incorrects"].append({
+                    "timestamp": timestamp,
+                    "is_review": is_daily_review
+                })
+        
+        print(f"[BKT] Processed {len(vocabularies_processed)} unique vocabularies: {list(vocabularies_processed)}")
+        
+        # Update predictions with review status
+        for vocab in vocabularies_processed:
+            # Get latest parameters from custom_bkt
+            latest_params = custom_bkt.vocab_parameters.get(vocab, {})
+            latest_guess = float(latest_params.get('guess', 0.25))
+            latest_slip = float(latest_params.get('slip', 0.1))
+            latest_mastery = float(latest_params.get('prior', 0.5))
+            
+            # Calculate confidence using the enhanced function
+            confidence = calculate_bkt_confidence(
+                latest_mastery,
+                latest_guess,
+                latest_slip,
+                vocab=vocab,
+                params=latest_params
+            )
+            
+            # CRITICAL FIX: Determine if this vocabulary was answered correctly in this session
+            was_correct = 0  # Default
+            for q_data in correct_answers.values():
+                if get_vocabulary_from_question(q_data) == vocab:
+                    was_correct = 1
+                    break
+            
+            # If not found in correct answers, check incorrect answers
+            if was_correct == 0:
+                for q_data in incorrect_answers.values():
+                    if get_vocabulary_from_question(q_data) == vocab:
+                        was_correct = 0  # Explicitly set to 0 for incorrect
+                        break
+            
+            # ENHANCED: Update the predictions dictionary with proper values
+            predictions[vocab.lower()] = {
+                'p_mastery': latest_mastery,
+                'guess': latest_guess,
+                'slip': latest_slip,
+                'confidence': confidence,  # Now uses enhanced calculation
+                'correct': was_correct,  # FIXED: Properly tracks last answer
+                'reviewed': True if is_daily_review else False,
+                'timestamp': int(time.time()),
+                'difficulty_level': 1,
+                'transferred_difficulty': 0,
+                'observations': latest_params.get('observations', []),
+                'response_times': latest_params.get('response_times', [])
+            }
+            
+            print(f"[BKT] Updated prediction for '{vocab}': mastery={latest_mastery:.3f}, " +
+                f"confidence={confidence:.3f}, correct={was_correct}")
         
         # Save updated state
         state["predictions"] = predictions
@@ -1508,73 +1515,43 @@ def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is
         # Save the BKT predictor
         save_custom_bkt(user_id, custom_bkt)
         
-        # Save to database with enhanced merging
-        save_bkt_data_to_database(user_id, custom_bkt)
-
-        # Generate and save the sequence for the LSTM model
-        ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else sorted(predictions.keys())
-        print(f"[update_bkt] Found {len(ordered_vocab)} vocabularies in order")
+        # CRITICAL FIX: Save updated BKT data with review context
+        success = save_bkt_data_to_database(user_id, custom_bkt, is_daily_review=is_daily_review)
+        if success:
+            print(f"[BKT] ✅ Successfully saved BKT data for user {user_id}")
+        else:
+            print(f"[BKT] ❌ Failed to save BKT data for user {user_id}")
         
-        # Now load database predictions to fill in gaps for vocabulary not seen in this session
-        db_predictions = {}
-        try:
-            arami = pymongo.MongoClient(uri)["arami"]
-            user_doc = arami["users"].find_one({"user_id": int(user_id)})
-            if user_doc and "bkt_data" in user_doc and isinstance(user_doc["bkt_data"], dict) and "predictions" in user_doc["bkt_data"]:
-                db_predictions = user_doc["bkt_data"]["predictions"]
-                print(f"[BKT] Loaded {len(db_predictions)} existing predictions from database")
-        except Exception as e:
-            print(f"[BKT] Error loading database predictions: {e}")
-        
-        # Merge predictions, prioritizing current session values over database values
-        merged_predictions = {}
-        
-        # First add database predictions
-        for vocab, pred in db_predictions.items():
-            merged_predictions[vocab] = pred
-        
-        # Then overwrite with session predictions (these take precedence)
-        for vocab, pred in predictions.items():
-            merged_predictions[vocab] = pred
-            
-        print(f"[BKT] Combined {len(predictions)} session predictions with {len(db_predictions)} database predictions")
-        print(f"[BKT] Final prediction count: {len(merged_predictions)}")
-        
-        # Generate the BKT sequence using the merged predictions
-        bkt_sequence = [float(merged_predictions.get(vocab, {}).get('p_mastery', 0.5)) for vocab in ordered_vocab]
-        
-        value_sources = []
-        for vocab in ordered_vocab:
-            if vocab in predictions:
-                value_sources.append("session")
-            elif vocab in db_predictions:
-                value_sources.append("database")
-            else:
-                value_sources.append("default")
-
-        print(f"[BKT] Value sources: {value_sources.count('session')} from session, " +
-            f"{value_sources.count('database')} from database, " +
-            f"{value_sources.count('default')} defaults")
-
-        # Save the merged predictions for consistency
-        with open('bkt_predictions.json', 'w') as f:
-            json.dump(merged_predictions, f)
-        
-        print(f"[update_bkt] Generated BKT sequence with {len(bkt_sequence)} values")
-        print(f"[BKT] Sequence now has {sum(1 for x in bkt_sequence if x != 0.5)} non-default values")
-        
-        # Apply difficulty adjustments
+        # FIXED: Apply difficulty adjustments BEFORE generating sequence
         adjust_difficulty_after_session(user_id, correct_answers, incorrect_answers)
-
-        # REPLACE THE ORIGINAL RETURN WITH THIS:
-        # Get the most complete sequence using comprehensive database integration
-        bkt_sequence = ensure_bkt_data_loaded(user_id, force_db_refresh=True)
-        print(f"[BKT] Final comprehensive sequence: {len(bkt_sequence)} values")
-        print(f"[BKT] Non-default values in final sequence: {sum(1 for x in bkt_sequence if abs(x - 0.5) > 0.01)}/{len(bkt_sequence)}")
         
+        # FIXED: Generate sequence with comprehensive database integration
+        try:
+            # Get the most complete sequence using comprehensive database integration
+            bkt_sequence = ensure_bkt_data_loaded(user_id, force_db_refresh=True)
+            print(f"[BKT] Final comprehensive sequence: {len(bkt_sequence)} values")
+            print(f"[BKT] Non-default values in final sequence: {sum(1 for x in bkt_sequence if abs(x - 0.5) > 0.01)}/{len(bkt_sequence)}")
+            
+            # CRITICAL: Save updated predictions with review status to temp file
+            with open('bkt_predictions.json', 'w') as f:
+                json.dump(predictions, f, indent=2)
+            print(f"[BKT] Saved {len(predictions)} updated predictions with review status")
+            
+            # Return the enriched sequence
+            return bkt_sequence
+            
+        except Exception as e:
+            print(f"[BKT] Error in final sequence generation: {e}")
+            # Fallback: Generate basic sequence from custom_bkt
+            try:
+                ordered_vocab = custom_bkt.get_vocabulary_in_order()
+                fallback_sequence = [custom_bkt.get_mastery(vocab) for vocab in ordered_vocab]
+                print(f"[BKT] Using fallback sequence with {len(fallback_sequence)} values")
+                return fallback_sequence
+            except Exception as fallback_error:
+                print(f"[BKT] Fallback sequence generation failed: {fallback_error}")
+                return []
         
-        # Return the enriched sequence
-        return bkt_sequence
     except Exception as e:
         print(f"[BKT] Critical error in update_bkt: {str(e)}")
         import traceback
@@ -1770,26 +1747,33 @@ def get_existing_parameters(vocab, user_id=None):
 
     # Add this to bkt_engine.py
 def display_bkt_predictions(user_id, filter_vocab=None):
-    """Formats and prints BKT predictions in a readable table format"""
-    state = load_temp_state(user_id)
-    predictions = state.get("predictions", {})
+    """Display BKT predictions with daily review data integration"""
+    # First try to load from daily review file if it exists
+    daily_review_file = f"daily_review_bkt_{user_id}.json"
+    predictions = {}
     
-    if not predictions and os.path.exists('bkt_predictions.json'):
+    if os.path.exists(daily_review_file):
         try:
-            with open('bkt_predictions.json', 'r') as f:
-                data = json.load(f)
-                predictions = data.get("predictions", data)
-                print(f"[BKT] Loaded {len(predictions)} predictions from file")
+            with open(daily_review_file, 'r') as f:
+                daily_data = json.load(f)
+                predictions = daily_data.get("predictions", {})
+                print(f"[BKT] Loaded {len(predictions)} predictions from daily review file")
         except Exception as e:
-            print(f"[BKT] Error loading predictions from file: {e}")
+            print(f"[BKT] Error loading daily review predictions: {e}")
     
+    # Fall back to regular predictions file
     if not predictions:
-        print("\n┌─────────────────────────────────────────┐")
-        print("│           BKT MODEL PREDICTIONS          │")
-        print("├─────────────────────────────────────────┤")
-        print("│ No predictions available                 │")
-        print("└─────────────────────────────────────────┘")
-        return 0
+        state = load_temp_state(user_id)
+        predictions = state.get("predictions", {})
+        
+        if not predictions and os.path.exists('bkt_predictions.json'):
+            try:
+                with open('bkt_predictions.json', 'r') as f:
+                    data = json.load(f)
+                    predictions = data.get("predictions", data) if isinstance(data, dict) else {}
+                    print(f"[BKT] Loaded {len(predictions)} predictions from file")
+            except Exception as e:
+                print(f"[BKT] Error loading predictions from file: {e}")
     
     # Filter if needed
     if filter_vocab:
@@ -1799,10 +1783,17 @@ def display_bkt_predictions(user_id, filter_vocab=None):
             return 0
         predictions = filtered_preds
     
+    if not predictions:
+        print("\n┌─────────────────────────────────────────┐")
+        print("│           BKT MODEL PREDICTIONS          │")
+        print("├─────────────────────────────────────────┤")
+        print("│ No predictions available                 │")
+        print("└─────────────────────────────────────────┘")
+        return 0
+    
     # Count reviewed items
     reviewed_count = sum(1 for pred in predictions.values() if pred.get('reviewed', False))
     
-    # Debug counts
     print(f"[BKT] Total vocabularies: {len(predictions)}, Reviewed: {reviewed_count}")
     
     # Print header with reviewed count
@@ -1819,7 +1810,6 @@ def display_bkt_predictions(user_id, filter_vocab=None):
                             reverse=True)
         print(f"[BKT] Successfully sorted {len(sorted_items)} items by mastery")
     except (ValueError, TypeError) as e:
-        # Fall back to alphabetical sort if mastery values can't be compared
         print(f"[BKT] Warning: Could not sort by mastery ({e}), using alphabetical order")
         sorted_items = sorted(predictions.items())
     
@@ -1843,13 +1833,12 @@ def display_bkt_predictions(user_id, filter_vocab=None):
         # Format values with color indicators using ASCII
         mastery_str = f"{p_mastery:.2f}" + ('*' if p_mastery > 0.85 else ' ')
         
-        # Print the row with fixed column widths matching the header
         print(f"│ {vocab_display:<20} │ {mastery_str:^9} │ {guess:^8.2f} │ {slip:^8.2f} │ {conf:^8.2f} │ {correct:^8} │ {reviewed:^6} │")
     
     print("└──────────────────────┴───────────┴──────────┴──────────┴──────────┴──────────┴────────┘")
     print("* Mastery levels above 0.85 are considered 'mastered'")
+    print(f"[BKT] Displayed {reviewed_count} vocabulary predictions from daily review")
     
-    # Return count of reviewed items for testing purposes
     return reviewed_count
 
 def debug_question_object(question, prefix=""):
@@ -1966,141 +1955,131 @@ def apply_time_decay(custom_bkt, max_mastery_decrease=0.3):
     
     return updated_count
 
-def save_bkt_data_to_database(user_id, custom_bkt=None):
-    """Save BKT data to database with enhanced debugging"""
-    if not user_id:
-        print("[BKT] Cannot save to database: No user ID provided")
-        return False
-        
-    print(f"[BKT] Starting database save for user {user_id}")
-    
+def save_bkt_data_to_database(user_id, custom_bkt, is_daily_review=False):
+    """Save BKT data to database with review context preservation"""
     try:
-        # Connect to the database
-        arami = pymongo.MongoClient(uri)["arami"]
-        usercol = arami["users"]
+        print(f"[BKT] Saving BKT data to database for user {user_id}")
         
-        # Get current session data
-        if not custom_bkt:
-            custom_bkt = get_custom_bkt(user_id)
-        
-        if not custom_bkt or not hasattr(custom_bkt, 'vocab_parameters'):
-            print("[BKT] No valid BKT data to save")
-            return False
-            
-        print(f"[BKT] Found {len(custom_bkt.vocab_parameters)} vocabulary items to save")
-        
-        # Load user document
+        # Connect to database
+        usercol = connect_to_mongoDB()
         user = usercol.find_one({"user_id": int(user_id)})
+        
         if not user:
             print(f"[BKT] User {user_id} not found in database")
             return False
-            
-        # Get existing BKT data or create empty structure
-        db_bkt_data = user.get("bkt_data", {})
-        if not isinstance(db_bkt_data, dict):
-            db_bkt_data = {}
-            print("[BKT] Creating new BKT data structure")
         
-        # Get existing predictions from database
-        db_predictions = db_bkt_data.get("predictions", {})
-        if not isinstance(db_predictions, dict):
-            db_predictions = {}
+        # Get existing BKT data structure
+        existing_bkt_data = user.get("bkt_data", {})
+        if not isinstance(existing_bkt_data, dict):
+            existing_bkt_data = {}
         
-        print(f"[BKT] Existing database predictions: {len(db_predictions)}")
+        # Ensure predictions structure exists
+        if "predictions" not in existing_bkt_data:
+            existing_bkt_data["predictions"] = {}
         
-        # Track changes for debugging
-        vocabs_updated = 0
-        vocabs_added = 0
+        existing_predictions = existing_bkt_data["predictions"]
         
-        # CRITICAL: Process vocabulary parameters
+        # CRITICAL FIX: Merge predictions properly without overwriting
+        new_vocab_count = 0
+        updated_vocab_count = 0
+        
+        # Process vocabulary parameters from custom_bkt
         for vocab, params in custom_bkt.vocab_parameters.items():
-            # Skip special keys
             if vocab in ["fitted", "refit_counter"]:
                 continue
                 
-            if not isinstance(params, dict):
-                print(f"[BKT] Skipping invalid params for '{vocab}': {type(params)}")
-                continue
+            # Create prediction entry with all necessary fields
+            prediction_entry = {
+                "p_mastery": float(params.get('prior', 0.5)),
+                "guess": float(params.get('guess', 0.25)),
+                "slip": float(params.get('slip', 0.1)),
+                "confidence": float(params.get('confidence', 0.5)),
+                "correct": int(params.get('correct', 0)),
+                "reviewed": bool(params.get('reviewed', False)),  # CRITICAL: Preserve review status
+                "timestamp": int(params.get('last_reviewed', time.time())),
+                "difficulty_level": int(params.get('difficulty_level', 1)),
+                "transferred_difficulty": float(params.get('transferred_difficulty', 0)),
+                "observations": params.get('observations', []),
+                "response_times": params.get('response_times', [])
+            }
             
-            # Track if this is new or update
-            is_new_vocab = vocab not in db_bkt_data
-            
-            if is_new_vocab:
-                db_bkt_data[vocab] = {}
-                vocabs_added += 1
-                print(f"[BKT] Adding new vocab '{vocab}' with mastery {params.get('prior', 0.5):.3f}")
+            # Check if this is new or updated vocabulary
+            if vocab not in existing_predictions:
+                new_vocab_count += 1
+                print(f"[BKT] Adding NEW vocab '{vocab}': mastery={prediction_entry['p_mastery']:.6f}, reviewed={prediction_entry['reviewed']}")
             else:
-                vocabs_updated += 1
-                print(f"[BKT] Updating existing vocab '{vocab}' with mastery {params.get('prior', 0.5):.3f}")
+                old_entry = existing_predictions[vocab]
+                old_mastery = old_entry.get('p_mastery', 0.5)
+                new_mastery = prediction_entry['p_mastery']
+                old_reviewed = old_entry.get('reviewed', False)
+                new_reviewed = prediction_entry['reviewed']
+                
+                if abs(old_mastery - new_mastery) > 0.001 or old_reviewed != new_reviewed:
+                    updated_vocab_count += 1
+                    print(f"[BKT] Updating vocab '{vocab}': mastery {old_mastery:.6f}→{new_mastery:.6f}, reviewed {old_reviewed}→{new_reviewed}")
             
-            # Update all parameters
-            for key, value in params.items():
-                if key == 'observations' and isinstance(value, list):
-                    # Merge observations
-                    if 'observations' not in db_bkt_data[vocab]:
-                        db_bkt_data[vocab]['observations'] = []
-                    
-                    # Get existing timestamps to avoid duplicates
-                    existing_timestamps = set()
-                    for obs in db_bkt_data[vocab]['observations']:
-                        if isinstance(obs, dict) and 'timestamp' in obs:
-                            existing_timestamps.add(obs['timestamp'])
-                    
-                    # Add new observations
-                    for obs in value:
-                        if isinstance(obs, dict) and 'timestamp' in obs:
-                            if obs['timestamp'] not in existing_timestamps:
-                                db_bkt_data[vocab]['observations'].append(obs)
-                else:
-                    # For other parameters, always use the latest value
-                    old_value = db_bkt_data[vocab].get(key, "N/A")
-                    db_bkt_data[vocab][key] = value
-                    if old_value != value:
-                        print(f"[BKT] Updated {key} for '{vocab}': {old_value} → {value}")
+            # Update the prediction
+            existing_predictions[vocab] = prediction_entry
         
-        # Create predictions structure if it doesn't exist
-        if "predictions" not in db_bkt_data:
-            db_bkt_data["predictions"] = {}
+        # Update the main BKT data structure with metadata
+        updated_bkt_data = {
+            **existing_bkt_data,
+            "predictions": existing_predictions,
+            "last_update": int(time.time()),
+            "last_update_type": "daily_review" if is_daily_review else "lesson",
+            "vocab_count": len(existing_predictions)
+        }
         
-        # Update predictions with current session data
-        session_predictions = {}
-        try:
-            state = load_temp_state(user_id)
-            session_predictions = state.get("predictions", {})
-        except Exception as e:
-            print(f"[BKT] Error loading session predictions: {e}")
+        # CRITICAL: Also save in old format for backward compatibility
+        for vocab, prediction in existing_predictions.items():
+            updated_bkt_data[vocab] = {
+                'prior': prediction['p_mastery'],
+                'guess': prediction['guess'],
+                'slip': prediction['slip'],
+                'learn': 0.15,
+                'reviewed': prediction['reviewed'],
+                'observations': prediction.get('observations', []),
+                'timestamp': prediction['timestamp']
+            }
         
-        # Merge predictions
-        predictions_updated = 0
-        for vocab, pred in session_predictions.items():
-            if isinstance(pred, dict):
-                db_bkt_data["predictions"][vocab] = pred
-                predictions_updated += 1
-                print(f"[BKT] Updated prediction for '{vocab}': mastery={pred.get('p_mastery', 0.5):.3f}")
-        
-        # Set metadata
-        db_bkt_data["fitted"] = True
-        db_bkt_data["refit_counter"] = getattr(custom_bkt, 'refit_counter', 1)
-        
-        print(f"[BKT] Saving: {vocabs_added} new vocabs, {vocabs_updated} updated vocabs, {predictions_updated} predictions")
-        
-        # CRITICAL: Actually save to database
-        result = usercol.update_one(
+        # Save to database
+        update_result = usercol.update_one(
             {"user_id": int(user_id)},
-            {"$set": {"bkt_data": db_bkt_data}}
+            {"$set": {"bkt_data": updated_bkt_data}}
         )
         
-        print(f"[BKT] Database update result: matched={result.matched_count}, modified={result.modified_count}")
+        print(f"[BKT] Database update result: matched={update_result.matched_count}, modified={update_result.modified_count}")
+        print(f"[BKT] Saving: {new_vocab_count} new vocabs, {updated_vocab_count} updated vocabs, {len(existing_predictions)} predictions")
         
-        if result.modified_count > 0:
-            print(f"[BKT] Successfully saved BKT data to database for user {user_id}")
+        # CRITICAL: Update temp files for immediate access
+        if update_result.modified_count > 0:
+            try:
+                # Update bkt_predictions.json for immediate use
+                with open('bkt_predictions.json', 'w') as f:
+                    json.dump(existing_predictions, f, indent=2)
+                print(f"[BKT] Updated bkt_predictions.json with {len(existing_predictions)} predictions")
+                
+                # Create user-specific temp file for daily review processing
+                if is_daily_review:
+                    review_file = f"daily_review_bkt_{user_id}.json"
+                    with open(review_file, 'w') as f:
+                        json.dump({
+                            "predictions": existing_predictions,
+                            "timestamp": int(time.time()),
+                            "reviewed_count": len([p for p in existing_predictions.values() if p.get('reviewed', False)])
+                        }, f, indent=2)
+                    print(f"[BKT] Created daily review BKT file: {review_file}")
+                
+            except Exception as e:
+                print(f"[BKT] Error updating temp files: {e}")
+            
             return True
         else:
-            print(f"[BKT] WARNING: Database was not modified for user {user_id}")
+            print(f"[BKT] No changes made to database")
             return False
-        
+            
     except Exception as e:
-        print(f"[BKT] Error saving BKT data to database: {e}")
+        print(f"[BKT] Error saving to database: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -2135,19 +2114,74 @@ def ensure_bkt_data_loaded(user_id, force_db_refresh=False):
         ordered_vocab = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
         print(f"[BKT] Found {len(ordered_vocab)} vocabulary items in order")
         
-        # If ordered_vocab is empty, try to populate it from database or qbank
+        # If ordered_vocab is empty, try alternative methods to populate it
         if not ordered_vocab:
             try:
-                # Try to get vocabulary list from qbank
-                from qbank import get_all_vocabulary
-                all_vocab = get_all_vocabulary()
-                if all_vocab:
-                    ordered_vocab = all_vocab
-                    print(f"[BKT] Using {len(ordered_vocab)} vocabulary items from qbank")
+                # FIXED: Try multiple sources for vocabulary list
+                
+                # Method 1: Try to get from user's library
+                user_library = get_user_library(user_id)
+                if user_library:
+                    ordered_vocab = []
+                    for item in user_library:
+                        if isinstance(item, dict):
+                            vocab = item.get('vocabulary') or item.get('word')
+                            if vocab:
+                                ordered_vocab.append(vocab)
+                        elif isinstance(item, str):
+                            # If it's a string, just add it directly
+                            ordered_vocab.append(item)
+                    ordered_vocab = [v for v in ordered_vocab if v]  # Remove empty strings
+                    print(f"[BKT] Using {len(ordered_vocab)} vocabulary items from user library")
+                
+                # Method 2: Try to get from lesson data in session
+                if not ordered_vocab:
+                    try:
+                        # This is a fallback - try to get from any available source
+                        state = load_temp_state(user_id)
+                        predictions = state.get("predictions", {})
+                        if predictions:
+                            ordered_vocab = list(predictions.keys())
+                            print(f"[BKT] Using {len(ordered_vocab)} vocabulary items from session predictions")
+                    except Exception as e:
+                        print(f"[BKT] Error getting vocabulary from session: {e}")
+                
+                # Method 3: Try to get from database directly
+                if not ordered_vocab:
+                    try:
+                        arami = pymongo.MongoClient(uri)["arami"]
+                        user_doc = arami["users"].find_one({"user_id": int(user_id)})
+                        if user_doc and "bkt_data" in user_doc:
+                            bkt_data = user_doc["bkt_data"]
+                            
+                            # Get vocabulary from predictions
+                            if "predictions" in bkt_data and isinstance(bkt_data["predictions"], dict):
+                                ordered_vocab = list(bkt_data["predictions"].keys())
+                                print(f"[BKT] Using {len(ordered_vocab)} vocabulary items from database predictions")
+                            
+                            # Also check for direct vocabulary entries in bkt_data
+                            if not ordered_vocab:
+                                vocab_from_bkt = []
+                                for key, value in bkt_data.items():
+                                    if key not in ["fitted", "refit_counter", "predictions", "last_updated", "source", "force_update_id"] and isinstance(value, dict):
+                                        vocab_from_bkt.append(key)
+                                if vocab_from_bkt:
+                                    ordered_vocab = vocab_from_bkt
+                                    print(f"[BKT] Using {len(ordered_vocab)} vocabulary items from database BKT entries")
+                    except Exception as e:
+                        print(f"[BKT] Error getting vocabulary from database: {e}")
+                
+                # Method 4: Try to get from a hardcoded common vocabulary list (fallback)
+                if not ordered_vocab:
+                    print("[BKT] No vocabulary found from any source, using common vocabulary list")
+                    ordered_vocab = [
+                        "maupay", "diri", "it", "okay la ako", "salamat", "pakadto", 
+                        "balay", "tubig", "kaon", "buhi", "maupay nga kulop"
+                    ]
+                    print(f"[BKT] Using {len(ordered_vocab)} default vocabulary items")
+                    
             except Exception as e:
-                print(f"[BKT] Error getting vocabulary list: {e}")
-        
-        # MISSING CODE: Load predictions from session and database and create final_sequence
+                print(f"[BKT] Error getting alternative vocabulary list: {e}")
         
         # 2. Get session predictions
         state = load_temp_state(user_id)
@@ -2170,7 +2204,7 @@ def ensure_bkt_data_loaded(user_id, force_db_refresh=False):
                 # Also check for legacy format
                 for vocab, data in bkt_data.items():
                     # Skip special keys that aren't vocabulary items
-                    if vocab in ["fitted", "refit_counter", "predictions"]:
+                    if vocab in ["fitted", "refit_counter", "predictions", "last_updated", "source", "force_update_id"]:
                         continue
                         
                     # If it's a dict with prior, it's a valid vocabulary entry
@@ -2214,8 +2248,6 @@ def ensure_bkt_data_loaded(user_id, force_db_refresh=False):
             else:
                 final_sequence.append(0.5)  # Default for unknown vocabulary
                 
-        # Now continue with the existing code
-        
         # CRITICAL FIX: If final_sequence is empty, use database predictions directly
         if not final_sequence and merged_predictions:
             print("[BKT] Ordered vocabulary is empty, building sequence from predictions")
@@ -2241,6 +2273,7 @@ def ensure_bkt_data_loaded(user_id, force_db_refresh=False):
                 print(f"[BKT] Error caching sequence: {e}")
                 
         print(f"[BKT] Generated final sequence with {len(final_sequence)} values")
+        print(f"[BKT] Sequence preview: {final_sequence[:5]}{'...' if len(final_sequence) > 5 else ''}")
         return final_sequence
         
     except Exception as e:

@@ -98,27 +98,27 @@ def get_vocabulary_from_question(question):
 def calculate_bkt_confidence(mastery, guess, slip, vocab=None, params=None):
     """Calculate confidence based on BKT parameters with more dynamic weighting"""
     # Normalize input parameters
-    mastery = min(0.99, max(0.01, mastery))
-    guess = min(0.5, max(0.01, guess))
-    slip = min(0.5, max(0.01, slip))
+    mastery = min(0.99, max(0.01, float(mastery)))
+    guess = min(0.5, max(0.01, float(guess)))
+    slip = min(0.5, max(0.01, float(slip)))
     
-    # Calculate certainty component - higher near 0 or 1
-    certainty = 1.5 * abs(mastery - 0.5)  # Reduced from 2.0 to 1.5
+    # ENHANCED: Calculate certainty component - higher near 0 or 1
+    certainty = 2.0 * abs(mastery - 0.5)  # 0.0 to 1.0 scale
     
-    # Basic confidence starts at 0.5
-    base_conf = 0.5
+    # Basic confidence starts at 0.3
+    base_conf = 0.3
     
-    # Mastery contributes at the extremes, but with a more logarithmic curve
+    # ENHANCED: Mastery contributes more significantly
     if mastery > 0.5:
-        mastery_contrib = 0.20 * math.log(1 + (mastery - 0.5) * 2) / math.log(3)
+        mastery_contrib = 0.35 * (mastery - 0.5) * 2  # 0 to 0.35
     else:
-        mastery_contrib = 0.20 * math.log(1 + (0.5 - mastery) * 2) / math.log(3)
+        mastery_contrib = 0.25 * (0.5 - mastery) * 2  # 0 to 0.25 (for low mastery)
     
-    # Lower guess rates increase confidence (less randomness)
-    guess_contrib = 0.20 * (1.0 - (guess / 0.5))
+    # ENHANCED: Lower guess rates increase confidence significantly
+    guess_contrib = 0.25 * (1.0 - (guess / 0.5))  # Max 0.25 contribution
     
-    # Lower slip rates increase confidence (more consistency)
-    slip_contrib = 0.15 * (1.0 - (slip / 0.5))
+    # ENHANCED: Lower slip rates increase confidence significantly  
+    slip_contrib = 0.20 * (1.0 - (slip / 0.5))  # Max 0.20 contribution
     
     # Add learning history factor if available
     history_contrib = 0.0
@@ -127,22 +127,27 @@ def calculate_bkt_confidence(mastery, guess, slip, vocab=None, params=None):
         # More observations increase confidence, but with diminishing returns
         history_contrib = 0.15 * min(1.0, math.log(1 + obs_count) / math.log(10))
         
-        # But incorrect answers in recent history decrease confidence
-        recent_obs = params['observations'][-5:] if len(params['observations']) > 5 else params['observations']
-        incorrect_count = sum(1 for o in recent_obs if not o.get('correct', True))
-        if incorrect_count > 0:
-            history_contrib -= 0.05 * incorrect_count
+        # Recent performance affects confidence
+        recent_obs = params['observations'][-3:] if len(params['observations']) > 3 else params['observations']
+        if recent_obs:
+            recent_correct = sum(1 for o in recent_obs if o.get('correct', True))
+            recent_ratio = recent_correct / len(recent_obs)
+            if recent_ratio >= 0.67:  # 2/3 or better
+                history_contrib += 0.10
+            elif recent_ratio <= 0.33:  # 1/3 or worse
+                history_contrib -= 0.05
     
     # Calculate confidence from components
     confidence = base_conf + mastery_contrib + guess_contrib + slip_contrib + history_contrib
     
     # Keep within reasonable bounds
-    confidence = min(0.95, max(0.3, confidence))
+    confidence = min(0.95, max(0.25, confidence))
     
     # Debug components with more detail
-    print(f"[BKT] Confidence for {vocab or 'unknown'} (mastery={mastery:.3f}): {confidence:.3f}")
-    print(f"[BKT]   Components: Base={base_conf:.2f}, Mastery={mastery_contrib:.2f}, " +
-          f"Guess={guess_contrib:.2f}, Slip={slip_contrib:.2f}, History={history_contrib:.2f}")
+    if vocab:
+        print(f"[BKT] Confidence for {vocab} (mastery={mastery:.3f}): {confidence:.3f}")
+        print(f"[BKT]   Components: Base={base_conf:.2f}, Mastery={mastery_contrib:.2f}, " +
+              f"Guess={guess_contrib:.2f}, Slip={slip_contrib:.2f}, History={history_contrib:.2f}")
     
     return confidence
 

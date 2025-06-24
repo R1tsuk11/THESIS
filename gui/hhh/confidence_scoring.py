@@ -4,6 +4,15 @@ import os
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from datetime import datetime
+import flet as ft
+
+try:
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+    print("[Confidence] Warning: matplotlib not available, visualization disabled")
+
 
 class BayesianConfidenceSystem:
     """
@@ -264,6 +273,9 @@ class BayesianConfidenceSystem:
         Args:
             save_path: Path to save the visualization, if None just display
         """
+        if not HAS_MATPLOTLIB:
+            print("[Confidence] Visualization not available - matplotlib not installed")
+            return
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         fig.suptitle('Model Score Distributions for Correct vs. Incorrect Predictions')
         
@@ -373,79 +385,99 @@ if __name__ == "__main__":
     print(f"\nSystem confidence: {result['system_confidence']:.2f}")
     print(f"Interpretation: {interpret_confidence(result['system_confidence'])}")
     
-    # 5. Show model contributions
-    print("\nModel contributions:")
-    for model, data in result["model_likelihoods"].items():
-        print(f"  {model}: score={data['score']:.2f}, l_correct={data['l_correct']:.2f}, l_incorrect={data['l_incorrect']:.2f}")
+    # FIXED: Remove the broken model_likelihoods access
+    print(f"\nCalculation completed with {len(test_scores)} models")
 
-def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronunciation_score=None, user_id=None):
-    """Calculate a weighted system-wide confidence score based on component models"""
+def get_daily_review_completion_count(user_id):
+    """Get the number of completed daily reviews - strict checking"""
     try:
-        # Debug initial input values
-        print(f"[DEBUG] Raw confidence inputs - BKT: {bkt_score}, LSTM: {lstm_score}, SuperMemo: {supermemo_score}")
+        from mainmenu import connect_to_mongoDB
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
         
-        # Better error handling for input values
-        bkt_score = 0.5 if bkt_score is None else float(bkt_score)
-        lstm_score = 0.5 if lstm_score is None else float(lstm_score)
+        if user:
+            # Check review_data first (most reliable)
+            review_data = user.get("review_data", {})
+            completed_reviews = review_data.get("completed", 0)
+            
+            if completed_reviews > 0:
+                print(f"[SuperMemo] Found {completed_reviews} completed daily reviews")
+                return completed_reviews
+            
+            # Alternative: check review_history but be more strict
+            review_history = user.get("review_history", {})
+            
+            # Count vocabularies that have been reviewed MORE than once (indicating spaced repetition)
+            spaced_review_count = 0
+            for vocab, data in review_history.items():
+                times_reviewed = data.get("times_reviewed", 0)
+                last_review = data.get("last_review", None)
+                
+                # Must have been reviewed multiple times AND have a recent review date
+                if times_reviewed >= 2 and last_review:
+                    try:
+                        from datetime import datetime, timedelta
+                        last_review_date = datetime.strptime(last_review, "%Y-%m-%d")
+                        # Only count if reviewed in the last 30 days
+                        if (datetime.now() - last_review_date).days <= 30:
+                            spaced_review_count += 1
+                    except:
+                        pass  # Skip if date parsing fails
+            
+            if spaced_review_count > 0:
+                print(f"[SuperMemo] Found {spaced_review_count} vocabularies with spaced reviews")
+                return spaced_review_count
+            
+            print(f"[SuperMemo] No meaningful review activity found")
+            return 0
+                
+    except Exception as e:
+        print(f"[SuperMemo] Error checking daily review completion: {e}")
+    
+    return 0
+
+def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronunciation_score=None, page=None):
+    """Calculate system-wide confidence with proper SuperMemo check"""
+    try:
+        print(f"[Confidence] Calculating Bayesian fusion with these scores:")
+        print(f"  - bkt: score={bkt_score:.2f}")
+        print(f"  - lstm: score={lstm_score:.2f}")
         
-        # Normalize inputs to valid confidence values
+        # Prepare scores dictionary
         scores = {
-            "bkt": min(0.95, max(0.1, bkt_score)),
-            "lstm": min(0.95, max(0.1, lstm_score)),
+            "bkt": min(0.95, max(0.05, float(bkt_score))),
+            "lstm": min(0.95, max(0.05, float(lstm_score)))
         }
         
-        # Check if supermemo score should be included
-        if supermemo_score is not None:
+        # Check if SuperMemo data is available by looking for daily review completion
+        if supermemo_score is None and page is not None:
+            # Try to get SuperMemo data from daily review completion
             try:
-                # IMPORTANT: Import has_completed_reviews from supermemo_engine
-                from supermemo_engine import has_completed_reviews
+                user_id = page.session.get("user_id")
                 
-                # Check if the user actually has any SuperMemo history with repetitions
-                has_supermemo_data = False
+                if user_id:
+                    daily_review_count = get_daily_review_completion_count(user_id)
+                    if daily_review_count > 0:
+                        # Calculate a basic SuperMemo score based on completion
+                        supermemo_score = min(0.9, 0.5 + (daily_review_count * 0.1))
+                        print(f"[Confidence] Calculated SuperMemo score from {daily_review_count} completed reviews: {supermemo_score:.2f}")
+                    else:
+                        print(f"[Confidence] No daily reviews completed yet")
                 
-                if user_id is not None:
-                    try:
-                        from supermemo_engine import connect_to_mongoDB
-                        usercol = connect_to_mongoDB()
-                        user = usercol.find_one({"user_id": int(user_id)})
-                        
-                        if user and "supermemo" in user:
-                            # Check if supermemo has any actual review history where repetition > 0
-                            supermemo_data = user["supermemo"]
-                            
-                            # Count items that have actually been reviewed (not just scheduled)
-                            reviewed_items = 0
-                            
-                            # Check for items with repetition > 0 in needs_practice
-                            if "needs_practice" in supermemo_data:
-                                for vocab_data in supermemo_data["needs_practice"].values():
-                                    if isinstance(vocab_data, dict) and vocab_data.get("repetition", 0) > 0:
-                                        reviewed_items += 1
-                            
-                            # Check for items with repetition > 0 in mastered
-                            if "mastered" in supermemo_data:
-                                for vocab_data in supermemo_data["mastered"].values():
-                                    if isinstance(vocab_data, dict) and vocab_data.get("repetition", 0) > 0:
-                                        reviewed_items += 1
-                            
-                            has_supermemo_data = reviewed_items > 0
-                            print(f"[SuperMemo] Found {reviewed_items} items with review history")
-                    except Exception as e:
-                        print(f"[Confidence] Error checking SuperMemo data: {e}")
-                
-                # Only include SuperMemo if the user has completed reviews
-                if user_id is not None and (has_completed_reviews(user_id) or has_supermemo_data):
-                    scores["supermemo"] = min(0.95, max(0.1, float(supermemo_score)))
-                    print(f"[SuperMemo] Using confidence score: {scores['supermemo']:.2f}")
-                else:
-                    # IMPORTANT CHANGE: Do NOT include SuperMemo score for new users at all
-                    print("[SuperMemo] Not available - user hasn't completed any daily reviews yet")
             except Exception as e:
-                print(f"[Confidence] Error checking SuperMemo eligibility: {e}")
+                print(f"[Confidence] Error getting SuperMemo data: {e}")
+        
+        # Add SuperMemo score if available
+        if supermemo_score is not None:
+            scores["supermemo"] = min(0.95, max(0.05, float(supermemo_score)))
+            print(f"  - supermemo: score={supermemo_score:.2f}")
+        else:
+            print(f"  - supermemo: Not available - user hasn't completed any daily reviews yet")
         
         # Add pronunciation score if available
         if pronunciation_score is not None:
-            scores["pronunciation"] = min(0.95, max(0.1, float(pronunciation_score)))
+            scores["pronunciation"] = min(0.95, max(0.05, float(pronunciation_score)))
+            print(f"  - pronunciation: score={pronunciation_score:.2f}")
         
         # Calculate final confidence using Bayesian fusion
         confidence_system = BayesianConfidenceSystem()
@@ -453,28 +485,46 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
         final_confidence = result["system_confidence"]
         interpretation = interpret_confidence(final_confidence)
         
-        # Print formatted output
+        # ENHANCED: Print RAW values with high precision
         print(f"\n{'='*70}")
-        print(f"SYSTEM-WIDE CONFIDENCE ASSESSMENT")
+        print(f"SYSTEM-WIDE CONFIDENCE ASSESSMENT - RAW VALUES")
         print(f"{'='*70}")
         
-        # Print included component scores
+        # Print included component scores with RAW precision
         for model, score in scores.items():
-            print(f"{model.upper()} Confidence:    {score:.2f}")
+            print(f"{model.upper()} Confidence:    {score:.8f}")
         
         # Print explicit note if SuperMemo is not included
-        if supermemo_score is not None and "supermemo" not in scores:
+        if supermemo_score is None:
             print("SUPERMEMO: Not available - user hasn't completed any daily reviews yet")
-            
-        print(f"Overall System Confidence: {final_confidence:.2f}")
+        
+        # ENHANCED: Show additional raw calculation details
+        print(f"Overall System Confidence: {final_confidence:.8f}")
         print(f"Interpretation: {interpretation}")
+        
+        # ENHANCED: Show raw Bayesian calculation details
+        print(f"\nRAW BAYESIAN CALCULATION DETAILS:")
+        print(f"  - Input Scores (normalized): {[f'{k}={v:.6f}' for k, v in scores.items()]}")
+        print(f"  - Raw Posterior Probability: {final_confidence:.10f}")
+        print(f"  - Confidence Level (0-1 scale): {final_confidence:.8f}")
+        print(f"  - Confidence Percentage: {final_confidence * 100:.6f}%")
+        
+        # ENHANCED: Show individual model contributions if available
+        if hasattr(result, 'model_contributions') and result.model_contributions:
+            print(f"\nINDIVIDUAL MODEL CONTRIBUTIONS:")
+            for model, contribution in result.model_contributions.items():
+                print(f"  - {model.upper()}: {contribution:.8f}")
+        
         print(f"{'='*70}")
         
         return {
             "system_confidence": final_confidence,
             "interpretation": interpretation,
-            "components": scores
+            "components": scores,
+            "raw_posterior": final_confidence,
+            "confidence_percentage": final_confidence * 100
         }
+        
     except Exception as e:
         print(f"[Confidence] Error in system confidence calculation: {str(e)}")
         import traceback
@@ -482,5 +532,7 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
         return {
             "system_confidence": 0.5, 
             "interpretation": "Error in confidence calculation",
-            "components": {}
+            "components": {},
+            "raw_posterior": 0.5,
+            "confidence_percentage": 50.0
         }

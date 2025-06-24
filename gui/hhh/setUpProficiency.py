@@ -879,9 +879,9 @@ def pretest_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncor
     percentage = (4 / 6) * 100  # This will be 66.67
     
     # Determine proficiency level based on score
-    proficiency_value = 0.05 if accuracyPercentage > percentage else 0.0
-    proficiency_text = "BEGINNER" if proficiency_value == 0.05 else "STARTER"
-    proficiency_color = "#75B0FF" if proficiency_value == 0.05 else "#FFB7B7"
+    proficiency_value = 0.02 if accuracyPercentage > percentage else 0.0
+    proficiency_text = "BEGINNER" if proficiency_value == 0.02 else "STARTER"
+    proficiency_color = "#75B0FF" if proficiency_value == 0.02 else "#FFB7B7"
     
     # Add proficiency to database
     add_proficiency_to_db(user_id, proficiency_value)

@@ -7,13 +7,14 @@ import sys
 from reviewScore import lesson_score
 import numpy as np
 import asyncio
-from supermemo_engine import has_review_questions, update_supermemo_state, connect_to_mongoDB
+from supermemo_engine import calculate_dynamic_quality, has_review_questions, mark_vocabulary_batch_reviewed, update_supermemo_state, connect_to_mongoDB
 import threading
 import matplotlib.pyplot as plt  # Import for visualization
 import base64  # Import for encoding visualization images
 from voice_recognition.audio_processing import is_valid_audio, extract_features
 from voice_recognition.speech_recognition_utils import SpeechProcessor, capture_audio  # Import the more complete module
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from supermemo_engine import calculate_dynamic_quality, has_review_questions, mark_vocabulary_batch_reviewed, update_supermemo_state, connect_to_mongoDB
 
 correct_answers = {}
 incorrect_answers = {}
@@ -49,44 +50,124 @@ correctDlg = ft.AlertDialog(
 )
 
 def batch_update_supermemo(user_id, correct_answers, incorrect_answers):
-    """Process SuperMemo updates for all vocabulary items in a batch"""
+    """Process SuperMemo updates with enhanced quality calculation and BKT integration"""
     print(f"[SuperMemo] Processing {len(correct_answers)} correct and {len(incorrect_answers)} incorrect answers")
     
-    # Convert review results to the vocabulary:quality format needed by mark_vocabulary_batch_reviewed
+    # Get user's review history once for efficiency
+    try:
+        from bkt_engine import connect_to_mongoDB
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
+        review_history = user.get("review_history", {}) if user else {}
+    except:
+        review_history = {}
+    
     vocab_quality_map = {}
     
-    # Process correct answers with quality=5 (perfect recall)
-    for q in correct_answers.values():
+    # CRITICAL FIX: Process BKT updates for daily review FIRST
+    bkt_correct_answers = {}
+    bkt_incorrect_answers = {}
+    
+    # Process correct answers with ENHANCED quality calculation
+    for q_id, q in correct_answers.items():
         vocab = getattr(q, 'vocabulary', None)
         if vocab:
             vocab = vocab.lower().strip()
-            vocab_quality_map[vocab] = 5
-            print(f"[SuperMemo] Adding correct vocab: '{vocab}' with quality 5")
+            response_time = getattr(q, 'response_time', None)
+            
+            # FIXED: Pass daily review flag to quality calculation
+            quality = calculate_dynamic_quality(
+                user_id=user_id,
+                question_data=q,
+                is_correct=True,
+                response_time=response_time,
+                review_history=review_history.get(vocab, {}),
+                is_daily_review=True  # CRITICAL: Add this flag
+            )
+            
+            vocab_quality_map[vocab] = quality
+            print(f"[SuperMemo] Correct vocab: '{vocab}' with moderated daily review quality {quality}")
+            bkt_correct_answers[q_id] = q
     
-    # Process incorrect answers with quality=2 (difficult recall)
-    for q in incorrect_answers.values():
+    # Process incorrect answers
+    for q_id, q in incorrect_answers.items():
         vocab = getattr(q, 'vocabulary', None)
         if vocab:
             vocab = vocab.lower().strip()
-            vocab_quality_map[vocab] = 2
-            print(f"[SuperMemo] Adding incorrect vocab: '{vocab}' with quality 2")
+            response_time = getattr(q, 'response_time', None)
+            
+            # FIXED: Pass daily review flag to quality calculation
+            quality = calculate_dynamic_quality(
+                user_id=user_id,
+                question_data=q,
+                is_correct=False,
+                response_time=response_time,
+                review_history=review_history.get(vocab, {}),
+                is_daily_review=True  # CRITICAL: Add this flag
+            )
+            
+            vocab_quality_map[vocab] = quality
+            print(f"[SuperMemo] Incorrect vocab: '{vocab}' with moderated daily review quality {quality}")
+            bkt_incorrect_answers[q_id] = q
     
-    # Print summary before processing
+    # CRITICAL FIX: Process BKT updates for daily review with MORE GENTLE impact
+    if bkt_correct_answers or bkt_incorrect_answers:
+        print(f"[DAILY REVIEW] Processing BKT updates: {len(bkt_correct_answers)} correct, {len(bkt_incorrect_answers)} incorrect")
+        
+        try:
+            from bkt_engine import update_bkt
+            
+            # INCREASED impact scale for MORE GENTLE updates (higher = more gentle)
+            current_bkt_sequence = update_bkt(
+                user_id, 
+                bkt_correct_answers, 
+                bkt_incorrect_answers, 
+                impact_scale=2.0,  # INCREASED from 1.5 to 2.0 for MORE GENTLE updates
+                is_daily_review=True
+            )
+            
+            print(f"[DAILY REVIEW] BKT processing complete with GENTLE impact, sequence length: {len(current_bkt_sequence) if current_bkt_sequence else 0}")
+            
+            # CRITICAL: Verify that vocabularies were marked as reviewed
+            try:
+                from bkt_engine import get_custom_bkt
+                custom_bkt = get_custom_bkt(user_id)
+                if custom_bkt:
+                    reviewed_count = 0
+                    for vocab in vocab_quality_map.keys():
+                        if custom_bkt.is_reviewed(vocab):
+                            reviewed_count += 1
+                    print(f"[DAILY REVIEW] Verification: {reviewed_count}/{len(vocab_quality_map)} vocabularies marked as reviewed")
+                else:
+                    print(f"[DAILY REVIEW] Warning: Could not verify review status - no BKT predictor")
+            except Exception as verify_error:
+                print(f"[DAILY REVIEW] Error verifying review status: {verify_error}")
+            
+        except Exception as e:
+            print(f"[DAILY REVIEW] Error processing BKT updates: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Print summary before processing SuperMemo
     print(f"[SuperMemo] Total vocabulary items to update: {len(vocab_quality_map)}")
     for vocab, quality in vocab_quality_map.items():
         print(f"[SuperMemo] Will update: '{vocab}' with quality {quality}")
     
-    # Import from supermemo_engine to use the comprehensive function
+    # Use the enhanced batch function for SuperMemo scheduling
     try:
         from supermemo_engine import mark_vocabulary_batch_reviewed
         result = mark_vocabulary_batch_reviewed(user_id, vocab_quality_map)
-        if not result:
-            print("[SuperMemo] Error updating vocabulary batch")
+        if result:
+            print("[SuperMemo] ✅ Batch update completed successfully")
+        else:
+            print("[SuperMemo] ❌ Batch update failed")
+        return result
     except Exception as e:
         print(f"[SuperMemo] Error in batch update: {str(e)}")
         import traceback
         traceback.print_exc()
-
+        return False
+    
 def generate_consistent_key(question_data):
     """Generate a consistent key for tracking questions"""
     if not question_data:

@@ -525,24 +525,40 @@ def calculate_difficulty_transfer_for_mastery(session):
         return 0.5  # Safe fallback
 
 def process_lesson_question(user_id, question_id, question, is_correct, response_time=None):
-    """Process a single lesson question with dynamic BKT parameter updates and response time consideration"""
+    """Process a single lesson question with ENHANCED response time and difficulty conditioning"""
     session = create_or_get_session(user_id)
     if not session:
         return 0.5
-    
+
     vocab = extract_vocabulary_from_question(question)
     if not vocab:
         return 0.5
-    
+
     vocab = vocab.lower().strip()
-    
+
+    # CRITICAL FIX: For pronunciation questions, check accuracy attribute
+    actual_is_correct = is_correct
+    if hasattr(question, 'type') and question.type == 'Pronunciation':
+        accuracy = getattr(question, 'accuracy', 0.0)
+        accuracy_threshold = getattr(question, 'accuracy_threshold', 0.6)
+        actual_is_correct = accuracy >= accuracy_threshold
+
+        print(f"[LessonBKT] Pronunciation question processing:")
+        print(f"  - Original is_correct: {is_correct}")
+        print(f"  - Question accuracy: {accuracy:.2f}")
+        print(f"  - Accuracy threshold: {accuracy_threshold:.2f}")
+        print(f"  - Actual is_correct: {actual_is_correct}")
+
+    # CRITICAL: Override is_correct with the computed value
+    is_correct = actual_is_correct
+
     # Get or initialize vocabulary in session
     if vocab not in session.session_predictions:
         base_mastery = get_base_mastery_for_new_vocab(user_id)
         session.session_predictions[vocab] = {
             'p_mastery': base_mastery,
-            'guess': 0.25,  # Will be updated dynamically
-            'slip': 0.10,   # Will be updated dynamically
+            'guess': 0.25,
+            'slip': 0.10,
             'confidence': 0.5,
             'correct': 0,
             'reviewed': False,
@@ -550,118 +566,200 @@ def process_lesson_question(user_id, question_id, question, is_correct, response
             'difficulty_level': 1,
             'transferred_difficulty': 0,
             'observations': [],
-            'response_times': []  # NEW: Track response times
+            'response_times': []
         }
         print(f"[LessonBKT] Initialized '{vocab}' with base mastery: {base_mastery:.3f}")
-    
+
     # Get current prediction
     current_pred = session.session_predictions[vocab]
     old_mastery = current_pred['p_mastery']
     old_guess = current_pred.get('guess', 0.25)
     old_slip = current_pred.get('slip', 0.10)
-    
-    # ENHANCED: Consider response time for learning rate adjustment
-    base_learn_rate = 0.15
+
+    # ENHANCED: Much more sophisticated response time and difficulty analysis
+    base_learn_rate = 0.12  # Slightly lower base rate
+    difficulty = getattr(question, 'difficulty', 1)
+
+    # Enhanced difficulty-based expected times (more realistic)
+    expected_times = {
+        1: 1.5,   # Very easy - should be quick
+        2: 2.5,   # Easy - reasonable time
+        3: 4.0,   # Medium - think time
+        4: 6.0,   # Hard - significant thought
+        5: 8.0    # Very hard - lots of thinking
+    }
+
+    time_factor = 1.0
+    difficulty_factor = 1.0
+
     if response_time:
         current_pred['response_times'].append(response_time)
-        
-        # Calculate response time factor
-        # Fast responses (< 2 seconds) suggest high confidence/mastery
-        # Slow responses (> 5 seconds) suggest uncertainty
-        if response_time < 2.0:
-            time_factor = 1.2  # Boost learning for quick correct answers
-        elif response_time > 5.0:
-            time_factor = 0.8  # Reduce learning for slow answers
-        else:
-            time_factor = 1.0  # Normal learning rate
-        
-        learn_rate = base_learn_rate * time_factor
-        print(f"[LessonBKT] Response time: {response_time:.2f}s, learning factor: {time_factor:.2f}")
-    else:
-        learn_rate = base_learn_rate
-    
-    # ENHANCED: Dynamic parameter updates based on performance patterns
-    observations = current_pred.get('observations', [])
-    
-    # Update guess and slip based on recent performance patterns
-    if len(observations) >= 2:
-        recent_performance = [obs.get('correct', False) for obs in observations[-3:]]
-        
+        expected_time = expected_times.get(difficulty, 3.0)
+        time_ratio = response_time / expected_time
+
+        print(f"[LessonBKT] Response analysis: {response_time:.1f}s (expected: {expected_time:.1f}s, ratio: {time_ratio:.2f})")
+
         if is_correct:
-            # Correct answer - adjust parameters
-            if old_mastery < 0.5:
-                # Low mastery but correct - might be a lucky guess
-                if response_time and response_time > 4.0:
-                    # Slow correct answer suggests learning, not guessing
-                    new_guess = max(0.05, old_guess * 0.9)  # Reduce guess rate
+            if time_ratio < 0.4:  # Very fast correct
+                if difficulty <= 2:
+                    time_factor = 1.4
+                    print(f"[LessonBKT] Excellent: Very fast correct on easy question")
                 else:
-                    # Fast correct answer might be a guess
-                    new_guess = min(0.35, old_guess * 1.1)  # Slight increase
-            else:
-                # High mastery and correct - reduce guess rate
-                new_guess = max(0.05, old_guess * 0.85)
-            
-            # Reduce slip rate for correct answers
-            new_slip = max(0.03, old_slip * 0.9)
-            
+                    time_factor = 0.9
+                    print(f"[LessonBKT] Suspicious: Very fast correct on hard question")
+            elif time_ratio < 0.8:  # Reasonably fast correct
+                if difficulty >= 4:
+                    time_factor = 1.3
+                    print(f"[LessonBKT] Excellent: Fast correct on hard question")
+                else:
+                    time_factor = 1.2
+                    print(f"[LessonBKT] Good: Fast correct on medium question")
+            elif time_ratio < 1.3:  # Normal time correct
+                time_factor = 1.0
+                print(f"[LessonBKT] Normal: Reasonable time correct")
+            elif time_ratio < 2.0:  # Slow correct
+                if difficulty >= 4:
+                    time_factor = 0.95
+                    print(f"[LessonBKT] Acceptable: Slow but correct on hard question")
+                else:
+                    time_factor = 0.7
+                    print(f"[LessonBKT] Concerning: Slow correct on easy question")
+            else:  # Very slow correct
+                if difficulty >= 4:
+                    time_factor = 0.8
+                    print(f"[LessonBKT] Slow but correct: Very slow on hard question")
+                else:
+                    time_factor = 0.6
+                    print(f"[LessonBKT] Slow but correct: Very slow on easy question")
         else:
-            # Incorrect answer - adjust parameters
-            if old_mastery > 0.7:
-                # High mastery but incorrect - likely a slip
-                new_slip = min(0.30, old_slip * 1.15)
-                new_guess = old_guess  # Don't change guess for slips
+            if time_ratio < 0.5:
+                time_factor = 0.2
+                print(f"[LessonBKT] Very poor: Fast incorrect (careless/guessing)")
+            elif time_ratio < 1.0:
+                time_factor = 0.4
+                print(f"[LessonBKT] Poor: Medium speed incorrect")
             else:
-                # Low mastery and incorrect - increase guess rate
-                new_guess = min(0.40, old_guess * 1.1)
-                new_slip = max(0.05, old_slip * 1.05)  # Slight slip increase
+                time_factor = 0.3
+                print(f"[LessonBKT] Very poor: Slow incorrect (struggled and failed)")
+
+    # ENHANCED: More pronounced difficulty-based adjustments
+    if difficulty <= 1:
+        difficulty_factor = 0.6
+        print(f"[LessonBKT] Very easy question - reduced learning factor")
+    elif difficulty == 2:
+        difficulty_factor = 0.8
+        print(f"[LessonBKT] Easy question - reduced learning factor")
+    elif difficulty == 3:
+        difficulty_factor = 1.0
+        print(f"[LessonBKT] Medium question - standard learning factor")
+    elif difficulty == 4:
+        difficulty_factor = 1.4
+        print(f"[LessonBKT] Hard question - increased learning factor")
     else:
-        # First few observations - use defaults with slight adjustments
+        difficulty_factor = 1.8
+        print(f"[LessonBKT] Very hard question - greatly increased learning factor")
+
+    learn_rate = base_learn_rate * time_factor * difficulty_factor
+    learn_rate = max(0.02, min(0.4, learn_rate))
+
+    print(f"[LessonBKT] Final learning rate: {learn_rate:.3f} "
+          f"(base: {base_learn_rate:.3f} × time: {time_factor:.2f} × difficulty: {difficulty_factor:.2f})")
+
+    observations = current_pred.get('observations', [])
+
+    # Adaptive parameter adjustment based on performance history
+    if response_time is not None:
+        # Use time_ratio and difficulty for dynamic adjustment
+        if is_correct:
+            # Fast and correct on hard question: decrease guess/slip more
+            if time_ratio < 0.8 and difficulty >= 4:
+                new_guess = max(0.02, old_guess * 0.7)
+                new_slip = max(0.02, old_slip * 0.8)
+            # Fast and correct on easy/medium: moderate decrease
+            elif time_ratio < 0.8:
+                new_guess = max(0.03, old_guess * 0.8)
+                new_slip = max(0.03, old_slip * 0.85)
+            # Slow and correct on easy: less decrease, maybe slight increase in slip
+            elif time_ratio > 1.5 and difficulty <= 2:
+                new_guess = max(0.05, old_guess * 0.95)
+                new_slip = min(0.4, old_slip * 1.05)
+            else:
+                # Default: gentle decrease
+                new_guess = max(0.03, old_guess * 0.9)
+                new_slip = max(0.03, old_slip * 0.9)
+        else:
+            # Incorrect and fast: likely guessing, increase guess
+            if time_ratio < 0.8:
+                new_guess = min(0.5, old_guess * 1.15)
+                new_slip = min(0.4, old_slip * 1.05)
+            # Incorrect and slow: likely confusion, increase slip more
+            elif time_ratio > 1.5:
+                new_guess = min(0.5, old_guess * 1.05)
+                new_slip = min(0.4, old_slip * 1.15)
+            else:
+                # Default: gentle increase
+                new_guess = min(0.5, old_guess * 1.05)
+                new_slip = min(0.4, old_slip * 1.05)
+    else:
+        # Fallback if no response_time: use old logic or keep unchanged
         new_guess = old_guess
         new_slip = old_slip
-    
-    # Standard BKT update with dynamic parameters
+
+    # Consistency bonus/penalty (optional, can keep from your original code)
+    if len(observations) >= 2:
+        recent_performance = [obs.get('correct', False) for obs in observations[-5:]]
+        if len(recent_performance) >= 3:
+            if all(recent_performance[-3:]):
+                learn_rate *= 1.2
+                print(f"[LessonBKT] Consistency bonus applied - 3 correct in a row")
+            elif not any(recent_performance[-3:]):
+                learn_rate *= 0.7
+                print(f"[LessonBKT] Consistency penalty applied - 3 incorrect in a row")
+
+    # Enhanced BKT update with dynamic parameters
     if is_correct:
-        # P(mastered | correct)
         new_mastery = (old_mastery * (1 - new_slip)) / (old_mastery * (1 - new_slip) + (1 - old_mastery) * new_guess)
-        # Apply learning
         new_mastery = new_mastery + (1 - new_mastery) * learn_rate
     else:
-        # P(mastered | incorrect)
         new_mastery = (old_mastery * new_slip) / (old_mastery * new_slip + (1 - old_mastery) * (1 - new_guess))
-        # Learning still occurs but less
-        new_mastery = new_mastery + (1 - new_mastery) * (learn_rate * 0.5)
-    
-    # Calculate confidence based on consistency and parameters
+        new_mastery = new_mastery + (1 - new_mastery) * (learn_rate * 0.4)
+
+    new_mastery = max(0.01, min(0.99, new_mastery))
+    new_guess = max(0.02, min(0.5, new_guess))
+    new_slip = max(0.02, min(0.4, new_slip))
+
     confidence = calculate_bkt_confidence_enhanced(new_mastery, new_guess, new_slip, vocab, current_pred)
-    
-    # Update the prediction
+
     current_pred['p_mastery'] = new_mastery
     current_pred['guess'] = new_guess
     current_pred['slip'] = new_slip
     current_pred['confidence'] = confidence
     current_pred['timestamp'] = int(time.time())
-    current_pred['correct'] = 1 if is_correct else 0  # Last answer result
-    
-    # Add to observations
+    current_pred['correct'] = 1 if is_correct else 0
+
     observation = {
         'correct': is_correct,
         'timestamp': int(time.time()),
         'question_id': question_id,
-        'difficulty': getattr(question, 'difficulty', 1),
-        'response_time': response_time
+        'difficulty': difficulty,
+        'response_time': response_time,
+        'type': getattr(question, 'type', None),
+        'time_ratio': time_ratio if response_time else None,
+        'time_factor': time_factor,
+        'difficulty_factor': difficulty_factor,
+        'learn_rate': learn_rate
     }
-    
+
     if 'observations' not in current_pred:
         current_pred['observations'] = []
     current_pred['observations'].append(observation)
-    
+
     print(f"[LessonBKT] Updated '{vocab}': mastery {old_mastery:.3f}→{new_mastery:.3f}, " +
           f"guess {old_guess:.3f}→{new_guess:.3f}, slip {old_slip:.3f}→{new_slip:.3f}, " +
           f"conf: {confidence:.3f} (correct={is_correct})")
-    
-    # Save session
+
     save_session_to_file(user_id, session)
-    
+
     return new_mastery
 
 def calculate_bkt_confidence_enhanced(mastery, guess, slip, vocab=None, prediction_data=None):
@@ -685,8 +783,13 @@ def calculate_bkt_confidence_enhanced(mastery, guess, slip, vocab=None, predicti
     
     # Response time contribution
     time_contrib = 0.0
-    if prediction_data and 'response_times' in prediction_data:
-        times = prediction_data['response_times']
+    if prediction_data and 'observations' in prediction_data:
+        # Only consider non-Lesson observations for response time
+        times = [
+            obs['response_time']
+            for obs in prediction_data['observations']
+            if obs.get('response_time') and getattr(obs, 'type', None) != 'Lesson' and obs.get('type', None) != 'Lesson'
+        ]
         if times:
             avg_time = sum(times) / len(times)
             # Optimal time range is 2-4 seconds
@@ -696,7 +799,7 @@ def calculate_bkt_confidence_enhanced(mastery, guess, slip, vocab=None, predicti
                 time_contrib = 0.05  # Very fast might be guessing
             else:
                 time_contrib = 0.02  # Very slow suggests uncertainty
-    
+
     confidence = base_conf + mastery_contrib + param_contrib + consistency_contrib + time_contrib
     return min(0.95, max(0.25, confidence))
 
@@ -737,6 +840,32 @@ def get_base_mastery_for_new_vocab(user_id):
         print(f"[LessonBKT] Error getting base mastery: {e}")
     
     return 0.5  # Default
+
+def get_vocab_performance_summary(prediction):
+    """
+    Calculate the percent correct for a vocabulary from its observations.
+    Ensures all 'correct' values are treated as int (0/1).
+    """
+    observations = prediction.get('observations', [])
+    if not observations:
+        return 0.0
+
+    correct_count = 0
+    total_count = 0
+    for obs in observations:
+        if 'correct' in obs:
+            val = obs['correct']
+            # Convert bool to int if needed
+            if isinstance(val, bool):
+                val = int(val)
+            correct_count += val
+            total_count += 1
+
+    if total_count == 0:
+        return 0.0
+
+    percent = (correct_count / total_count) * 100
+    return percent
 
 def get_difficulty_transfer_bonus(user_id, vocab):
     """Get difficulty transfer bonus for a vocabulary"""
@@ -828,27 +957,35 @@ def save_session_to_file(user_id, session):
     """Save session to file for persistence"""
     try:
         session_file = f"lesson_session_{user_id}.json" if user_id else "lesson_session.json"
-        
+
         # Prepare session data for JSON serialization
+        # CRITICAL FIX: Convert all 'correct' in observations to int
+        session_predictions = session.session_predictions.copy()
+        for vocab, pred in session_predictions.items():
+            if 'observations' in pred:
+                for obs in pred['observations']:
+                    if 'correct' in obs:
+                        obs['correct'] = int(obs['correct'])
+
         session_data = {
             'user_id': session.user_id,
             'session_id': session.session_id,
             'session_start_time': session.session_start_time,
             'seen_vocabulary': list(session.seen_vocabulary),
             'difficulty_factors': session.difficulty_factors,
-            'session_predictions': session.session_predictions,
+            'session_predictions': session_predictions,
             'database_predictions': session.database_predictions,
             'merged_predictions': session.merged_predictions,
             'difficulty_transfers': getattr(session, 'difficulty_transfers', {}),
             'timestamp': int(time.time())
         }
-        
+
         with open(session_file, 'w') as f:
             json.dump(session_data, f, indent=2)
-        
+
         print(f"[LessonBKT] Saved session to {session_file}")
         return True
-        
+
     except Exception as e:
         print(f"[LessonBKT] Error saving session to file: {e}")
         return False
@@ -971,132 +1108,117 @@ def update_session_bkt(user_id, impact_scale=1.0, session_id=None):
     session = create_or_get_session(user_id, session_id)
     return session.process_bkt_update(impact_scale)
 
-def save_session_to_database(user_id, session_id=None):
-    """Save lesson BKT session data to database using the main BKT engine's proven method"""
-    global _saving_sessions
-    
-    # Prevent multiple simultaneous saves for the same user
-    if user_id in _saving_sessions:
-        print(f"[LessonBKT] Save already in progress for user {user_id}, skipping")
-        return True
-    
+def save_session_to_database(user_id):
+    """Save lesson BKT session data to database - FIXED to actually save data"""
     try:
-        _saving_sessions.add(user_id)
-        
-        session = create_or_get_session(user_id, session_id)
+        session = create_or_get_session(user_id)
         if not session:
             print(f"[LessonBKT] No session to save for user {user_id}")
             return False
         
-        # CRITICAL FIX: Don't check _already_saved here - let the actual save complete first
-        # Remove this premature check that was preventing saves:
-        # if hasattr(session, '_already_saved') and session._already_saved:
-        
-        print(f"[LessonBKT] Starting database save for user {user_id}")
-        
-        # 1. Save to temp files first (this works as backup)
-        save_lesson_bkt_to_temp_files(user_id, session)
-        
-        # 2. Get the main BKT engine and save through it
-        from bkt_engine import get_custom_bkt, save_custom_bkt, save_bkt_data_to_database
-        
-        # Get or create the main BKT predictor
-        custom_bkt = get_custom_bkt(user_id)
-        if not custom_bkt:
-            print(f"[LessonBKT] Creating new BKT predictor for user {user_id}")
-            from bkt_engine import CustomBKTPredictor
-            custom_bkt = CustomBKTPredictor()
-        
-        # 3. Merge lesson session data into the main BKT predictor
-        session_vocab_count = 0
-        actual_database_saves = 0
-        
-        # Add vocabulary parameters from lesson session
-        if session.bkt_predictor and hasattr(session.bkt_predictor, 'vocab_parameters'):
-            for vocab, params in session.bkt_predictor.vocab_parameters.items():
-                # Skip special keys
-                if vocab in ["fitted", "refit_counter"]:
-                    continue
-                
-                if isinstance(params, dict):
-                    # Always update - don't check for existing to ensure fresh data
-                    custom_bkt.vocab_parameters[vocab] = {
-                        'prior': float(params.get('prior', 0.5)),
-                        'guess': float(params.get('guess', 0.25)),
-                        'slip': float(params.get('slip', 0.1)),
-                        'learn': float(params.get('learn', 0.15)),
-                        'observations': params.get('observations', [])
-                    }
-                    session_vocab_count += 1
-                    print(f"[LessonBKT] Added vocab '{vocab}' with mastery {params.get('prior', 0.5):.3f}")
-        
-        # 4. Update metadata
-        custom_bkt.fitted = True
-        custom_bkt.refit_counter = getattr(custom_bkt, 'refit_counter', 0) + 1
-        
-        # 5. CRITICAL: Actually save to database
-        if session_vocab_count > 0:
-            try:
-                # Save the custom BKT predictor first
-                save_result = save_custom_bkt(user_id, custom_bkt)
-                print(f"[LessonBKT] Custom BKT save result: {save_result}")
-                
-                # MOST IMPORTANT: Save to database using the main engine
-                db_result = save_bkt_data_to_database(user_id, custom_bkt)
-                print(f"[LessonBKT] Database save result: {db_result}")
-                
-                if db_result:
-                    actual_database_saves += 1
-                    
-                    # Update predictions state
-                    from bkt_engine import save_temp_state, load_temp_state
-                    state = load_temp_state(user_id)
-                    if "predictions" not in state:
-                        state["predictions"] = {}
-                    
-                    # Add lesson predictions to the main state
-                    predictions_added = 0
-                    for vocab, prediction in session.session_predictions.items():
-                        if isinstance(prediction, dict):
-                            state["predictions"][vocab] = {
-                                'p_mastery': float(prediction.get('p_mastery', 0.5)),
-                                'guess': float(prediction.get('guess', 0.25)),
-                                'slip': float(prediction.get('slip', 0.1)),
-                                'confidence': float(prediction.get('confidence', 0.7)),
-                                'correct': prediction.get('correct', 0),
-                                'reviewed': prediction.get('reviewed', False),
-                                'timestamp': prediction.get('timestamp', int(time.time()))
-                            }
-                            predictions_added += 1
-                    
-                    save_temp_state(state, user_id)
-                    print(f"[LessonBKT] Added {predictions_added} predictions to main state")
-                    
-                    # ONLY mark as saved AFTER successful database save
-                    session._database_saved = True
-                    print(f"[LessonBKT] Successfully completed database save for user {user_id}")
-                    return True
-                else:
-                    print(f"[LessonBKT] Database save failed for user {user_id}")
-                    return False
-                    
-            except Exception as save_error:
-                print(f"[LessonBKT] Error during database save: {save_error}")
-                import traceback
-                traceback.print_exc()
-                return False
-        else:
-            print(f"[LessonBKT] No vocabulary data to save for user {user_id}")
+        if not session.session_predictions:
+            print(f"[LessonBKT] No session predictions to save for user {user_id}")
             return False
         
+        print(f"[LessonBKT] Starting database save for user {user_id} with {len(session.session_predictions)} predictions")
+        
+        # Connect to database
+        arami = pymongo.MongoClient(uri)["arami"]
+        users_col = arami["users"]
+        
+        user_doc = users_col.find_one({"user_id": int(user_id)})
+        if not user_doc:
+            print(f"[LessonBKT] User {user_id} not found")
+            return False
+        
+        # Get existing BKT data
+        existing_bkt_data = user_doc.get("bkt_data", {})
+        if not isinstance(existing_bkt_data, dict):
+            existing_bkt_data = {}
+        
+        # CRITICAL FIX: Ensure predictions structure exists
+        if "predictions" not in existing_bkt_data:
+            existing_bkt_data["predictions"] = {}
+        
+        existing_predictions = existing_bkt_data["predictions"]
+        
+        # Add session predictions (these take precedence)
+        new_vocab_count = 0
+        updated_vocab_count = 0
+        
+        for vocab, pred in session.session_predictions.items():
+            if vocab not in existing_predictions:
+                new_vocab_count += 1
+                print(f"[LessonBKT] Adding NEW vocab '{vocab}': mastery={pred.get('p_mastery', 0.5):.6f}")
+            else:
+                old_mastery = existing_predictions[vocab].get('p_mastery', 0.5)
+                new_mastery = pred.get('p_mastery', 0.5)
+                if abs(old_mastery - new_mastery) > 0.001:  # Only count as update if significant change
+                    updated_vocab_count += 1
+                    print(f"[LessonBKT] Updating vocab '{vocab}': {old_mastery:.6f} → {new_mastery:.6f}")
+            
+            existing_predictions[vocab] = pred
+        
+        # CRITICAL FIX: Also save to main BKT structure for compatibility
+        for vocab, pred in session.session_predictions.items():
+            existing_bkt_data[vocab] = {
+                'prior': pred.get('p_mastery', 0.5),
+                'guess': pred.get('guess', 0.25),
+                'slip': pred.get('slip', 0.1),
+                'learn': 0.15,
+                'observations': pred.get('observations', []),
+                'timestamp': int(time.time())
+            }
+        
+        # Update BKT data structure
+        updated_bkt_data = {
+            **existing_bkt_data,
+            "predictions": existing_predictions,
+            "last_lesson_update": int(time.time()),
+            "lesson_vocab_count": len(session.session_predictions)
+        }
+        
+        # Save to database
+        update_result = users_col.update_one(
+            {"user_id": int(user_id)},
+            {"$set": {"bkt_data": updated_bkt_data}}
+        )
+        
+        print(f"[LessonBKT] Database update result: matched={update_result.matched_count}, modified={update_result.modified_count}")
+        print(f"[LessonBKT] Summary: {new_vocab_count} new vocab, {updated_vocab_count} updated vocab")
+        
+        if update_result.modified_count > 0:
+            # CRITICAL: Also save to temp files for immediate use
+            try:
+                # Save lesson predictions file for logout processing
+                lesson_file = f"lesson_bkt_predictions_{user_id}.json"
+                with open(lesson_file, 'w') as f:
+                    json.dump({
+                        "predictions": existing_predictions,
+                        "timestamp": int(time.time()),
+                        "vocab_count": len(session.session_predictions)
+                    }, f, indent=2)
+                print(f"[LessonBKT] Created lesson predictions file: {lesson_file}")
+                
+                # Update main bkt_predictions.json for compatibility
+                with open('bkt_predictions.json', 'w') as f:
+                    json.dump(existing_predictions, f, indent=2)
+                print(f"[LessonBKT] Updated main bkt_predictions.json with {len(existing_predictions)} predictions")
+                
+            except Exception as e:
+                print(f"[LessonBKT] Error creating temp files: {e}")
+            
+            print(f"[LessonBKT] Successfully saved {len(session.session_predictions)} vocabulary predictions")
+            return True
+        else:
+            print(f"[LessonBKT] No changes were made to database")
+            return False
+            
     except Exception as e:
-        print(f"[LessonBKT] Error in save_session_to_database: {e}")
+        print(f"[LessonBKT] Error saving to database: {e}")
         import traceback
         traceback.print_exc()
-        return False
-    finally:
-        # Always remove from saving set
-        _saving_sessions.discard(user_id)
+    return False
     
 def save_lesson_bkt_to_temp_files(user_id, session):
     """Save lesson BKT data to temp files as backup (similar to bkt_engine.py)"""
@@ -1204,55 +1326,32 @@ def clear_lesson_bkt_temp_files(user_id=None):
             except Exception as e:
                 print(f"[LessonBKT] Error removing {file_path}: {e}")
 
-def get_session_bkt_sequence(user_id):
-    """Get BKT sequence from lesson session - COMPLETE sequence for LSTM"""
-    session = create_or_get_session(user_id)
-    if not session:
-        print("[LessonBKT] No session found for sequence generation")
-        return [0.5, 0.55, 0.6, 0.65, 0.7]  # Default fallback
-    
-    # Get ALL vocabularies from session predictions
-    if not session.session_predictions:
-        print("[LessonBKT] No session predictions available")
-        return [0.5, 0.55, 0.6, 0.65, 0.7]  # Default fallback
-    
-    # Sort vocabularies by order of appearance in session (timestamp)
-    vocab_items = []
-    for vocab, prediction in session.session_predictions.items():
-        timestamp = prediction.get('timestamp', 0)
-        mastery = prediction.get('p_mastery', 0.5)
-        vocab_items.append((timestamp, vocab, mastery))
-    
-    # Sort by timestamp to maintain learning order
-    vocab_items.sort(key=lambda x: x[0])
-    
-    # Extract mastery values
-    sequence = [item[2] for item in vocab_items]
-    
-    print(f"[LessonBKT] Generated sequence from {len(sequence)} session vocabularies:")
-    for i, (timestamp, vocab, mastery) in enumerate(vocab_items):
-        print(f"  {i+1}. {vocab}: {mastery:.3f}")
-    
-    # CRITICAL: Ensure sequence has reasonable length for LSTM
-    if len(sequence) < 5:
-        # Pad with interpolated values if too short
-        while len(sequence) < 5:
-            if sequence:
-                # Add slight variation to last value
-                last_val = sequence[-1]
-                new_val = min(0.95, max(0.05, last_val + (0.1 * (0.5 - random.random()))))
-                sequence.append(new_val)
-            else:
-                sequence.append(0.5)
-        print(f"[LessonBKT] Padded sequence to {len(sequence)} values")
-    
-    # Cap sequence length for LSTM performance
-    if len(sequence) > 15:
-        sequence = sequence[:15]
-        print(f"[LessonBKT] Truncated sequence to {len(sequence)} values")
-    
-    print(f"[LessonBKT] Final sequence: {sequence}")
-    return sequence
+def get_session_bkt_sequence(user_id, session_id=None):
+    """Get BKT sequence from current session - FIXED to not add extra padding"""
+    try:
+        session = create_or_get_session(user_id, session_id)
+        if not session or not session.session_predictions:
+            print(f"[LessonBKT] No session data, returning default sequence")
+            return [0.5, 0.55, 0.6, 0.65, 0.7]
+        
+        # Get actual mastery values from session (NO PADDING)
+        masteries = []
+        vocab_count = 0
+        
+        print(f"[LessonBKT] Generating sequence from {len(session.session_predictions)} session vocabularies:")
+        for vocab, prediction in session.session_predictions.items():
+            mastery = prediction.get('p_mastery', 0.5)
+            masteries.append(mastery)
+            vocab_count += 1
+            print(f"  {vocab_count}. {vocab}: {mastery:.3f}")
+        
+        # CRITICAL FIX: Return actual sequence without any padding
+        print(f"[LessonBKT] Generated sequence from {len(masteries)} vocabularies (no padding)")
+        return masteries
+        
+    except Exception as e:
+        print(f"[LessonBKT] Error generating sequence: {e}")
+        return [0.5, 0.55, 0.6, 0.65, 0.7]
 
 def get_lesson_bkt_summary(user_id):
     """Get summary of lesson BKT session"""
@@ -1400,11 +1499,14 @@ def get_next_vocabulary_simple(user_id, current_vocab=None, session_id=None):
         return None
     
 def display_lesson_bkt_predictions(user_id):
-    """Display current BKT predictions for lesson session including database values"""
+    """Display current BKT predictions for lesson session - RAW VALUES"""
     try:
-        # Get session predictions
         session = create_or_get_session(user_id)
-        session_predictions = session.session_predictions if session else {}
+        if not session:
+            print("[LessonBKT] No active session found")
+            return 0
+        
+        session_predictions = session.session_predictions
         
         # Get database predictions for comparison
         db_predictions = {}
@@ -1412,61 +1514,34 @@ def display_lesson_bkt_predictions(user_id):
             arami = pymongo.MongoClient(uri)["arami"]
             user_doc = arami["users"].find_one({"user_id": int(user_id)})
             if user_doc and "bkt_data" in user_doc:
-                # Look for predictions in the BKT data structure
                 bkt_data = user_doc["bkt_data"]
-                
-                # Try different locations for predictions
                 if "predictions" in bkt_data:
                     db_predictions = bkt_data["predictions"]
-                else:
-                    # Convert vocabulary BKT data to prediction format
-                    for vocab, data in bkt_data.items():
-                        if isinstance(data, dict) and 'p_mastery' in data:
-                            db_predictions[vocab] = {
-                                'p_mastery': data['p_mastery'],
-                                'guess': data.get('p_guess', 0.25),
-                                'slip': data.get('p_slip', 0.1),
-                                'confidence': data.get('confidence', 0.5),
-                                'observations': data.get('observations', 0),
-                                'avg_response_time': data.get('avg_response_time', 0)
-                            }
-                            
         except Exception as e:
             print(f"[LessonBKT] Error loading database predictions: {e}")
         
-        # Combine all predictions - session takes priority
+        # Combine predictions
         all_predictions = {}
-        
-        # First add database predictions
         for vocab, pred in db_predictions.items():
-            all_predictions[vocab] = {
-                **pred,
-                'source': 'Database'
-            }
-        
-        # Then add/override with session predictions
+            all_predictions[vocab] = {**pred, 'source': 'Database'}
         for vocab, pred in session_predictions.items():
-            all_predictions[vocab] = {
-                **pred,
-                'source': 'Session'
-            }
+            all_predictions[vocab] = {**pred, 'source': 'Session'}
         
         if not all_predictions:
             print("[LessonBKT] No predictions to display")
             return 0
         
-        # Count session vs database entries
         session_count = len(session_predictions)
         db_count = len([v for v in all_predictions.values() if v.get('source') == 'Database'])
         
-        # Display the table
-        print("┌" + "─" * 79 + "┐")
-        print(f"│ LESSON BKT PREDICTIONS ({session_count} session, {db_count} database) │".ljust(81) + "│")
-        print("├" + "─" * 20 + "┬" + "─" * 11 + "┬" + "─" * 10 + "┬" + "─" * 10 + "┬" + "─" * 10 + "┬" + "─" * 10 + "┬" + "─" * 8 + "┤")
-        print("│ Vocabulary           │ Mastery   │ Guess    │ Slip     │ Conf     │ Obs/RT   │ Source │")
-        print("├" + "─" * 20 + "┼" + "─" * 11 + "┼" + "─" * 10 + "┼" + "─" * 10 + "┼" + "─" * 10 + "┼" + "─" * 10 + "┼" + "─" * 8 + "┤")
+        # ENHANCED: Display table with RAW values
+        print("┌" + "─" * 95 + "┐")
+        print(f"│ LESSON BKT PREDICTIONS ({session_count} session, {db_count} database) - RAW VALUES │".ljust(97) + "│")
+        print("├" + "─" * 20 + "┬" + "─" * 15 + "┬" + "─" * 12 + "┬" + "─" * 12 + "┬" + "─" * 12 + "┬" + "─" * 10 + "┬" + "─" * 8 + "┤")
+        print("│ Vocabulary           │ Mastery         │ Guess        │ Slip         │ Conf         │ Obs/RT   │ Source │")
+        print("├" + "─" * 20 + "┼" + "─" * 15 + "┼" + "─" * 12 + "┼" + "─" * 12 + "┼" + "─" * 12 + "┼" + "─" * 10 + "┼" + "─" * 8 + "┤")
         
-        # Sort by mastery (descending) and then by source (Session first)
+        # Sort by mastery (descending)
         sorted_predictions = sorted(all_predictions.items(), 
                                   key=lambda x: (-x[1].get('p_mastery', 0), x[1]['source'] != 'Session'))
         
@@ -1474,23 +1549,50 @@ def display_lesson_bkt_predictions(user_id):
             mastery = prediction.get('p_mastery', 0)
             guess = prediction.get('guess', 0)
             slip = prediction.get('slip', 0)
-            conf = prediction.get('confidence', 0)
+            confidence = prediction.get('confidence', 0)
+            source = prediction['source']
             
-            # Format observations and response time
-            observations = prediction.get('observations', 0)
-            avg_rt = prediction.get('avg_response_time', 0)
-            obs_rt = f"{observations}/{avg_rt:.1f}s" if avg_rt > 0 else f"{observations}/0s"
+            # Calculate observation display
+            observations = prediction.get('observations', [])
+            obs_count = len(observations) if isinstance(observations, list) else 0
             
-            # Add asterisk for high mastery
-            mastery_str = f"{mastery:.2f}{'*' if mastery > 0.95 else ' '}"
-            source = prediction['source'][:7]  # Truncate to fit
+            response_times = []
+            if isinstance(observations, list):
+                for obs in observations:
+                    if isinstance(obs, dict) and 'response_time' in obs:
+                        rt = obs['response_time']
+                        if rt and rt > 0:
+                            response_times.append(rt)
             
-            # Truncate vocabulary name if too long
-            vocab_display = vocab[:19] if len(vocab) <= 19 else vocab[:16] + "..."
+            avg_response_time = sum(response_times) / len(response_times) if response_times else 0
             
-            print(f"│ {vocab_display:<20} │ {mastery_str:>9} │ {guess:>8.2f} │ {slip:>8.2f} │ {conf:>8.2f} │ {obs_rt:>8} │ {source:<6} │")
+            if obs_count > 0:
+                if avg_response_time > 0:
+                    obs_display = f"{obs_count}obs/{avg_response_time:.1f}s"
+                else:
+                    obs_display = f"{obs_count} obs"
+            else:
+                obs_display = "No obs"
+            
+            if len(obs_display) > 10:
+                obs_display = obs_display[:9] + "…"
+            
+            # CRITICAL FIX: Show RAW values with higher precision
+            print("│ {:<20} │ {:>12.8f}{}│ {:>10.6f} │ {:>10.6f} │ {:>10.6f} │ {:<10} │ {:<6} │".format(
+                vocab[:20], mastery, '*' if source == 'Session' else ' ', guess, slip, confidence, obs_display, source
+            ))
         
-        print("└" + "─" * 20 + "┴" + "─" * 11 + "┴" + "─" * 10 + "┴" + "─" * 10 + "┴" + "─" * 10 + "┴" + "─" * 10 + "┴" + "─" * 8 + "┘")
+        print("└" + "─" * 20 + "┴" + "─" * 15 + "┴" + "─" * 12 + "┴" + "─" * 12 + "┴" + "─" * 12 + "┴" + "─" * 10 + "┴" + "─" * 8 + "┘")
+        
+        # ENHANCED: Print raw summary values
+        print(f"\nRAW BKT VALUES SUMMARY:")
+        for vocab, prediction in sorted_predictions:
+            print(f"  {vocab}: mastery={prediction.get('p_mastery', 0):.8f}, "
+                  f"guess={prediction.get('guess', 0):.6f}, "
+                  f"slip={prediction.get('slip', 0):.6f}, "
+                  f"conf={prediction.get('confidence', 0):.6f}")
+        
+        print(f"[LessonBKT] Displayed {len(all_predictions)} vocabulary predictions from lesson session")
         
         return len(all_predictions)
         

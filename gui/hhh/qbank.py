@@ -1289,8 +1289,8 @@ module_1 = {
         "id": 122, 
         "type": "Image Picker", 
         "question": "Pasaylo-a ako", 
-        "choices": ["https://res.cloudinary.com/djm2qhi9f/image/upload/v1749726321/assets_19_i7kqwp.png", "https://res.cloudinary.com/djm2qhi9f/image/upload/v1749726321/assets_19_i7kqwp.png"], 
-        "correct_answer": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1749726321/assets_19_i7kqwp.png", 
+        "choices": ["https://res.cloudinary.com/djm2qhi9f/image/upload/v1749726172/assets_18_ysbr9b.png", "https://res.cloudinary.com/djm2qhi9f/image/upload/v1749726321/assets_19_i7kqwp.png"], 
+        "correct_answer": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1749726172/assets_18_ysbr9b.png", 
         "vocabulary": "Pasaylo-a ako", 
         "difficulty": 2, 
         "response_time": 0
@@ -1395,7 +1395,7 @@ module_1 = {
     },
     {
         "id": 132,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "You need help from someone who speaks English. What would you ask?",
         "choices": ["Ano it imo ngaran?", "Maaram ka mag-English?"],
         "correct_answer": "Maaram ka mag-English?",
@@ -1416,6 +1416,7 @@ module_1 = {
         "id": 134, 
         "type": "True or False", 
         "question": "'English ak mag-aaram.' means I can't speak English.", 
+        "choices": ["True", "False"],
         "correct_answer": "False", 
         "vocabulary": "Maaram ka mag-english", 
         "difficulty": 4, 

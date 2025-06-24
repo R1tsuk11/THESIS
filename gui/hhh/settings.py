@@ -25,22 +25,47 @@ def settings_page(page: ft.Page):
 
     # Update the perform_logout function in settings.py
     def perform_logout(e):
-        """Handle user logout with proper file cleanup"""
+        """Handle user logout with proper file cleanup - ENHANCED VERSION"""
         user_id = page.session.get("user_id")
         if user_id:
             try:
                 print(f"[LOGOUT] Saving all data for user {user_id}")
                 
-                # 1. Save lesson BKT data first
-                try:
-                    from bkt_engine import save_lesson_bkt_if_file_exists
-                    lesson_save_result = save_lesson_bkt_if_file_exists(user_id)
-                    print(f"[LOGOUT] Lesson BKT file processing result: {lesson_save_result}")
-                    
-                except Exception as e:
-                    print(f"[LOGOUT] Error processing lesson BKT file: {e}")
+                # 1. CRITICAL: Save lesson BKT data FIRST with multiple attempts
+                lesson_save_success = False
+                for attempt in range(3):  # Try up to 3 times
+                    try:
+                        from lesson_bkt_engine import save_session_to_database
+                        lesson_save_result = save_session_to_database(user_id)
+                        print(f"[LOGOUT] Lesson BKT save attempt {attempt + 1}: {lesson_save_result}")
+                        
+                        if lesson_save_result:
+                            lesson_save_success = True
+                            break
+                            
+                    except Exception as e:
+                        print(f"[LOGOUT] Lesson BKT save attempt {attempt + 1} failed: {e}")
                 
-                # 2. Save regular user data
+                # 2. CRITICAL: Save main BKT data to database BEFORE cleanup
+                try:
+                    from bkt_engine import save_bkt_data_to_database, get_custom_bkt
+                    custom_bkt = get_custom_bkt(user_id)
+                    if custom_bkt:
+                        main_bkt_save_result = save_bkt_data_to_database(user_id, custom_bkt)
+                        print(f"[LOGOUT] Main BKT save result: {main_bkt_save_result}")
+                except Exception as e:
+                    print(f"[LOGOUT] Main BKT save failed: {e}")
+                            
+                # 3. Also try the file-based approach as fallback
+                if not lesson_save_success:
+                    try:
+                        from bkt_engine import save_lesson_bkt_if_file_exists
+                        file_save_result = save_lesson_bkt_if_file_exists(user_id)
+                        print(f"[LOGOUT] File-based BKT save result: {file_save_result}")
+                    except Exception as e:
+                        print(f"[LOGOUT] File-based BKT save failed: {e}")
+                
+                # 4. Save regular user data
                 from mainmenu import User
                 user = User().load_data(user_id, page)
                 
@@ -50,14 +75,68 @@ def settings_page(page: ft.Page):
                     print(f"[Achievements] Syncing {len(session_achievements)} achievements to database")
                     user.achievements = session_achievements
                 
-                # Save user data
-                user.save_user(page)
+                # CRITICAL: Ensure completion percentage is saved
+                try:
+                    # Get completion percentage from session or calculate it
+                    completion_percentage = page.session.get("completion_percentage")
+                    if completion_percentage is None:
+                        # Calculate from modules if not in session
+                        modules = page.session.get("modules")
+                        if modules:
+                            total_lessons = sum(len(getattr(module, 'levels', [])) for module in modules)
+                            completed_lessons = sum(
+                                len([level for level in getattr(module, 'levels', []) if getattr(level, 'completed', False)])
+                                for module in modules
+                            )
+                            if total_lessons > 0:
+                                completion_percentage = (completed_lessons / total_lessons) * 100
+                                print(f"[LOGOUT] Calculated completion: {completed_lessons}/{total_lessons} = {completion_percentage:.1f}%")
+                    
+                    if completion_percentage is not None:
+                        user.completion_percentage = completion_percentage
+                        print(f"[LOGOUT] Setting completion percentage: {completion_percentage:.1f}%")
+                        
+                except Exception as e:
+                    print(f"[LOGOUT] Error setting completion percentage: {e}")
                 
-                # 3. CRITICAL: Clean up all temp files AFTER saving
+                # Save user data with verification
+                try:
+                    save_success = user.save_user(page)
+                    print(f"[LOGOUT] User data save result: {save_success}")
+                    
+                    # VERIFICATION: Check if data was actually saved
+                    if save_success:
+                        # Verify by loading from database
+                        verification_user = User().load_data(user_id, page)
+                        if verification_user:
+                            print(f"[LOGOUT] ✅ Verified user data saved - completion: {getattr(verification_user, 'completion_percentage', 'N/A')}%")
+                        else:
+                            print(f"[LOGOUT] ❌ User data verification failed")
+                            
+                except Exception as e:
+                    print(f"[LOGOUT] Error saving user data: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                # 5. Clean up temp files AFTER saving (but preserve critical files)
                 try:
                     from mainmenu import clear_all_temp_files
-                    clear_all_temp_files(user_id)
-                    print(f"[LOGOUT] Cleaned up temp files for user {user_id}")
+                    
+                    # CRITICAL: Don't clean up files immediately after creating them
+                    import time
+                    time.sleep(1)  # Give filesystem time to finish writes
+                    
+                    # Clean up but preserve recent BKT files
+                    preserved_files = [
+                        f"lesson_bkt_predictions_{user_id}.json",
+                        f"bkt_sequence_{user_id}",
+                        f"custom_bkt_predictor_{user_id}.pkl"
+                    ]
+                    
+                    # Call cleanup with file preservation
+                    clear_all_temp_files(user_id, preserve_files=preserved_files)
+                    print(f"[LOGOUT] Cleaned up temp files for user {user_id} (preserved BKT files)")
+                    
                 except Exception as cleanup_error:
                     print(f"[LOGOUT] Error cleaning up temp files: {cleanup_error}")
                 
@@ -68,7 +147,7 @@ def settings_page(page: ft.Page):
                 import traceback
                 traceback.print_exc()
         
-        # 4. Clear session and navigate
+        # 6. Clear session and navigate
         page.session.clear()
         page.go("/login")
 
@@ -360,24 +439,39 @@ def settings_page(page: ft.Page):
         page.open(logout_dialog)
 
     # In a real app, perform actual logout operations      
-    # Replace the existing perform_logout function with this:
+        # Replace the existing perform_logout function with this:
     def perform_logout(e):
-        """Handle user logout with simplified BKT saving"""
+        """Handle user logout with proper file cleanup - ENHANCED VERSION"""
         user_id = page.session.get("user_id")
         if user_id:
             try:
                 print(f"[LOGOUT] Saving all data for user {user_id}")
                 
-                # SIMPLIFIED: Just check for lesson BKT file and save if exists
-                try:
-                    from bkt_engine import save_lesson_bkt_if_file_exists
-                    lesson_save_result = save_lesson_bkt_if_file_exists(user_id)
-                    print(f"[LOGOUT] Lesson BKT file processing result: {lesson_save_result}")
-                    
-                except Exception as e:
-                    print(f"[LOGOUT] Error processing lesson BKT file: {e}")
+                # 1. CRITICAL: Save lesson BKT data FIRST with multiple attempts
+                lesson_save_success = False
+                for attempt in range(3):  # Try up to 3 times
+                    try:
+                        from lesson_bkt_engine import save_session_to_database
+                        lesson_save_result = save_session_to_database(user_id)
+                        print(f"[LOGOUT] Lesson BKT save attempt {attempt + 1}: {lesson_save_result}")
+                        
+                        if lesson_save_result:
+                            lesson_save_success = True
+                            break
+                            
+                    except Exception as e:
+                        print(f"[LOGOUT] Lesson BKT save attempt {attempt + 1} failed: {e}")
+                        
+                # 2. Also try the file-based approach as fallback
+                if not lesson_save_success:
+                    try:
+                        from bkt_engine import save_lesson_bkt_if_file_exists
+                        file_save_result = save_lesson_bkt_if_file_exists(user_id)
+                        print(f"[LOGOUT] File-based BKT save result: {file_save_result}")
+                    except Exception as e:
+                        print(f"[LOGOUT] File-based BKT save failed: {e}")
                 
-                # Continue with regular user data save
+                # 3. Save regular user data
                 from mainmenu import User
                 user = User().load_data(user_id, page)
                 
@@ -387,8 +481,17 @@ def settings_page(page: ft.Page):
                     print(f"[Achievements] Syncing {len(session_achievements)} achievements to database")
                     user.achievements = session_achievements
                 
-                # Save user data
-                user.save_user(page)
+                # Save user data with verification
+                save_success = user.save_user(page)
+                print(f"[LOGOUT] User data save result: {save_success}")
+                
+                # 4. Clean up temp files AFTER saving
+                try:
+                    from mainmenu import clear_all_temp_files
+                    clear_all_temp_files(user_id)
+                    print(f"[LOGOUT] Cleaned up temp files for user {user_id}")
+                except Exception as cleanup_error:
+                    print(f"[LOGOUT] Error cleaning up temp files: {cleanup_error}")
                 
                 print(f"[LOGOUT] Logout completed for user {user_id}")
                 
@@ -397,6 +500,7 @@ def settings_page(page: ft.Page):
                 import traceback
                 traceback.print_exc()
         
+        # 5. Clear session and navigate
         page.session.clear()
         page.go("/login")
         
@@ -625,7 +729,6 @@ def settings_page(page: ft.Page):
             change_password,
             acknowledgements,
             about,
-            notifications,
             ft.Divider(height=1, thickness=1, color="#DDDDDD"),
             log_out,
             delete_account
@@ -749,7 +852,7 @@ def about_page(page: ft.Page, image_urls: list):
     # App description card
     app_description = ft.Container(
         content=ft.Text(
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas mattis risus et libero ultrices, in lobortis sapien consectetur.",
+            "ARAMI is a language learning app focused on helping users learn the Waray language. It uses a combination of learning models such as Bayesian Knowledge Tracing, LSTM, and SuperMemo to track progress, adjust learning content, and improve retention. The system also personalizes the learning path based on the user's performance to support more effective learning.",
             size=14,
             color="#FFFFFF",
             text_align=ft.TextAlign.LEFT,
@@ -780,9 +883,9 @@ def about_page(page: ft.Page, image_urls: list):
     )
     
     # Function to create a team member profile card that exactly matches the photo reference
-    def create_profile_card(name, role, email, image_url=None):
+    def create_profile_card(name, role, email, image):
         profile_image = ft.Image(
-            src="THESIS-main/THESIS/gui/hhh/assets/sampleID.jpg",
+            src=image,
             width=220,
             height=220,
             fit=ft.ImageFit.COVER,
@@ -844,26 +947,26 @@ def about_page(page: ft.Page, image_urls: list):
         {
             "name": "Arquiza, Miguelin III.",
             "role": "Lead Programmer",
-            "email": "adamtumaning@gmail.com",
-            "image": "/api/placeholder/150/150"
+            "email": "migmigarquiza@gmail.com",
+            "image": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1750759395/ID_-_Arquiza_nals3q.png"
         },
         {
             "name": "Creer, Chelsea Anne",
-            "role": "UI/UX Designer",
-            "email": "minji.lee@gmail.com",
-            "image": "/api/placeholder/150/150"
+            "role": "UI Designer & Project Manager",
+            "email": "creerchelsea@gmail.com",
+            "image": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1750759396/ID_-_Creer_fvrgsf.png"
         },
         {
             "name": "Flores, Robert Gabriel",
-            "role": "Language Expert",
-            "email": "mgarcia@gmail.com",
-            "image": "/api/placeholder/150/150"
+            "role": "Documentation & QA Analyst",
+            "email": "robertgabriel.flores@gmail.com",
+            "image": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1750759395/ID_-_Flores_nffmot.png"
         },
         {
             "name": "Tumaning, Benedict Adam",
-            "role": "Project Manager",
-            "email": "emily.smith@gmail.com",
-            "image": "/api/placeholder/150/150"
+            "role": "Head Programmer",
+            "email": "adamtumaning52h@gmail.com",
+            "image": "https://res.cloudinary.com/djm2qhi9f/image/upload/v1750759395/ID_-_Tumaning_xgfysu.jpg"
         },
     ]
     
@@ -1071,7 +1174,7 @@ def acknowledgements_page(page: ft.Page):
     # Acknowledgements card
     app_acknowledgements = ft.Container(
         content=ft.Text(
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas mattis risus et libero ultrices, in lobortis sapien consectetur.",
+            "This application was made possible through the use of various open-source libraries, frameworks, and assets. We acknowledge and thank the developers and contributors of tools such as Python, Flet, NLTK, and other freely available resources used in building ARAMI. Icons, images, and visual elements included in the app were sourced from licensed or publicly available repositories, and we remain grateful to their creators for making such assets accessible to the development community.",
             size=14,
             color="#FFFFFF",
             text_align=ft.TextAlign.LEFT,
@@ -1088,20 +1191,29 @@ def acknowledgements_page(page: ft.Page):
             offset=ft.Offset(0, 2),
         ),
     )
-    
-    
+
+    extra_text = ft.Container(
+        content=ft.Text(
+            "We use these open source libraries to make ARAMI:\n - PNGTree: Sky Pixel Style Wallpaper\n - Freepik: Free Vector Graphics\n - Flaticon: Free Icons\n - Unsplash: Free Stock Photos\n - Google Fonts: Open Source Fonts\n - Font Awesome: Iconic Font and CSS Toolkit\n - Adroitcell: ArtStation Portfolio\n - Game8’s\n - Behance creator: Behance Project",
+            size=13,
+            color="#000000",
+            text_align=ft.TextAlign.LEFT,
+        ),
+        padding=ft.padding.symmetric(horizontal=35, vertical=10),  # Adjust as needed
+    )
+
     # Create a ListView for scrollable content
     scrollable_list = ft.ListView(
+        [
+            thin_line,  # Added thin line
+            app_acknowledgements,
+            extra_text,  # <-- Add your new text widget here
+        ],
         spacing=10,
         padding=ft.padding.only(bottom=80),  # Increased padding to prevent bottom nav overlap
         expand=True,
     )
-
-    # Add content to the ListView
-    scrollable_list.controls.extend([
-        thin_line,  # Added thin line
-        app_acknowledgements
-    ])
+    
     
     # Content area that will be scrollable
     content_area = ft.Container(

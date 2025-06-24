@@ -15,12 +15,204 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 from bkt_engine import should_rebatch, select_adaptive_questions, get_vocab_mastery
 import threading
 
+used_question_ids = set()  # Track used question IDs to avoid duplicates
 correct_answers = {}
 incorrect_answers = {}
 grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
 user_library = []
+
+class LessonQuestionPool:
+    """Manages the complete question pool for the current lesson"""
+    def __init__(self):
+        self.full_pool = []
+        self.pool_by_vocab = {}
+        self.pool_by_type = {}
+        self.pool_by_difficulty = {}
+        self.initialized = False
+    
+    def initialize_pool(self, all_questions):
+        """Initialize the pool with all questions from the lesson - ENHANCED"""
+        self.full_pool = all_questions.copy()
+        self.pool_by_vocab = {}
+        self.pool_by_type = {}
+        self.pool_by_difficulty = {}
+        
+        print(f"[POOL] Initializing question pool with {len(all_questions)} questions")
+        
+        # Organize questions by vocabulary, type, and difficulty
+        valid_questions = 0
+        invalid_difficulty_count = 0
+        
+        for q in all_questions:
+            # Handle both dict and object formats
+            if isinstance(q, dict):
+                vocab = q.get('vocabulary', 'Unknown').lower()
+                q_type = q.get('type', 'Unknown')
+                difficulty = q.get('difficulty', None)
+            else:
+                vocab = getattr(q, 'vocabulary', 'Unknown').lower()
+                q_type = getattr(q, 'type', 'Unknown')
+                difficulty = getattr(q, 'difficulty', None)
+            
+            # By vocabulary
+            if vocab not in self.pool_by_vocab:
+                self.pool_by_vocab[vocab] = []
+            self.pool_by_vocab[vocab].append(q)
+            
+            # By type
+            if q_type not in self.pool_by_type:
+                self.pool_by_type[q_type] = []
+            self.pool_by_type[q_type].append(q)
+            
+            # By difficulty (only for practice questions with valid difficulty)
+            if (difficulty is not None and 
+                isinstance(difficulty, (int, float)) and 
+                q_type not in ['Lesson', 'Cultural Trivia']):
+                if difficulty not in self.pool_by_difficulty:
+                    self.pool_by_difficulty[difficulty] = []
+                self.pool_by_difficulty[difficulty].append(q)
+                valid_questions += 1
+            else:
+                if q_type not in ['Lesson', 'Cultural Trivia']:
+                    invalid_difficulty_count += 1
+        
+        self.initialized = True
+        
+        print(f"[POOL] Pool initialized:")
+        print(f"  - Total questions: {len(all_questions)}")
+        print(f"  - Valid practice questions: {valid_questions}")
+        print(f"  - Invalid difficulty questions: {invalid_difficulty_count}")
+        
+        self._log_pool_statistics()
+
+    def find_question_by_criteria(self, vocab, q_type, target_difficulty):
+        """Find the best question matching the criteria - FIXED VERSION"""
+        if not self.initialized:
+            print("[POOL] Warning: Pool not initialized")
+            return None
+        
+        vocab_lower = vocab.lower()
+        
+        # Get all questions for this vocabulary and type
+        if vocab_lower not in self.pool_by_vocab:
+            print(f"[POOL] No questions found for vocabulary '{vocab}'")
+            return None
+        
+        matching_questions = []
+        for q in self.pool_by_vocab[vocab_lower]:
+            # Handle both dict and object formats
+            if isinstance(q, dict):
+                q_difficulty = q.get('difficulty', None)
+                q_id = q.get('id', 'unknown')
+                if q_id in used_question_ids:
+                    continue
+                q_q_type = q.get('type', '')
+            else:
+                q_q_type = getattr(q, 'type', '')
+                q_difficulty = getattr(q, 'difficulty', None)
+                q_id = getattr(q, 'id', 'unknown')
+
+            # IGNORE question type: Only match on vocab and difficulty
+            if (q_difficulty is not None and 
+                isinstance(q_difficulty, (int, float)) and
+                q_q_type != 'Lesson'):  # Still skip lesson questions
+                matching_questions.append((q, q_difficulty, q_id))
+        
+        if not matching_questions:
+            print(f"[POOL] No {q_type} questions found for '{vocab}' with valid difficulties")
+            return None
+        
+        print(f"[POOL] Found {len(matching_questions)} {q_type} questions for '{vocab}' with valid difficulties:")
+        for q, diff, qid in matching_questions:
+            print(f"[POOL]   - ID: {qid}, Difficulty: {diff}")
+        
+        # Strategy 1: Find exact match first
+        exact_matches = [(q, diff, qid) for q, diff, qid in matching_questions if diff == target_difficulty]
+        if exact_matches:
+            selected = exact_matches[0]
+            print(f"[POOL] Found EXACT match for {q_type} '{vocab}': difficulty {target_difficulty} (ID: {selected[2]})")
+            # FIXED: Ensure the returned question has the difficulty properly set
+            selected_question = selected[0]
+            return self._ensure_question_attributes(selected_question)
+        
+        # Strategy 2: Find closest match, preferring higher difficulties for increases
+        matching_questions.sort(key=lambda x: (abs(x[1] - target_difficulty), x[1]))
+        best_question, actual_difficulty, best_id = matching_questions[0]
+        
+        print(f"[POOL] Found CLOSEST match for {q_type} '{vocab}': target {target_difficulty}, got {actual_difficulty} (ID: {best_id})")
+        # FIXED: Ensure the returned question has the difficulty properly set
+        return self._ensure_question_attributes(best_question)
+
+    def _ensure_question_attributes(self, question):
+        """Ensure question object has proper attributes set"""
+        from types import SimpleNamespace
+        
+        # If it's a dict, convert to object and ensure all attributes are preserved
+        if isinstance(question, dict):
+            # Create object from dict
+            q_obj = SimpleNamespace(**question)
+            
+            # Double-check that difficulty is properly set
+            if hasattr(q_obj, 'difficulty') and q_obj.difficulty is not None:
+                print(f"[POOL] Converted dict to object: difficulty = {q_obj.difficulty}")
+                return q_obj
+            else:
+                print(f"[POOL] Warning: Converted object missing difficulty")
+                return q_obj
+        else:
+            # It's already an object, just return it
+            difficulty = getattr(question, 'difficulty', None)
+            print(f"[POOL] Returning existing object: difficulty = {difficulty}")
+            return question
+    
+    def _log_pool_statistics(self):
+        """Log statistics about the question pool"""
+        print(f"[POOL] Question pool statistics:")
+        print(f"  Total questions: {len(self.full_pool)}")
+        print(f"  Vocabularies: {len(self.pool_by_vocab)}")
+        print(f"  Question types: {list(self.pool_by_type.keys())}")
+        print(f"  Difficulty levels: {sorted(self.pool_by_difficulty.keys())}")
+        
+        # Show breakdown by vocabulary
+        for vocab, questions in self.pool_by_vocab.items():
+            types = {}
+            difficulties = {}
+            for q in questions:
+                q_type = getattr(q, 'type', 'Unknown')
+                difficulty = getattr(q, 'difficulty', None)
+                
+                types[q_type] = types.get(q_type, 0) + 1
+                if difficulty is not None:
+                    difficulties[difficulty] = difficulties.get(difficulty, 0) + 1
+            
+            print(f"    {vocab}: {dict(types)} | difficulties: {dict(difficulties)}")
+    
+    def get_questions_by_difficulty_range(self, vocab, q_type, min_diff, max_diff):
+        """Get all questions within a difficulty range - ENHANCED"""
+        vocab_lower = vocab.lower()
+        
+        if vocab_lower not in self.pool_by_vocab:
+            return []
+        
+        matching = []
+        for q in self.pool_by_vocab[vocab_lower]:
+            q_question_type = getattr(q, 'type', '') if hasattr(q, 'type') else q.get('type', '')
+            difficulty = getattr(q, 'difficulty', None) if hasattr(q, 'difficulty') else q.get('difficulty', None)
+            q_id = getattr(q, 'id', None) if hasattr(q, 'id') else q.get('id', None)
+            if q_id in used_question_ids:
+                continue  # Skip already used questions
+            if (difficulty is not None and 
+                min_diff <= difficulty <= max_diff and
+                q_question_type != 'Lesson'):
+                matching.append(q)
+        
+        print(f"[POOL] Found {len(matching)} {q_type} questions for '{vocab}' in difficulty range {min_diff}-{max_diff}")
+        return matching
+
+# Create global instance
+lesson_question_pool = LessonQuestionPool()
 
 def create_correct_dialog():
     """Create a fresh correct/incorrect dialog for each lesson session"""
@@ -38,53 +230,549 @@ def create_correct_dialog():
         bgcolor="#F5F5F5"
     )
 
+def initialize_comprehensive_question_pool(page):
+        """Initialize a comprehensive pool with ALL possible questions from qbank"""
+        global lesson_question_pool
+        
+        try:
+            # Get current lesson info
+            level_data = page.session.get("level_data")
+            lesson_id = getattr(level_data, 'lesson_id', None)
+            
+            # Import qbank and get ALL questions for this lesson
+            import qbank
+            lesson_key = f"Lesson {lesson_id}"
+            
+            all_lesson_questions = []
+            
+            if hasattr(qbank, 'module_1') and lesson_key in qbank.module_1:
+                qbank_questions = qbank.module_1[lesson_key]
+                
+                # Convert to objects and add to pool
+                from types import SimpleNamespace
+                for q_data in qbank_questions:
+                    if isinstance(q_data, dict):
+                        q_obj = SimpleNamespace(**q_data)
+                        q_obj.lesson_id = lesson_id
+                        q_obj.module_name = 'Module 1'
+                        all_lesson_questions.append(q_obj)
+                    else:
+                        all_lesson_questions.append(q_data)
+            
+            print(f"[POOL] Comprehensive pool initialized with {len(all_lesson_questions)} questions from qbank")
+            
+            # Initialize the pool with ALL questions
+            lesson_question_pool.initialize_pool(all_lesson_questions)
+            
+            return all_lesson_questions
+            
+        except Exception as e:
+            print(f"[POOL] Error building comprehensive pool: {e}")
+            # Fallback to the limited pool
+            return None
+
 def get_questions(page):
-    """Retrieves questions for the current lesson."""
+    """Dynamically build lesson questions from blueprint based on difficulty and performance"""
     level_data = page.session.get("level_data")
     if not level_data:
         print("Level data not found in session.")
-        return None
+        return []  # Return empty list instead of None
 
-    questions = level_data.questions_answers
-
-    if not questions:
-        print("No questions found.")
-        return None
-
-    # ENHANCED: Ensure all questions have proper IDs
-    for i, q in enumerate(questions):
-        q.lesson_id = level_data.lesson_id
-        q.module_name = level_data.module_name
+    # Check if we have a blueprint instead of pre-selected questions
+    if hasattr(level_data, 'lesson_blueprint'):
+        blueprint = level_data.lesson_blueprint
+        print(f"[LESSON] Building lesson from blueprint with {len(blueprint['vocabulary_order'])} vocabularies")
         
-        # Set ID if missing
-        if not hasattr(q, 'id') or q.id is None:
-            q.id = f"L{level_data.lesson_id}Q{i+1}"
-            print(f"[QUESTION] Assigned ID {q.id} to {getattr(q, 'type', 'Unknown')} question")
+        # Build questions dynamically based on user proficiency and blueprint
+        user_id = page.session.get("user_id")
+        overall_proficiency = get_user_overall_proficiency(user_id, page)
+        
+        dynamic_questions = build_questions_from_blueprint(blueprint, overall_proficiency, user_id)
+        
+        # CRITICAL: Verify question integrity before proceeding
+        if not dynamic_questions or not verify_question_integrity(dynamic_questions):
+            print("[LESSON] ERROR: Question integrity check failed or no questions built!")
+            return []  # Return empty list instead of None
+        
+        # CRITICAL FIX: Assign lesson_id and module_name to each question
+        for q in dynamic_questions:
+            q.lesson_id = level_data.lesson_id
+            q.module_name = level_data.module_name
+            # Also ensure we have a unique ID if not already set
+            if not hasattr(q, 'id') or q.id is None:
+                # Generate ID based on position and lesson
+                q_index = dynamic_questions.index(q)
+                q.id = f"L{level_data.lesson_id}Q{q_index+1}"
+        
+        print(f"[LESSON] ✅ Assigned lesson_id={level_data.lesson_id} and module_name='{level_data.module_name}' to {len(dynamic_questions)} questions")
+        
+        # Initialize comprehensive pool with ALL available questions
+        lesson_question_pool.initialize_pool(blueprint['available_questions'])
+        
+        # Set the dynamically built questions
+        level_data.questions_answers = dynamic_questions
+        
+        print(f"[QUESTIONS] Built {len(dynamic_questions)} questions from blueprint")
+        return dynamic_questions
+    else:
+        # Fallback to old method if no blueprint
+        questions = level_data.questions_answers
+        if not questions:
+            print("No questions found.")
+            return []  # Return empty list instead of None
 
-    # Pre-load lesson images
-    lesson_images = []
-    for q in questions:
-        if getattr(q, "type", None) == "Lesson" and getattr(q, "image", None):
-            lesson_images.append(q.image)
+        # RESTORED: Set IDs and metadata for questions (original logic)
+        for i, q in enumerate(questions):
+            q.lesson_id = level_data.lesson_id
+            q.module_name = level_data.module_name
+            if not hasattr(q, 'id') or q.id is None:
+                q.id = f"L{level_data.lesson_id}Q{i+1}"
+
+        print(f"[LESSON] ✅ Assigned lesson_id={level_data.lesson_id} and module_name='{level_data.module_name}' to {len(questions)} questions (fallback method)")
+        return questions
+
+def debug_blueprint_structure(blueprint):
+    """Debug function to show blueprint structure"""
+    print("\n[BLUEPRINT DEBUG] Structure:")
+    for vocab in blueprint['vocabulary_order']:
+        structure = blueprint['question_structure'][vocab]
+        print(f"  {vocab}:")
+        print(f"    - Practice count: {structure['practice_count']}")
+        print(f"    - Practice types: {structure['practice_types']}")
+        
+        # Count available questions for this vocab
+        vocab_questions = [q for q in blueprint['available_questions'] 
+                         if q.get('vocabulary', '').lower() == vocab.lower()]
+        print(f"    - Available questions: {len(vocab_questions)}")
+        
+        # Break down by type
+        by_type = {}
+        for q in vocab_questions:
+            q_type = q.get('type', 'Unknown')
+            by_type[q_type] = by_type.get(q_type, 0) + 1
+        print(f"    - By type: {by_type}")
+    print()
+
+def build_questions_from_blueprint(blueprint, overall_proficiency, user_id):
+    """Build the actual lesson sequence from blueprint based on proficiency - FIXED"""
+    from types import SimpleNamespace
+    # Determine target difficulty range based on proficiency
+    if overall_proficiency < 0.4:
+        target_difficulties = [1, 2]
+        print(f"[BLUEPRINT] Low proficiency - targeting difficulties {target_difficulties}")
+    elif overall_proficiency < 0.7:
+        target_difficulties = [2, 3, 4]
+        print(f"[BLUEPRINT] Medium proficiency - targeting difficulties {target_difficulties}")
+    else:
+        target_difficulties = [3, 4, 5]
+        print(f"[BLUEPRINT] High proficiency - targeting difficulties {target_difficulties}")
+
+    debug_blueprint_structure(blueprint)
+    lesson_sequence = []
+    available_questions = blueprint['available_questions']
+    question_id_counter = 1
     
-    # Add invisible images to the page to trigger preloading
-    for img_url in lesson_images:
-        page.controls.append(
-            ft.Image(src=img_url, visible=False, width=1, height=1)
-        )
-    page.update()
+    # Build questions for each vocabulary in order
+    for vocab in blueprint['vocabulary_order']:
+        structure = blueprint['question_structure'][vocab]
+        vocab_questions = []
+        
+        print(f"[BLUEPRINT] Building questions for vocabulary: {vocab}")
+        print(f"[BLUEPRINT] Target practice count: {structure['practice_count']}")
+        print(f"[BLUEPRINT] Available practice types: {structure['practice_types']}")
+        
+        # 1. Add lesson question (always first)
+        lesson_q = find_question_by_criteria(available_questions, vocab, 'Lesson', None)
+        if lesson_q:
+            lesson_obj = convert_question_with_proper_attributes(lesson_q, blueprint['lesson_id'], f"L{blueprint['lesson_id']}Q{question_id_counter}")
+            vocab_questions.append(lesson_obj)
+            question_id_counter += 1
+            print(f"[BLUEPRINT] Added lesson question for {vocab}")
+        
+        # 2. Add practice questions - ENHANCED SELECTION
+        practice_added = 0
+        target_practice_count = structure['practice_count']
+        available_practice_types = structure['practice_types']
+        
+        # DEBUGGING: Show what's available for this vocabulary
+        vocab_available_questions = [q for q in available_questions 
+                                   if q.get('vocabulary', '').lower() == vocab.lower()]
+        print(f"[BLUEPRINT] Found {len(vocab_available_questions)} total questions for '{vocab}' in qbank")
+        
+        practice_questions_available = [q for q in vocab_available_questions 
+                                      if q.get('type', '') != 'Lesson']
+        print(f"[BLUEPRINT] Found {len(practice_questions_available)} practice questions for '{vocab}'")
+        
+        # Try to get the requested number of practice questions
+        for i in range(target_practice_count):
+            if practice_added >= target_practice_count:
+                break
+                
+            # Cycle through practice types
+            practice_type = available_practice_types[i % len(available_practice_types)]
+            
+            # ENHANCED: Try multiple strategies to find questions
+            practice_q = None
+            
+            # Strategy 1: Find with preferred difficulty
+            practice_q = find_question_by_criteria_with_difficulty(
+                available_questions, vocab, practice_type, target_difficulties
+            )
+            
+            # Strategy 2: If not found, try any difficulty for this type
+            if not practice_q:
+                print(f"[BLUEPRINT] No {practice_type} found with target difficulties {target_difficulties}, trying any difficulty")
+                practice_q = find_question_by_criteria(available_questions, vocab, practice_type, None)
+            
+            # Strategy 3: If still not found, try a different type from available types
+            if not practice_q and len(available_practice_types) > 1:
+                for alt_type in available_practice_types:
+                    if alt_type != practice_type:
+                        print(f"[BLUEPRINT] Trying alternative type: {alt_type}")
+                        practice_q = find_question_by_criteria_with_difficulty(
+                            available_questions, vocab, alt_type, target_difficulties
+                        )
+                        if practice_q:
+                            practice_type = alt_type  # Update the type
+                            break
+            
+            if practice_q:
+                practice_obj = convert_question_with_proper_attributes(
+                    practice_q, blueprint['lesson_id'], f"L{blueprint['lesson_id']}Q{question_id_counter}"
+                )
+                
+                # Verify the question has required attributes for its type
+                if verify_question_type_attributes(practice_obj):
+                    vocab_questions.append(practice_obj)
+                    question_id_counter += 1
+                    practice_added += 1
+                    
+                    difficulty = getattr(practice_obj, 'difficulty', 'N/A')
+                    print(f"[BLUEPRINT] ✅ Added {practice_type} question {practice_added}/{target_practice_count} for {vocab} (difficulty: {difficulty})")
+                else:
+                    print(f"[BLUEPRINT] ❌ SKIPPED {practice_type} question for {vocab} - failed validation")
+            else:
+                print(f"[BLUEPRINT] ❌ Could not find {practice_type} question for {vocab} (attempt {i+1}/{target_practice_count})")
+        
+        # VERIFICATION: Ensure we got enough practice questions
+        if practice_added < target_practice_count:
+            print(f"[BLUEPRINT] ⚠️  WARNING: Only got {practice_added}/{target_practice_count} practice questions for '{vocab}'")
+            
+            # Show what types we actually have available
+            available_types = set()
+            for q in practice_questions_available:
+                available_types.add(q.get('type', 'Unknown'))
+            print(f"[BLUEPRINT] Available question types for '{vocab}': {list(available_types)}")
+        
+        lesson_sequence.extend(vocab_questions)
+        print(f"[BLUEPRINT] Completed {vocab}: {len(vocab_questions)} total questions ({practice_added} practice)")
+    
+    print(f"[BLUEPRINT] Built complete lesson sequence: {len(lesson_sequence)} questions")
+    
+    # FINAL VERIFICATION
+    valid_questions = []
+    for i, q in enumerate(lesson_sequence):
+        if verify_question_type_attributes(q):
+            valid_questions.append(q)
+        else:
+            print(f"[BLUEPRINT] ❌ FINAL CHECK: Question {i+1} failed validation")
+    
+    print(f"[BLUEPRINT] ✅ {len(valid_questions)} of {len(lesson_sequence)} questions passed final verification")
+    return valid_questions
 
-    print(f"[QUESTIONS] Loaded {len(questions)} questions with proper IDs")
-    return questions
+def convert_question_with_proper_attributes(question_dict, lesson_id, question_id):
+    """Convert question dictionary to object with proper attributes based on question type - FIXED"""
+    
+    # Create a simple object to hold question attributes
+    q_obj = type('Question', (), question_dict)()
+    q_obj.lesson_id = lesson_id
+    q_obj.question_id = question_id
+    
+    # CRITICAL FIX: Also set module_name here to ensure it's always present
+    q_obj.module_name = 'Module 1'  # Default module name, can be overridden later
+    
+    q_type = question_dict.get('type', '')
+    
+    # FIXED: Type-specific validation based on actual question structure
+    if q_type == 'Lesson':
+        required_attrs = ['question', 'vocabulary', 'type']
+        missing_attrs = [attr for attr in required_attrs if not hasattr(q_obj, attr)]
+        
+        if missing_attrs:
+            print(f"[CONVERT] ❌ Lesson missing required attributes: {missing_attrs}")
+            return None
+            
+    elif q_type == 'Pronunciation':
+        # CRITICAL FIX: Pronunciation questions have different required attributes
+        required_attrs = ['question', 'vocabulary', 'type']
+        missing_attrs = [attr for attr in required_attrs if not hasattr(q_obj, attr)]
+        
+        if missing_attrs:
+            print(f"[CONVERT] ❌ Pronunciation missing required attributes: {missing_attrs}")
+            return None
+            
+        # FIXED: Set default accuracy_threshold if not present
+        if not hasattr(q_obj, 'accuracy_threshold'):
+            q_obj.accuracy_threshold = 0.6  # Default threshold
+            
+        # FIXED: Don't validate choices/correct_answer for Pronunciation questions
+        print(f"[CONVERT] ✅ Successfully converted Pronunciation question: '{q_obj.question}'")
+        
+    else:
+        # For all other practice questions (Word Select, True/False, etc.)
+        required_base_attrs = ['choices', 'correct_answer', 'vocabulary', 'type']
+        missing_attrs = [attr for attr in required_base_attrs if not hasattr(q_obj, attr)]
+        
+        if missing_attrs:
+            print(f"[CONVERT] ❌ {q_type} missing base attributes: {missing_attrs}")
+            return None
+    
+    print(f"[CONVERT] ✅ Successfully converted {q_type} question with lesson_id={lesson_id}")
+    return q_obj
+
+def verify_question_type_attributes(question):
+    """Verify that a question has all required attributes for its type - FIXED for Pronunciation"""
+    if not question:
+        return False
+        
+    q_type = getattr(question, 'type', 'Unknown')
+    
+    if q_type == 'Lesson':
+        required_attrs = ['question', 'type', 'vocabulary']
+        
+    elif q_type == 'Word Select':
+        required_attrs = ['word_to_translate', 'choices', 'correct_answer', 'question', 'type', 'vocabulary']
+        
+    elif q_type == 'Translate Sentence':
+        required_attrs = ['question', 'choices', 'correct_answer', 'type', 'vocabulary']
+        
+    elif q_type == 'True or False':
+        required_attrs = ['question', 'choices', 'correct_answer', 'type', 'vocabulary']
+        
+    elif q_type == 'Image Picker':
+        required_attrs = ['question', 'choices', 'correct_answer', 'type', 'vocabulary']
+        
+    elif q_type == 'Pronunciation':
+        # CRITICAL FIX: Pronunciation questions don't have choices or correct_answer
+        required_attrs = ['question', 'type', 'vocabulary', 'accuracy_threshold']
+        
+    else:
+        print(f"[VERIFY] Unknown question type: {q_type}")
+        return False
+    
+    # Check for missing attributes
+    missing_attrs = []
+    for attr in required_attrs:
+        if not hasattr(question, attr):
+            missing_attrs.append(attr)
+    
+    if missing_attrs:
+        vocab = getattr(question, 'vocabulary', 'Unknown')
+        print(f"[VERIFY] ❌ {q_type} - {vocab} missing: {missing_attrs}")
+        return False
+    
+    # Special validation for Word Select
+    if q_type == 'Word Select':
+        word_to_translate = getattr(question, 'word_to_translate', '')
+        if not word_to_translate or word_to_translate == "Missing word_to_translate":
+            print(f"[VERIFY] ❌ Word Select has invalid word_to_translate: '{word_to_translate}'")
+            return False
+    
+    # ENHANCED: Special validation for Pronunciation questions
+    if q_type == 'Pronunciation':
+        accuracy_threshold = getattr(question, 'accuracy_threshold', None)
+        if accuracy_threshold is None or accuracy_threshold <= 0:
+            print(f"[VERIFY] ❌ Pronunciation has invalid accuracy_threshold: {accuracy_threshold}")
+            return False
+    
+    return True
+
+def fix_word_select_questions_in_qbank():
+    """Helper function to identify and fix Word Select questions missing word_to_translate"""
+    import qbank
+    
+    print("[QBANK_FIX] Analyzing Word Select questions in qbank...")
+    
+    fixed_count = 0
+    total_word_select = 0
+    
+    for module_name, lessons in [('module_1', qbank.module_1)]:
+        for lesson_name, questions in lessons.items():
+            for q in questions:
+                if q.get('type') == 'Word Select':
+                    total_word_select += 1
+                    
+                    if 'word_to_translate' not in q:
+                        # Try to extract word_to_translate from question pattern
+                        question_text = q.get('question', '')
+                        print(f"[QBANK_FIX] Found Word Select without word_to_translate:")
+                        print(f"  Question: {question_text}")
+                        print(f"  Choices: {q.get('choices', [])}")
+                        
+                        # You could add logic here to fix the qbank data
+                        # For now, just count the issues
+                        fixed_count += 1
+    
+    print(f"[QBANK_FIX] Found {fixed_count} Word Select questions needing fixes out of {total_word_select} total")
+    return fixed_count
+
+def get_user_overall_proficiency(user_id, page=None):
+    """Get user's overall proficiency, preferring session value if available."""
+    # Try session first if page is provided
+    if page is not None:
+        session_proficiency = page.session.get("overall_proficiency")
+        if session_proficiency is not None:
+            try:
+                session_proficiency = float(session_proficiency)
+                # Ensure valid range
+                session_proficiency = max(0.01, min(1.0, session_proficiency))
+                print(f"[Proficiency] Using session overall proficiency: {session_proficiency}")
+                return session_proficiency
+            except Exception as e:
+                print(f"[Proficiency] Error parsing session proficiency: {e}")
+    # Fallback to DB
+    try:
+        import pymongo
+        arami = pymongo.MongoClient("mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/")["arami"]
+        users_col = arami["users"]
+        user_doc = users_col.find_one({"user_id": int(user_id)})
+        if user_doc:
+            proficiency = user_doc.get("proficiency", 0.5)
+            if isinstance(proficiency, dict):
+                proficiency = proficiency.get("proficiency", 0.5)
+            if proficiency > 1.0:
+                proficiency = proficiency / 100.0
+            proficiency = max(0.01, min(1.0, proficiency))
+            print(f"[Proficiency] Using DB overall proficiency: {proficiency}")
+            return proficiency
+    except Exception as e:
+        print(f"[Proficiency] Error getting proficiency: {e}")
+    return 0.5  # Default
+
+def find_question_by_criteria(questions, vocab, q_type, difficulty):
+    """Find a question matching vocabulary and type"""
+    for q in questions:
+        q_vocab = q.get('vocabulary', '').lower()
+        q_question_type = q.get('type', '')
+        
+        if q_vocab == vocab.lower() and q_question_type == q_type:
+            if difficulty is None or q.get('difficulty') == difficulty:
+                return q
+    return None
+
+def find_question_by_criteria_with_difficulty(questions, vocab, q_type, target_difficulties):
+    """Find the best question matching vocab, type, and preferred difficulties"""
+    matching_questions = []
+    
+    for q in questions:
+        q_vocab = q.get('vocabulary', '').lower()
+        q_question_type = q.get('type', '')
+        q_difficulty = q.get('difficulty', None)
+        
+        if q_vocab == vocab.lower() and q_question_type == q_type:
+            matching_questions.append((q, q_difficulty))
+    
+    if not matching_questions:
+        return None
+    
+    # First, try to find exact matches in target difficulties
+    for target_diff in target_difficulties:
+        for q, diff in matching_questions:
+            if diff == target_diff:
+                return q
+    
+    # If no exact match, find closest difficulty
+    if matching_questions:
+        # Sort by how close to target difficulties
+        def difficulty_score(q_diff):
+            if q_diff is None:
+                return float('inf')
+            return min(abs(q_diff - td) for td in target_difficulties)
+        
+        matching_questions.sort(key=lambda x: difficulty_score(x[1]))
+        return matching_questions[0][0]
+    
+    return None
+
+def convert_to_question_object(question_dict, lesson_id, question_id):
+    """Convert question dictionary to object format expected by lesson system"""
+    from types import SimpleNamespace
+    
+    # CRITICAL: Create object with ALL dictionary attributes
+    q_obj = SimpleNamespace()
+    
+    # Copy ALL attributes from the dictionary
+    for key, value in question_dict.items():
+        setattr(q_obj, key, value)
+    
+    # Set lesson metadata
+    q_obj.lesson_id = lesson_id
+    q_obj.module_name = 'Module 1'
+    q_obj.id = f"L{lesson_id}Q{question_id}"
+    
+    # VERIFICATION: Check for critical attributes
+    required_attrs = ['choices', 'correct_answer', 'question', 'type', 'vocabulary']
+    missing_attrs = []
+    
+    for attr in required_attrs:
+        if not hasattr(q_obj, attr):
+            missing_attrs.append(attr)
+    
+    if missing_attrs:
+        print(f"[CONVERT] WARNING: Missing attributes {missing_attrs} in question {question_id}")
+        print(f"[CONVERT] Available attributes: {list(question_dict.keys())}")
+    
+    return q_obj
+
+def verify_question_integrity(questions):
+    """Verify that all questions have required attributes - FIXED for Pronunciation"""
+    print("[VERIFY] Checking question integrity...")
+    
+    for i, q in enumerate(questions):
+        q_type = getattr(q, 'type', 'Unknown')
+        vocab = getattr(q, 'vocabulary', 'Unknown')
+        
+        # CRITICAL FIX: Different validation based on question type
+        if q_type == 'Lesson':
+            # Lesson questions need different attributes
+            required_attrs = ['question', 'type', 'vocabulary']
+        elif q_type == 'Pronunciation':
+            # FIXED: Pronunciation questions have their own required attributes
+            required_attrs = ['question', 'type', 'vocabulary', 'accuracy_threshold']
+        else:
+            # Practice questions need these attributes
+            required_attrs = ['choices', 'correct_answer', 'question', 'type', 'vocabulary']
+        
+        missing_attrs = []
+        for attr in required_attrs:
+            if not hasattr(q, attr):
+                missing_attrs.append(attr)
+        
+        if missing_attrs:
+            print(f"[VERIFY] ERROR: Question {i+1} ({q_type} - {vocab}) missing: {missing_attrs}")
+            return False
+        else:
+            print(f"[VERIFY] OK: Question {i+1} ({q_type} - {vocab}) has all required attributes")
+    
+    print("[VERIFY] All questions verified successfully")
+    return True
 
 def get_user_library():
     try:
         with open("temp_library.json", "r") as f:
             user_library = json.load(f)
+            # CRITICAL FIX: Ensure we return a list, not None
+            if user_library is None:
+                return []
             return user_library
     except FileNotFoundError:
         print("Temp library cache not found.")
-        return None
+        # CRITICAL FIX: Return empty list instead of None
+        return []
+    except Exception as e:
+        print(f"Error loading user library: {e}")
+        # CRITICAL FIX: Return empty list instead of None
+        return []
     
 def update_user_library():
     global user_library
@@ -1821,18 +2509,46 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
         global total_response_time
         total_response_time += response_time
         
-        if not question_data.accuracy:
+        # CRITICAL FIX: Initialize accuracy attribute if it doesn't exist
+        if not hasattr(question_data, 'accuracy'):
             question_data.accuracy = 0.0
+            print(f"[PRONUNCIATION] Initialized accuracy to 0.0 for '{question_data.vocabulary}'")
+        
+        # FIXED: Determine if pronunciation was correct based on accuracy threshold
+        is_pronunciation_correct = question_data.accuracy >= accuracy_threshold
+        
+        print(f"[PRONUNCIATION] Question accuracy: {question_data.accuracy:.2f}, threshold: {accuracy_threshold:.2f}, correct: {is_pronunciation_correct}")
+        
+        # CRITICAL: Set the correct attribute for BKT processing
+        question_data.correct = is_pronunciation_correct
+        
+        # Update global tracking based on actual result
+        if is_pronunciation_correct:
+            print(f"Correct answer for '{question_data.vocabulary}'!")
+            global correct_answers
+            question_id = getattr(question_data, 'id', f'q_{len(correct_answers)}')
+            correct_answers[question_id] = question_data
             
-        if question_data.accuracy >= accuracy_threshold:
-            print(f"Pronunciation accepted with accuracy: {question_data.accuracy:.2f}")
-            correct_answers[question_data.question] = question_data
+            # Add to user library
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
+                
+            print(f"Using vocabulary key: '{question_data.vocabulary}' for tracking question")
         else:
-            print(f"Pronunciation below threshold: {question_data.accuracy:.2f}")
-            incorrect_answers[question_data.question] = question_data
+            print(f"Incorrect answer for '{question_data.vocabulary}'. Accuracy: {question_data.accuracy:.2f}")
+            global incorrect_answers
+            question_id = getattr(question_data, 'id', f'q_{len(incorrect_answers)}')
+            incorrect_answers[question_id] = question_data
             
+            # Still add to user library (they encountered it)
+            if question_data.vocabulary not in user_library:
+                user_library.append(question_data.vocabulary)
+                
+            print(f"Using vocabulary key: '{question_data.vocabulary}' for tracking question")
+        
+        # Call the next question handler
         if on_next:
-            on_next(e)
+            on_next()
 
     
     # Main UI Layout
@@ -2157,32 +2873,62 @@ def lesson_page(page: ft.Page, image_urls: list):
         ],
         actions_alignment=ft.MainAxisAlignment.CENTER,
     )
-    
-    def get_user_overall_proficiency(user_id):
-        """Get user's overall proficiency from database"""
-        try:
-            import pymongo
-            arami = pymongo.MongoClient("mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/")["arami"]
-            users_col = arami["users"]
-            
-            user_doc = users_col.find_one({"user_id": int(user_id)})
-            if user_doc:
-                proficiency = user_doc.get("proficiency", 0.5)
-                if isinstance(proficiency, dict):
-                    proficiency = proficiency.get("proficiency", 0.5)
-                
-                # Convert to 0-1 scale if needed
-                if proficiency > 1.0:
-                    proficiency = proficiency / 100.0
-                
-                # Ensure valid range
-                proficiency = max(0.01, min(1.0, proficiency))
-                return proficiency
-                
-        except Exception as e:
-            print(f"[Proficiency] Error getting proficiency: {e}")
+
+    def apply_dynamic_difficulty_adjustment_during_lesson(current_index, questions, vocab_performance, blueprint):
+        """Dynamically adjust remaining questions based on real-time performance"""
         
-        return 0.5  # Default
+        if not blueprint:
+            return
+        
+        # Calculate current performance for this vocabulary
+        answers = vocab_performance.get("answers", [])
+        if len(answers) < 2:  # Need at least 2 answers to make adjustments
+            return
+        
+        accuracy = sum(answers) / len(answers)
+        
+        # Determine new target difficulty based on performance
+        if accuracy >= 0.9:
+            new_target_difficulties = [4, 5]  # Much harder
+            adjustment_msg = "Excellent performance - switching to hardest questions"
+        elif accuracy >= 0.75:
+            new_target_difficulties = [3, 4, 5]  # Harder
+            adjustment_msg = "Good performance - increasing difficulty"
+        elif accuracy < 0.5:
+            new_target_difficulties = [1, 2]  # Easier
+            adjustment_msg = "Poor performance - switching to easier questions"
+        else:
+            return  # No change needed
+        
+        print(f"[DYNAMIC] {adjustment_msg}")
+        
+        # Replace remaining questions for this vocabulary
+        remaining_questions = questions[current_index + 1:]
+        current_vocab = vocab_performance.get("vocabulary", "").lower()
+        
+        replacements = 0
+        for i, q in enumerate(remaining_questions):
+            q_vocab = getattr(q, 'vocabulary', '').lower()
+            q_type = getattr(q, 'type', '')
+            
+            if q_vocab == current_vocab and q_type != 'Lesson':
+                # Find a better question from the blueprint
+                better_q = find_question_by_criteria_with_difficulty(
+                    blueprint['available_questions'], q_vocab, q_type, new_target_difficulties
+                )
+                
+                if better_q and better_q.get('difficulty') != getattr(q, 'difficulty', None):
+                    # Replace the question
+                    new_q_obj = convert_to_question_object(better_q, blueprint['lesson_id'], f"DYN{i}")
+                    questions[current_index + 1 + i] = new_q_obj
+                    replacements += 1
+                    
+                    old_diff = getattr(q, 'difficulty', 'N/A')
+                    new_diff = better_q.get('difficulty', 'N/A')
+                    print(f"[DYNAMIC] Replaced {q_type} - {q_vocab}: difficulty {old_diff} → {new_diff}")
+        
+        if replacements > 0:
+            print(f"[DYNAMIC] Made {replacements} dynamic replacements for '{current_vocab}'")
 
     def apply_initial_difficulty_adjustment(questions, overall_proficiency):
         """Apply initial difficulty based on overall proficiency to ALL questions"""
@@ -2239,6 +2985,152 @@ def lesson_page(page: ft.Page, image_urls: list):
         ),
         expand=True
     )
+
+    def apply_original_difficulty_adjustment(questions, overall_proficiency):
+        """Original fallback difficulty adjustment method"""
+        print(f"[LESSON] Applying original difficulty adjustment based on proficiency: {overall_proficiency:.3f}")
+        
+        # Determine base difficulty range based on overall proficiency
+        if overall_proficiency < 0.3:          # Very low (0-30%)
+            base_range = [1, 2]  # Easy questions only
+            adjustment_message = "Very low proficiency - starting with easy questions"
+        elif overall_proficiency < 0.5:       # Low (30-50%)
+            base_range = [1, 2, 3]  # Easy to medium
+            adjustment_message = "Low proficiency - starting with easy-medium questions"
+        elif overall_proficiency < 0.7:       # Medium (50-70%)
+            base_range = [2, 3, 4]  # Medium questions
+            adjustment_message = "Medium proficiency - starting with medium questions"
+        elif overall_proficiency < 0.85:      # High (70-85%)
+            base_range = [3, 4, 5]  # Medium to hard
+            adjustment_message = "High proficiency - starting with medium-hard questions"
+        else:                                  # Very high (85-100%)
+            base_range = [4, 5]  # Hard questions only
+            adjustment_message = "Very high proficiency - starting with hard questions"
+        
+        print(f"[LESSON] {adjustment_message}")
+        print(f"[LESSON] Initial difficulty range: {base_range}")
+        
+        # Apply to all practice questions (skip lesson and cultural trivia)
+        questions_adjusted = 0
+        for question in questions:
+            q_type = getattr(question, 'type', '')
+            if q_type not in ['Lesson', 'Cultural Trivia']:
+                # Assign difficulty from base range (cycling through if needed)
+                import random
+                difficulty = random.choice(base_range)
+                question.difficulty = difficulty
+                questions_adjusted += 1
+                
+                vocab = getattr(question, 'vocabulary', 'Unknown')
+                print(f"[LESSON] Set initial difficulty {difficulty} for {q_type} - {vocab}")
+        
+        print(f"[LESSON] Applied initial difficulty to {questions_adjusted} questions")
+
+    # Update the apply_initial_difficulty_adjustment_fixed function to fix the fallback call:
+    def apply_initial_difficulty_adjustment_fixed(questions, overall_proficiency, page):
+        """Apply initial difficulty based on overall proficiency by finding appropriate questions"""
+        
+        level_data = page.session.get("level_data")
+        if not level_data:
+            return
+        
+        try:
+            import qbank
+            lesson_id = getattr(level_data, 'lesson_id', None)
+            
+            if lesson_id:
+                lesson_key = f"Lesson {lesson_id}"
+                if hasattr(qbank, 'module_1') and lesson_key in qbank.module_1:
+                    full_lesson_questions = qbank.module_1[lesson_key]
+                    print(f"[LESSON] Found {len(full_lesson_questions)} questions in qbank for {lesson_key}")
+                    
+                    # Determine target difficulty range based on proficiency
+                    if overall_proficiency < 0.3:
+                        target_difficulties = [1, 2]
+                        adjustment_message = "Very low proficiency - selecting easy questions"
+                    elif overall_proficiency < 0.5:
+                        target_difficulties = [1, 2, 3]
+                        adjustment_message = "Low proficiency - selecting easy-medium questions"
+                    elif overall_proficiency < 0.7:
+                        target_difficulties = [2, 3, 4]
+                        adjustment_message = "Medium proficiency - selecting medium-hard questions"
+                    elif overall_proficiency < 0.85:
+                        target_difficulties = [3, 4, 5]
+                        adjustment_message = "High proficiency - selecting hard questions"
+                    else:
+                        target_difficulties = [4, 5]
+                        adjustment_message = "Very high proficiency - selecting hardest questions"
+                    
+                    print(f"[LESSON] {adjustment_message}")
+                    print(f"[LESSON] Target difficulties: {target_difficulties}")
+                    
+                    # Replace questions with appropriate difficulty versions
+                    questions_replaced = 0
+                    for i, question in enumerate(questions):
+                        q_type = getattr(question, 'type', '')
+                        if q_type in ['Lesson', 'Cultural Trivia']:
+                            continue
+                        
+                        vocab = getattr(question, 'vocabulary', '')
+                        current_difficulty = getattr(question, 'difficulty', 1)
+                        
+                        # FIXED: Remove the prefer_highest parameter
+                        better_question = find_better_question_from_qbank(
+                            full_lesson_questions, vocab, q_type, target_difficulties
+                        )
+                        
+                        if better_question:
+                            new_difficulty = getattr(better_question, 'difficulty', current_difficulty)
+                            
+                            if new_difficulty != current_difficulty:
+                                from types import SimpleNamespace
+                                if isinstance(better_question, dict):
+                                    better_question = SimpleNamespace(**better_question)
+                                
+                                better_question.lesson_id = getattr(question, 'lesson_id', lesson_id)
+                                better_question.module_name = getattr(question, 'module_name', 'Module 1')
+                                
+                                questions[i] = better_question
+                                questions_replaced += 1
+                                
+                                print(f"[LESSON] REPLACED {q_type} - {vocab}: difficulty {current_difficulty} → {new_difficulty}")
+                            else:
+                                print(f"[LESSON] KEPT {q_type} - {vocab}: difficulty {current_difficulty} (already optimal)")
+                        else:
+                            print(f"[LESSON] KEPT {q_type} - {vocab}: difficulty {current_difficulty} (no better option)")
+                    
+                    print(f"[LESSON] Replaced {questions_replaced} questions with better difficulties")
+                    
+        except Exception as e:
+            print(f"[LESSON] Error accessing qbank: {e}")
+            # Only call fallback if we absolutely have to
+            print("[LESSON] Skipping fallback to preserve blueprint difficulties")
+            return  # Don't call the fallback at all
+
+    def find_better_question_from_qbank(full_questions, vocab, q_type, target_difficulties):
+        """Find a question from qbank that matches vocab, type, and has target difficulty"""
+        
+        # Find all matching questions
+        matching_questions = []
+        for q in full_questions:
+            q_vocab = q.get('vocabulary', '') if isinstance(q, dict) else getattr(q, 'vocabulary', '')
+            q_question_type = q.get('type', '') if isinstance(q, dict) else getattr(q, 'type', '')
+            q_difficulty = q.get('difficulty', None) if isinstance(q, dict) else getattr(q, 'difficulty', None)
+            q_id = q.get('id', None) if isinstance(q, dict) else getattr(q, 'id', None)
+            if q_id in used_question_ids:
+                continue  # Skip already used
+            if (q_vocab.lower() == vocab.lower() and 
+                q_difficulty in target_difficulties):
+                matching_questions.append(q)
+        
+        if matching_questions:
+            # Return the first matching question (you could add more logic here)
+            selected = matching_questions[0]
+            difficulty = selected.get('difficulty', 1) if isinstance(selected, dict) else getattr(selected, 'difficulty', 1)
+            print(f"[LESSON] Found better question: {q_type} - {vocab} with difficulty {difficulty}")
+            return selected
+        
+        return None
     
     def handle_question_progression(current_index, questions, current_question):
         """Handle progression to next question with proper vocabulary grouping"""
@@ -2423,232 +3315,269 @@ def lesson_page(page: ft.Page, image_urls: list):
         return vocabulary_groups
 
     def get_full_question_pool_for_rebatching(page):
-        """Get the full question pool for the current lesson from qbank using your existing structure"""
-        try:
-            # Get current lesson info from session (same way get_questions does it)
+        """Get the full question pool - now uses the global pool manager"""
+        global lesson_question_pool
+        
+        if not lesson_question_pool.initialized:
+            print("[REBATCH] Question pool not initialized, falling back to session data")
+            # Fallback to original method
             level_data = page.session.get("level_data")
-            if not level_data:
-                print("[REBATCH] No level_data found in session")
+            if level_data and level_data.questions_answers:
+                lesson_question_pool.initialize_pool(level_data.questions_answers)
+            else:
+                print("[REBATCH] No fallback data available")
                 return []
-            
-            # ENHANCED: Get the ORIGINAL full pool before any filtering
-            # This should give us access to ALL difficulties for each vocabulary
-            all_questions = level_data.questions_answers
-            
+        
+        print(f"[REBATCH] Using initialized question pool with {len(lesson_question_pool.full_pool)} questions")
+        return lesson_question_pool.full_pool
+
+    def select_question_by_difficulty(vocab, question_type, target_difficulty, all_questions=None):
+        """Select a question of specific difficulty - now uses the global pool"""
+        global lesson_question_pool
+        
+        if lesson_question_pool.initialized:
+            # Use the organized pool for faster lookups
+            return lesson_question_pool.find_question_by_criteria(vocab, question_type, target_difficulty)
+        else:
+            # Fallback to the original method if pool isn't available
+            print("[REBATCH] Pool not available, using fallback method")
             if not all_questions:
-                print("[REBATCH] No questions found in level_data")
-                return []
-            
-            print(f"[REBATCH] Found {len(all_questions)} questions in full pool")
-            
-            # IMPROVED: Try to get access to the original qbank data
-            try:
-                # Import and access the original qbank module
-                import sys
-                import os
-                qbank_path = os.path.join(os.path.dirname(__file__), 'qbank.py')
+                return None
                 
-                if os.path.exists(qbank_path):
-                    # Get the current lesson/module info
-                    lesson_id = getattr(level_data, 'lesson_id', None)
-                    module_name = getattr(level_data, 'module_name', None)
-                    
-                    print(f"[REBATCH] Looking for additional questions: lesson_id={lesson_id}, module={module_name}")
-                    
-                    # Try to import qbank and get more questions
-                    import importlib.util
-                    spec = importlib.util.spec_from_file_location("qbank", qbank_path)
-                    qbank_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(qbank_module)
-                    
-                    # Get the module data (e.g., module_1)
-                    if hasattr(qbank_module, 'module_1'):
-                        module_data = qbank_module.module_1
-                        
-                        # Find the lesson key (e.g., "Lesson 3")
-                        lesson_key = f"Lesson {lesson_id}"
-                        if lesson_key in module_data:
-                            qbank_questions = module_data[lesson_key]
-                            print(f"[REBATCH] Found {len(qbank_questions)} questions in qbank for {lesson_key}")
-                            
-                            # Convert qbank questions to objects if needed
-                            from types import SimpleNamespace
-                            additional_questions = []
-                            
-                            for q_data in qbank_questions:
-                                if isinstance(q_data, dict):
-                                    q_obj = SimpleNamespace(**q_data)
-                                    # Set lesson metadata
-                                    q_obj.lesson_id = lesson_id
-                                    q_obj.module_name = module_name
-                                    additional_questions.append(q_obj)
-                            
-                            # Merge with existing questions (avoid duplicates)
-                            existing_ids = {getattr(q, 'id', None) for q in all_questions}
-                            for q in additional_questions:
-                                if getattr(q, 'id', None) not in existing_ids:
-                                    all_questions.append(q)
-                            
-                            print(f"[REBATCH] Total questions after qbank merge: {len(all_questions)}")
-                            
-            except Exception as qbank_error:
-                print(f"[REBATCH] Could not access qbank: {qbank_error}")
-            
-            # Group questions by vocabulary and difficulty to see what's available
-            vocab_difficulties = {}
+            # Original logic as fallback
+            matching_questions = []
             for q in all_questions:
-                vocab = getattr(q, 'vocabulary', 'Unknown')
-                difficulty = getattr(q, 'difficulty', None)
-                q_type = getattr(q, 'type', 'Unknown')
+                q_vocab = getattr(q, 'vocabulary', '').lower()
+                q_type = getattr(q, 'type', '')
+                q_difficulty = getattr(q, 'difficulty', None)
                 
-                if vocab not in vocab_difficulties:
-                    vocab_difficulties[vocab] = {}
-                
-                if q_type not in vocab_difficulties[vocab]:
-                    vocab_difficulties[vocab][q_type] = []
-                
-                if difficulty is not None:
-                    vocab_difficulties[vocab][q_type].append(difficulty)
+                if (q_vocab == vocab.lower() and 
+                    q_type == question_type and 
+                    q_difficulty is not None):
+                    matching_questions.append((q, q_difficulty))
             
-            # Log available difficulties for debugging
-            print(f"[REBATCH] Available question pool breakdown:")
-            for vocab, types in vocab_difficulties.items():
-                for q_type, difficulties in types.items():
-                    if difficulties:  # Only show if there are actual difficulties
-                        unique_diffs = sorted(set(difficulties))
-                        print(f"  {vocab} - {q_type}: difficulties {unique_diffs}")
+            if not matching_questions:
+                return None
             
-            return all_questions
+            # Find exact match first
+            exact_matches = [(q, diff) for q, diff in matching_questions if diff == target_difficulty]
+            if exact_matches:
+                return exact_matches[0][0]
             
-        except Exception as e:
-            print(f"[REBATCH] Error getting question pool: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-        
-    def select_question_by_difficulty(vocab, question_type, target_difficulty, all_questions):
-        """Select a question of specific difficulty for a vocabulary and type"""
-        
-        # Find all questions matching vocab and type
-        matching_questions = []
-        for q in all_questions:
-            q_vocab = getattr(q, 'vocabulary', '').lower()
-            q_type = getattr(q, 'type', '')
-            q_difficulty = getattr(q, 'difficulty', None)
-            
-            if (q_vocab == vocab.lower() and 
-                q_type == question_type and 
-                q_difficulty is not None):
-                matching_questions.append((q, q_difficulty))
-        
-        if not matching_questions:
-            print(f"[QUESTION_SELECT] No {question_type} questions found for '{vocab}' in question pool")
-            return None
-        
-        # IMPROVED: First try to find exact difficulty match
-        exact_matches = [(q, diff) for q, diff in matching_questions if diff == target_difficulty]
-        
-        if exact_matches:
-            # Found exact match - return the first one
-            selected_question = exact_matches[0][0]
-            actual_difficulty = exact_matches[0][1]
-            print(f"[QUESTION_SELECT] Found EXACT match for {question_type} '{vocab}': target {target_difficulty}, got {actual_difficulty}")
-            return selected_question
-        
-        # No exact match - find closest difficulty
-        matching_questions.sort(key=lambda x: abs(x[1] - target_difficulty))
-        best_match = matching_questions[0]
-        selected_question = best_match[0]
-        actual_difficulty = best_match[1]
-        
-        print(f"[QUESTION_SELECT] Found CLOSEST match for {question_type} '{vocab}': target {target_difficulty}, got {actual_difficulty}")
-        
-        return selected_question
+            # Find closest match
+            matching_questions.sort(key=lambda x: abs(x[1] - target_difficulty))
+            return matching_questions[0][0]
 
     def apply_rebatched_difficulties_to_remaining_questions(current_index, questions, difficulty_change, page):
-        """Apply rebatched difficulties and actually select appropriate questions from the current lesson pool"""
+        """Apply rebatched difficulties using the global question pool - ENHANCED DEBUG"""
+        global lesson_question_pool
         
-        try:
-            # Get the full question pool using your existing structure
+        if not lesson_question_pool.initialized:
+            print("[REBATCH] Question pool not initialized - initializing now")
             full_question_pool = get_full_question_pool_for_rebatching(page)
-            
             if not full_question_pool:
                 print("[REBATCH] Cannot rebatch - no question pool available")
                 return
+        
+        print(f"[REBATCH] Using question pool with {len(lesson_question_pool.full_pool)} total questions")
+        
+        # Apply rebatching to remaining questions
+        remaining_questions = questions[current_index + 1:]
+        rebatched_count = 0
+        actually_replaced_count = 0
+        
+        for i, question in enumerate(remaining_questions):
+            q_type = getattr(question, 'type', '')
+            if q_type in ['Lesson', 'Cultural Trivia']:
+                continue  # Skip non-practice questions
             
-            print(f"[REBATCH] Full question pool: {len(full_question_pool)} questions")
+            vocab = getattr(question, 'vocabulary', '')
+            current_difficulty = getattr(question, 'difficulty', 2)
             
-            # Apply rebatching to remaining questions
-            remaining_questions = questions[current_index + 1:]
-            rebatched_count = 0
-            actually_replaced_count = 0
+            # FIXED: Handle None difficulty values
+            if current_difficulty is None:
+                print(f"[REBATCH] SKIPPED {q_type} - {vocab}: current difficulty is None")
+                continue
             
-            for i, question in enumerate(remaining_questions):
-                q_type = getattr(question, 'type', '')
-                if q_type in ['Lesson', 'Cultural Trivia']:
-                    continue  # Skip non-practice questions
-                
-                vocab = getattr(question, 'vocabulary', '')
-                current_difficulty = getattr(question, 'difficulty', 2)
-                target_difficulty = max(1, min(5, current_difficulty + difficulty_change))
-                
-                print(f"[REBATCH] Processing {q_type} - {vocab}: current diff {current_difficulty} → target {target_difficulty}")
-                
-                # Try to find a better question with the target difficulty
-                better_question = select_question_by_difficulty(vocab, q_type, target_difficulty, full_question_pool)
-                
-                if better_question and getattr(better_question, 'difficulty', None) != current_difficulty:
-                    # Replace the question with the better one ONLY if it's actually different
-                    actual_index = current_index + 1 + i
+            target_difficulty = max(1, min(5, current_difficulty + difficulty_change))
+            
+            print(f"[REBATCH] Processing {q_type} - {vocab}: current diff {current_difficulty} → target {target_difficulty}")
+            
+            # ENHANCED: More aggressive replacement logic - FIXED VERSION
+            if abs(difficulty_change) >= 1:  # Only process significant changes
+                try:
+                    # Try to find a better question with the target difficulty
+                    better_question = lesson_question_pool.find_question_by_criteria(vocab, q_type, target_difficulty)
                     
-                    # Preserve the lesson_id and module_name from the original question
-                    original_lesson_id = getattr(questions[actual_index], 'lesson_id', None)
-                    original_module_name = getattr(questions[actual_index], 'module_name', None)
-                    
-                    questions[actual_index] = better_question
-                    new_difficulty = getattr(better_question, 'difficulty', target_difficulty)
-                    
-                    # Restore the lesson metadata
-                    if original_lesson_id:
-                        questions[actual_index].lesson_id = original_lesson_id
-                    if original_module_name:
-                        questions[actual_index].module_name = original_module_name
-                    
-                    actually_replaced_count += 1
-                    print(f"[REBATCH] ✓ REPLACED {q_type} - {vocab}: difficulty {current_difficulty} → {new_difficulty}")
-                else:
-                    # Just update the difficulty if no better question found or same question
-                    question.difficulty = target_difficulty
-                    print(f"[REBATCH] ✓ UPDATED {q_type} - {vocab}: difficulty {current_difficulty} → {target_difficulty} (same question)")
-                
-                rebatched_count += 1
-            
-            print(f"[REBATCH] Successfully rebatched {rebatched_count} questions ({actually_replaced_count} actually replaced)")
-            
-        except Exception as e:
-            print(f"[REBATCH] Error in rebatching: {e}")
-            import traceback
-            traceback.print_exc()
+                    if better_question:
+                        # Get difficulty and ID info
+                        if isinstance(better_question, dict):
+                            better_difficulty = better_question.get('difficulty', None)
+                            better_id = better_question.get('id', None)
+                        else:
+                            better_difficulty = getattr(better_question, 'difficulty', None)
+                            better_id = getattr(better_question, 'id', None)
+                        
+                        current_id = getattr(question, 'id', None)
+                        
+                        # FIXED: Handle None difficulty in better_question
+                        if better_difficulty is None:
+                            print(f"[REBATCH] ⚠️ SKIPPED {q_type} - {vocab}: found question has None difficulty")
+                            continue
+                        
+                        # SIMPLIFIED: Replace if difficulty is different and closer to target
+                        should_replace = False
+                        replacement_reason = ""
 
+                        # Case 1: Exact target difficulty match
+                        if better_difficulty == target_difficulty:
+                            should_replace = True
+                            replacement_reason = f"exact target difficulty {target_difficulty}"
+
+                        # Case 2: For significant difficulty changes, accept ANY different difficulty
+                        elif abs(difficulty_change) >= 2:
+                            should_replace = True
+                            replacement_reason = f"accepting available difficulty {better_difficulty} for significant change (change: {difficulty_change:+d})"
+
+                        # Case 3: For moderate increases, accept higher difficulties
+                        elif difficulty_change > 0 and better_difficulty > current_difficulty:
+                            should_replace = True
+                            replacement_reason = f"higher difficulty {better_difficulty} for increase (change: +{difficulty_change})"
+
+                        # Case 4: For decreases, accept lower difficulties  
+                        elif difficulty_change < 0 and better_difficulty < current_difficulty:
+                            should_replace = True
+                            replacement_reason = f"lower difficulty {better_difficulty} for decrease (change: {difficulty_change})"
+
+                        # Case 5: Better approximation of target
+                        elif abs(better_difficulty - target_difficulty) < abs(current_difficulty - target_difficulty):
+                            should_replace = True
+                            replacement_reason = f"better approximation {better_difficulty} (closer to target {target_difficulty})"
+                                                                            
+                        if should_replace:
+                            # Replace the question with the better one
+                            actual_index = current_index + 1 + i
+                            
+                            # CRITICAL: Preserve ALL metadata from original question
+                            original_lesson_id = getattr(questions[actual_index], 'lesson_id', None)
+                            original_module_name = getattr(questions[actual_index], 'module_name', None)
+                            original_id = getattr(questions[actual_index], 'id', None)
+                            
+                            # FIXED: Properly convert dict to SimpleNamespace with ALL attributes
+                            if isinstance(better_question, dict):
+                                from types import SimpleNamespace
+                                
+                                # Create a complete SimpleNamespace with all dictionary keys as attributes
+                                better_question_obj = SimpleNamespace()
+                                
+                                # Copy ALL attributes from the dictionary
+                                for key, value in better_question.items():
+                                    setattr(better_question_obj, key, value)
+                                
+                                # Verify critical attributes exist
+                                required_attrs = ['choices', 'correct_answer', 'question', 'type', 'vocabulary', 'difficulty']
+                                missing_attrs = []
+                                
+                                for attr in required_attrs:
+                                    if not hasattr(better_question_obj, attr):
+                                        missing_attrs.append(attr)
+                                
+                                if missing_attrs:
+                                    print(f"[REBATCH] ⚠️ WARNING: Missing attributes in better_question: {missing_attrs}")
+                                    print(f"[REBATCH] Available attributes: {list(better_question.keys())}")
+                                    # Skip this replacement if critical attributes are missing
+                                    continue
+                                
+                                better_question = better_question_obj
+                            else:
+                                # Verify the object has required attributes
+                                required_attrs = ['choices', 'correct_answer', 'question', 'type', 'vocabulary']
+                                missing_attrs = []
+                                
+                                for attr in required_attrs:
+                                    if not hasattr(better_question, attr):
+                                        missing_attrs.append(attr)
+                                
+                                if missing_attrs:
+                                    print(f"[REBATCH] ⚠️ WARNING: Better question object missing attributes: {missing_attrs}")
+                                    continue
+                            
+                            # Replace the question
+                            questions[actual_index] = better_question
+                            new_difficulty = getattr(better_question, 'difficulty', target_difficulty)
+                            
+                            new_id = getattr(better_question, 'id', None)
+                            if new_id:
+                                used_question_ids.add(new_id)
+
+                            # Restore metadata
+                            if original_lesson_id:
+                                questions[actual_index].lesson_id = original_lesson_id
+                            if original_module_name:
+                                questions[actual_index].module_name = original_module_name
+                            if original_id:
+                                # Generate new unique ID based on original
+                                questions[actual_index].id = f"R{original_id}"
+                            else:
+                                # Generate completely new ID
+                                questions[actual_index].id = f"R{better_id}"
+                            
+                            actually_replaced_count += 1
+                            print(f"[REBATCH] ✅ REPLACED {q_type} - {vocab}: difficulty {current_difficulty} → {new_difficulty} ({replacement_reason})")
+                        else:
+                            print(f"[REBATCH] ⚠️ KEPT {q_type} - {vocab}: difficulty {current_difficulty} (found {better_difficulty} but not better enough)")
+                    else:
+                        print(f"[REBATCH] ⚠️ NO ALTERNATIVES found for {q_type} - {vocab} targeting difficulty {target_difficulty}")
+                        
+                except Exception as e:
+                    print(f"[REBATCH] ❌ ERROR processing {q_type} - {vocab}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+                            
+            else:
+                print(f"[REBATCH] ⚠️ SKIPPED {q_type} - {vocab}: change too small ({difficulty_change})")
+            
+            rebatched_count += 1
+        
+        print(f"[REBATCH] Successfully processed {rebatched_count} questions ({actually_replaced_count} actually replaced)")
+
+    def get_alternative_questions_by_performance(vocab, q_type, performance_level):
+        """Get alternative questions based on performance level"""
+        global lesson_question_pool
+        
+        if not lesson_question_pool.initialized:
+            return []
+        
+        # Define difficulty ranges based on performance
+        if performance_level == "excellent":
+            min_diff, max_diff = 4, 5  # Hardest questions
+        elif performance_level == "good":
+            min_diff, max_diff = 3, 4  # Medium-hard questions
+        elif performance_level == "moderate":
+            min_diff, max_diff = 2, 3  # Medium questions
+        else:  # poor
+            min_diff, max_diff = 1, 2  # Easy questions
+        
+        alternatives = lesson_question_pool.get_questions_by_difficulty_range(vocab, q_type, min_diff, max_diff)
+        print(f"[REBATCH] Found {len(alternatives)} alternative {q_type} questions for '{vocab}' (performance: {performance_level})")
+        
+        return alternatives
+    
     def check_vocabulary_completion_and_rebatch(vocab, current_index, questions, performance_tracker, overall_proficiency, page):
         """Check if vocabulary is completed and trigger rebatching if needed"""
         
         if vocab not in performance_tracker:
             return False
         
-        answers = performance_tracker[vocab]["answers"]
-        
-        # Check if we have enough answers to consider this vocabulary "completed"
-        if len(answers) < 3:
-            return False
-        
-        print(f"[REBATCH] Vocabulary '{vocab}' completed with {len(answers)} answers")
-        
-        # Calculate performance metrics
-        accuracy = sum(answers) / len(answers)
-        performance_level = "excellent" if accuracy >= 0.9 else "good" if accuracy >= 0.75 else "moderate" if accuracy >= 0.5 else "poor"
-        
-        print(f"[REBATCH] Performance for '{vocab}': {accuracy:.1%} ({performance_level})")
+        vocab_answers = performance_tracker[vocab]["answers"]
+        accuracy = sum(vocab_answers) / len(vocab_answers) if vocab_answers else 0
+        performance_level = (
+            "excellent" if accuracy >= 0.9 else
+            "good" if accuracy >= 0.75 else
+            "moderate" if accuracy >= 0.5 else
+            "poor"
+        )
         
         # Get remaining questions (those not yet seen)
         remaining_questions = questions[current_index + 1:]
@@ -2705,15 +3634,17 @@ def lesson_page(page: ft.Page, image_urls: list):
     questions = get_questions(page)
     initialize_question_sequence()
     global user_library
-    user_library = get_user_library()
+    loaded_library = get_user_library()
+    user_library = loaded_library if loaded_library is not None else []
+    print(f"[LIBRARY] Loaded user library: type={type(user_library)}, length={len(user_library)}")
 
     user_id = page.session.get("user_id")
-    overall_proficiency = get_user_overall_proficiency(user_id)
+    overall_proficiency = get_user_overall_proficiency(user_id, page)
     
     print(f"[LESSON] User {user_id} overall proficiency: {overall_proficiency:.3f}")
     
     # ENHANCED: Apply initial difficulty adjustment to ALL questions based on overall proficiency
-    apply_initial_difficulty_adjustment(questions, overall_proficiency)
+    apply_initial_difficulty_adjustment_fixed(questions, overall_proficiency, page)
 
     total_questions = len(questions)
     weighted_questions = [q for q in questions if getattr(q, 'correct_answer', None) is not None]
@@ -2725,39 +3656,43 @@ def lesson_page(page: ft.Page, image_urls: list):
         return
 
     def render_current_question(progress_value):
-        page.views.clear()  # Optional: clear previous view
+        page.views.clear()
         question = questions[current_question_index["value"]]
         
-        # IMPORTANT: Get user_id from the page session
+        # Mark this question as used
+        question_id = getattr(question, 'id', None)
+        if question_id:
+            used_question_ids.add(question_id)
+        
         user_id = page.session.get("user_id")
         
-        # CRITICAL FIX: Only assign difficulty if it's a lesson question OR if difficulty is not set
+        # CRITICAL: Don't override difficulties that are already set by blueprint
         q_type = getattr(question, 'type', 'Unknown')
+        current_difficulty = getattr(question, 'difficulty', None)
         
         if q_type == "Lesson":
-            # Lesson questions should NOT have difficulty
             question.difficulty = None
             print(f"[QUESTION] Lesson question - no difficulty assigned for {getattr(question, 'vocabulary', 'Unknown')}")
-        elif not hasattr(question, 'difficulty') or question.difficulty is None:
-            # Only assign if not already set by rebatching
-            assign_question_difficulty(question, user_id)
-        else:
-            # Use pre-set difficulty from rebatching
+        elif current_difficulty is not None:
+            # PRESERVE the blueprint difficulty - don't override it
             vocab = getattr(question, 'vocabulary', 'Unknown')
-            print(f"[QUESTION] Using rebatched difficulty {question.difficulty} for {q_type} - {vocab}")
+            print(f"[QUESTION] Using blueprint difficulty {current_difficulty} for {q_type} - {vocab}")
+        else:
+            # Only assign if somehow not set
+            assign_question_difficulty(question, user_id)
         
-        # Initialize performance tracking for this vocabulary
+        # Initialize performance tracking
         vocab = getattr(question, "vocabulary", "").lower()
         if vocab and vocab not in performance_tracker:
             performance_tracker[vocab] = {"answers": [], "predicted_mastery": getattr(question, "predicted_mastery", 0.5)}
             
         content = render_question_layout(
-            page = page,
+            page=page,
             question_data=question,
             progress_value=progress_value,
             on_next=next_question,
             on_back=go_back,
-            current_index = current_question_index,
+            current_index=current_question_index,
             user_id=user_id
         )
 
@@ -2779,13 +3714,42 @@ def lesson_page(page: ft.Page, image_urls: list):
         # Calculate response time for this question
         response_time = getattr(current_question, 'response_time', None)
         
+        # CRITICAL FIX: For pronunciation questions, determine correctness from accuracy
+        q_type = getattr(current_question, "type", "Unknown")
+        
+        if q_type == "Pronunciation":
+            accuracy = getattr(current_question, 'accuracy', 0.0)
+            accuracy_threshold = getattr(current_question, 'accuracy_threshold', 0.6)
+            is_pronunciation_correct = accuracy >= accuracy_threshold
+            
+            # CRITICAL: Set the correct flag properly
+            current_question.correct = is_pronunciation_correct
+            current_question.is_correct = is_pronunciation_correct
+            
+            print(f"[LESSON] Pronunciation question '{current_question.vocabulary}' accuracy: {accuracy:.2f}, threshold: {accuracy_threshold:.2f}, correct: {is_pronunciation_correct}")
+            
+            # Add to correct tracking based on actual performance
+            global correct_answers, incorrect_answers
+            question_id = getattr(current_question, 'id', f'q_{current_question_index["value"]}')
+            
+            if is_pronunciation_correct:
+                correct_answers[question_id] = current_question
+                print(f"Using vocabulary key: '{current_question.vocabulary}' for tracking question")
+                print(f"Correct answer for '{current_question.vocabulary}'!")
+            else:
+                incorrect_answers[question_id] = current_question
+                print(f"Using vocabulary key: '{current_question.vocabulary}' for tracking question")
+                print(f"Incorrect answer for '{current_question.vocabulary}'. Accuracy: {accuracy:.2f}")
+        
         # Log difficulty and vocabulary information
         difficulty = getattr(current_question, "difficulty", "N/A")
         vocab = getattr(current_question, "vocabulary", "Unknown").lower()
-        q_type = getattr(current_question, "type", "Unknown")
         
-        # Get user ID
+        # CRITICAL FIX: Get user ID with validation
         user_id = page.session.get("user_id")
+        if not user_id:
+            print("[LESSON] Error: No user ID found in session")
+            user_id = 1  # Fallback
         
         print(f"[DEBUG] Processing question {current_question_index['value']+1}: {q_type} - {vocab} " +
             f"(Difficulty: {difficulty}, Response Time: {response_time:.2f}s)" if response_time else 
@@ -2800,14 +3764,18 @@ def lesson_page(page: ft.Page, image_urls: list):
         # Track performance for this vocabulary using the new lesson BKT engine
         if vocab and q_type != "Lesson" and q_type != "Cultural Trivia":
             try:
-                # Check if the question was answered correctly
                 unique_key = f"{current_question.question}__{current_question.type}__{current_question_index['value']}"
-                is_correct = unique_key in correct_answers
-                
+                # For Pronunciation, use .correct attribute; for others, use correct_answers
+                if q_type == "Pronunciation":
+                    is_correct = getattr(current_question, "correct", False)
+                else:
+                    unique_key = f"{current_question.question}__{current_question.type}__{current_question_index['value']}"
+                    is_correct = unique_key in correct_answers
+
                 # Initialize vocabulary tracking if needed
                 if vocab not in performance_tracker:
                     performance_tracker[vocab] = {"answers": [], "predicted_mastery": 0.5}
-                
+
                 # Add answer to performance tracker
                 performance_tracker[vocab]["answers"].append(1 if is_correct else 0)
                 
@@ -2836,7 +3804,7 @@ def lesson_page(page: ft.Page, image_urls: list):
                     print(f"[LessonBKT] Performance summary for '{vocab}': {accuracy:.1%} ({performance_level})")
                     
                     # UPDATED: Trigger rebatching with page object
-                    overall_proficiency = get_user_overall_proficiency(user_id)
+                    overall_proficiency = get_user_overall_proficiency(user_id, page)
                     rebatch_triggered = check_vocabulary_completion_and_rebatch(
                         vocab, 
                         current_question_index["value"], 
@@ -2869,11 +3837,34 @@ def lesson_page(page: ft.Page, image_urls: list):
         if current_question_index["value"] < len(questions):
             render_current_question(progress_value)
         else:
-            complete_lesson_and_calculate_grade(user_id)
+            # CRITICAL FIX: Only call completion if we have a valid user_id
+            if user_id:
+                complete_lesson_and_calculate_grade(user_id)
+            else:
+                print("[LESSON] ❌ Cannot complete lesson without user_id - showing basic completion")
+                lesson_score(page, 0, correct_answers, incorrect_answers, "0:00")
+                reset_var()
 
     def complete_lesson_and_calculate_grade(user_id):
-        """Handle lesson completion with BKT session saving - SAVE ONCE ONLY"""
+        """Handle lesson completion with BKT session saving AND level completion - FIXED"""
         try:
+            # CRITICAL FIX: Validate user_id first
+            if not user_id:
+                print("[LESSON] ❌ No user_id provided - cannot complete lesson")
+                # Fallback to show lesson score without database updates
+                lesson_score(page, 0, correct_answers, incorrect_answers, "0:00")
+                reset_var()
+                return
+            
+            # ADDITIONAL FIX: Ensure user_id is valid
+            try:
+                user_id_int = int(user_id)
+            except (ValueError, TypeError) as e:
+                print(f"[LESSON] ❌ Invalid user_id '{user_id}': {e}")
+                lesson_score(page, 0, correct_answers, incorrect_answers, "0:00")
+                reset_var()
+                return
+            
             # IMPORTANT: Save the lesson BKT session ONCE at the very end
             from lesson_bkt_engine import save_session_to_database, reset_session
             
@@ -2907,10 +3898,122 @@ def lesson_page(page: ft.Page, image_urls: list):
                 grade_percentage = 0
                 
             print(f"Final grade percentage: {grade_percentage}%")
-                    
+            
+            # Calculate time
+            total_response_time = sum(getattr(q, "response_time", 0) for q in questions)
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
             correct_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()}
             incorrect_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()}
+            
+            # CRITICAL: Mark level as complete if grade is sufficient AND save completion percentage
+            level_data = page.session.get("level_data")
+            lesson_id = getattr(level_data, 'lesson_id', None)
+            module_name = getattr(level_data, 'module_name', None)
+
+            if lesson_id and grade_percentage >= 50:  # Assuming 50% is pass threshold
+                print(f"[LESSON] Lesson {lesson_id} completed with {grade_percentage}% - marking as complete")
+                
+                # Update level completion in database
+                try:
+                    import pymongo
+                    import datetime
+                    
+                    arami = pymongo.MongoClient("mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/")["arami"]
+                    users_col = arami["users"]
+                    
+                    module_id = page.session.get("module_id")
+                    
+                    # CRITICAL FIX: Validate module_id as well
+                    if not module_id:
+                        print("[LESSON] ❌ No module_id in session - cannot update database")
+                        raise Exception("Missing module_id")
+                    
+                    try:
+                        module_id_int = int(module_id)
+                    except (ValueError, TypeError) as e:
+                        print(f"[LESSON] ❌ Invalid module_id '{module_id}': {e}")
+                        raise Exception(f"Invalid module_id: {module_id}")
+                    
+                    update_query = {
+                        "user_id": user_id_int,  # Use the validated integer
+                        "modules.id": module_id_int  # Use the validated integer
+                    }
+                    
+                    update_operation = {
+                        "$set": {
+                            "modules.$[module].levels.$[level].completed": True,
+                            "modules.$[module].levels.$[level].completion_time": total_response_time,
+                            "modules.$[module].levels.$[level].grade_percentage": grade_percentage,
+                            "modules.$[module].levels.$[level].last_completed": datetime.datetime.utcnow().isoformat(),
+                            "modules.$[module].levels.$[level].completion_timestamp": int(time.time())
+                        }
+                    }
+                    
+                    array_filters = [
+                        {"module.id": module_id_int},  # Use the validated integer
+                        {"level.lesson_id": lesson_id}
+                    ]
+                    
+                    print(f"[LESSON] Updating database - user_id: {user_id_int}, module_id: {module_id_int}, lesson_id: {lesson_id}")
+                    print(f"[LESSON] Grade percentage being saved: {grade_percentage}%")
+                    
+                    update_result = users_col.update_one(
+                        update_query,
+                        update_operation,
+                        array_filters=array_filters
+                    )
+                    
+                    print(f"[LESSON] Database update result: matched={update_result.matched_count}, modified={update_result.modified_count}")
+                    
+                    if update_result.modified_count > 0:
+                        print(f"[LESSON] ✅ Successfully marked lesson {lesson_id} as complete")
+                        
+                        # CRITICAL: Import and call compute_completion correctly
+                        try:
+                            from levels import compute_completion
+                            completion_percentage = compute_completion(page)
+                            print(f"[LESSON] Updated overall completion: {completion_percentage:.1f}%")
+                        except ImportError:
+                            print("[LESSON] ❌ Could not import compute_completion - calculating manually")
+                            # Manual calculation as fallback
+                            modules = page.session.get("modules")
+                            if modules:
+                                total_lessons = sum(len(getattr(module, 'levels', [])) for module in modules)
+                                completed_lessons = sum(
+                                    len([level for level in getattr(module, 'levels', []) if getattr(level, 'completed', False)])
+                                    for module in modules
+                                )
+                                if total_lessons > 0:
+                                    completion_percentage = (completed_lessons / total_lessons) * 100
+                                    print(f"[LESSON] Manual completion calculation: {completed_lessons}/{total_lessons} = {completion_percentage:.1f}%")
+                                    page.session.set("completion_percentage", completion_percentage)
+                        
+                        # Update session modules to reflect the change
+                        modules = page.session.get("modules")
+                        if modules:
+                            for module in modules:
+                                if str(getattr(module, 'id', None)) == str(module_id):
+                                    for level in getattr(module, 'levels', []):
+                                        if getattr(level, 'lesson_id', None) == lesson_id:
+                                            level.completed = True
+                                            level.completion_time = total_response_time
+                                            level.grade_percentage = grade_percentage
+                                            print(f"[LESSON] ✅ Updated level {lesson_id} in session")
+                                            break
+                                    break
+                            page.session.set("modules", modules)
+                        
+                    else:
+                        print(f"[LESSON] ⚠️ Database update failed - no documents modified")
+                        
+                except Exception as db_error:
+                    print(f"[LESSON] ❌ Database update error: {db_error}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"[LESSON] Lesson {lesson_id} not marked complete - grade {grade_percentage}% below threshold")
+            
+            # Set session data for levels.py to process
             page.session.set("updated_data", [grade_percentage, formatted_time, total_response_time, correct_answers_serialized, incorrect_answers_serialized, questions])
             update_user_library()
 
@@ -2928,11 +4031,13 @@ def lesson_page(page: ft.Page, image_urls: list):
                 # Register them in a separate thread
                 def register_vocab_batch(user_id, vocab_list):
                     try:
-                        from supermemo_engine import register_new_vocabulary_batch
+                        # CRITICAL FIX: Use the correct function name
+                        from supermemo_engine import register_new_vocabulary_batch  # Changed from register_vocabulary_batch
                         register_new_vocabulary_batch(user_id, list(vocab_list))
+                        print(f"[SuperMemo] Registered {len(vocab_list)} vocabulary items")
                     except Exception as e:
                         print(f"[SuperMemo] Error registering vocabulary: {e}")
-                        
+                
                 # Start the registration thread
                 import threading
                 registration_thread = threading.Thread(

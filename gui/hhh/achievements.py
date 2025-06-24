@@ -180,6 +180,64 @@ def achievement_page(page: ft.Page, image_urls: list):
                     "color": "#AAAAAA"
                 })
     
+    # START OF CHECHANGE Information dialog for Language Proficiency
+    info_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Language Proficiency Information"),
+        content=ft.Text(
+            "This metric represents your overall language proficiency level based on:\n\n"
+            "• Vocabulary knowledge\n"
+            "• Grammar accuracy\n"
+            "• Reading comprehension\n"
+            "• Speaking fluency\n"
+            "• Writing skills\n\n"
+            "The percentage indicates your current skill level, with 100% representing native-level proficiency."
+        ),
+        actions=[
+            ft.TextButton("Close", on_click=lambda e: close_info_dialog(e))
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    # modify this for the language proficiency
+    info_dialog_new = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("The Other Information"),
+        content=ft.Text(
+            "This metric represents your overall language proficiency level based on:\n\n"
+            "• Vocabulary knowledge\n"
+            "• Grammar accuracy\n"
+            "• Reading comprehension\n"
+            "• Speaking fluency\n"
+            "• Writing skills\n\n"
+            "The percentage indicates your current skill level, with 100% representing native-level proficiency."
+        ),
+        actions=[
+            ft.TextButton("Close", on_click=lambda e: close_info_dialog_new(e))
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+    
+    def close_info_dialog(e):
+        info_dialog.open = False
+        page.update()
+
+    def close_info_dialog_new(e):
+        info_dialog_new.open = False
+        page.update()
+    
+    def show_info_dialog(e):
+        page.overlay.append(info_dialog)
+        info_dialog.open = True
+        page.update()
+    
+    #call this for the other information dialog
+    def show_info_dialog_new(e):
+        page.overlay.append(info_dialog_new)
+        info_dialog_new.open = True
+        page.update()
+    # END OF CHECHANGE
+    
     # Function to create achievement cards dynamically
     def create_achievement_card(achievement):
         return ft.Container(
@@ -430,7 +488,7 @@ def achievement_page(page: ft.Page, image_urls: list):
     vocabulary_mastery = 0
     try:
         # First try to get from session
-        raw_mastery = page.session.get("lstm_mastery")
+        raw_mastery = page.session.get("lstm_proficiency")
         if raw_mastery is not None:
             vocabulary_mastery = float(raw_mastery) * 100
             print(f"[Vocab] Using session LSTM mastery: {vocabulary_mastery:.1f}%")
@@ -493,29 +551,38 @@ def achievement_page(page: ft.Page, image_urls: list):
         raw_proficiency = vocabulary_mastery
         print(f"[Proficiency] Using mastery as fallback: {raw_proficiency:.1f}%")
 
-    # Calculate combined proficiency (70% proficiency + 30% completion)
-    combined_proficiency = (raw_proficiency * 0.7) + (progress_percentage * 0.3)
-    print(f"[Combined] Proficiency: {raw_proficiency:.1f}% * 0.7 + {progress_percentage:.1f}% * 0.3 = {combined_proficiency:.1f}%")
-
     if isinstance(progress_percentage, (int, float)) and progress_percentage > 100:
         print(f"[WARNING] Abnormal progress percentage detected: {progress_percentage}%, capping at 100%")
         progress_percentage = 100
 
-    # Calculate combined proficiency (70% proficiency + 30% completion)
-    combined_proficiency = (raw_proficiency * 0.7) + (progress_percentage * 0.3)
-    print(f"[Combined] Proficiency: {raw_proficiency:.1f}% * 0.7 + {progress_percentage:.1f}% * 0.3 = {combined_proficiency:.1f}%")
+    # Calculate combined proficiency
+    combined_proficiency = ((raw_proficiency/100) * (progress_percentage/100)) * 100
+    print(f"[Combined] Proficiency: {raw_proficiency:.1f}% * {progress_percentage:.1f}% = {combined_proficiency:.1f}%")
    
     # ------- FIRST CARD: LSTM Language Proficiency -------
     language_proficiency_card = ft.Container(
         content=ft.Column([
             ft.Row(
                 [
-                    ft.Text(
-                        "Overall Proficiency",  # Changed from "Overall Progress"
-                        size=15,
-                        color="#FFFFFF",
-                        weight=ft.FontWeight.BOLD,
-                    ),
+                    ft.Row([
+                        ft.Text(
+                            "Overall Proficiency",  # Changed from "Overall Progress"
+                            size=15,
+                            color="#FFFFFF",
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.INFO_OUTLINE,
+                            icon_color="#FFFFFF",
+                            icon_size=14,  # Smaller icon
+                            tooltip="More information",
+                            on_click=show_info_dialog,
+                            padding=ft.padding.all(0),  # Minimal padding
+                            style=ft.ButtonStyle(
+                                overlay_color=ft.Colors.TRANSPARENT,  # Remove button overlay
+                            ),
+                        ),
+                    ], spacing=-5, tight=True),  # Minimal spacing, tight layout
                     ft.Text(
                         f"{combined_proficiency:.1f}%",
                         size=28,
@@ -526,7 +593,7 @@ def achievement_page(page: ft.Page, image_urls: list):
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            # Progress bar
+             # Progress bar
             ft.Container(
                 content=ft.Stack([
                     ft.Container(
@@ -568,12 +635,25 @@ def achievement_page(page: ft.Page, image_urls: list):
         content=ft.Column([
             ft.Row(
                 [
-                    ft.Text(
-                        "Vocabulary Mastery",
-                        size=15,
-                        color="#FFFFFF",
-                        weight=ft.FontWeight.BOLD,
-                    ),
+                    ft.Row([
+                        ft.Text(
+                            "Vocabulary Mastery",  # 
+                            size=15,
+                            color="#FFFFFF",
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.INFO_OUTLINE,
+                            icon_color="#FFFFFF",
+                            icon_size=14,  # Smaller icon
+                            tooltip="More information",
+                            on_click=show_info_dialog_new,
+                            padding=ft.padding.all(0),  # Minimal padding
+                            style=ft.ButtonStyle(
+                                overlay_color=ft.Colors.TRANSPARENT,  # Remove button overlay
+                            ),
+                        ),
+                    ], spacing=-5, tight=True),  # Minimal spacing, tight layout
                     ft.Text(
                         f"{vocabulary_mastery:.1f}%",
                         size=28,

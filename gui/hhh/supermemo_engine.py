@@ -152,6 +152,52 @@ def get_user_proficiency(user_id):
             return 50  # Default for unknown format
     return 50  # Updated default proficiency if not found
 
+def get_daily_review_completion_count(user_id):
+    """Get the number of completed daily reviews"""
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
+        
+        if user:
+            # Check multiple sources for review completion
+            review_data = user.get("review_data", {})
+            completed_reviews = review_data.get("completed", 0)
+            
+            # Also check review_history
+            review_history = user.get("review_history", {})
+            
+            # Count vocabularies that have been reviewed at least once
+            reviewed_vocab_count = len([vocab for vocab, data in review_history.items() 
+                                      if data.get("times_reviewed", 0) > 0])
+            
+            # Use the higher of the two counts
+            total_reviews = max(completed_reviews, reviewed_vocab_count)
+            
+            print(f"[SuperMemo] Daily review completion check: completed={completed_reviews}, reviewed_vocab={reviewed_vocab_count}, using={total_reviews}")
+            return total_reviews
+    except Exception as e:
+        print(f"[SuperMemo] Error checking daily review completion: {e}")
+    
+    return 0
+
+def get_supermemo_confidence(user_id):
+    """Calculate SuperMemo confidence based on daily review completion"""
+    try:
+        from confidence_scoring import get_daily_review_completion_count
+        daily_review_count = get_daily_review_completion_count(user_id)
+        if daily_review_count > 0:
+            # Calculate a basic SuperMemo score based on completion
+            # Start at 0.5, add 0.1 for each completed review, max 0.9
+            supermemo_score = min(0.9, 0.5 + (daily_review_count * 0.1))
+            print(f"[SuperMemo] Calculated confidence from {daily_review_count} completed reviews: {supermemo_score:.2f}")
+            return supermemo_score
+        else:
+            print(f"[SuperMemo] No daily reviews completed yet")
+            return None
+    except Exception as e:
+        print(f"[SuperMemo] Error getting SuperMemo confidence: {e}")
+        return None
+
 def schedule_pending_vocabulary(user_id, session_data=None, force=False):
     """
     Schedule any newly learned vocabulary that hasn't been scheduled yet
@@ -558,121 +604,230 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
     display_supermemo_schedule(user_id)
     print("=========================\n")
 
-def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
-    """Prepare daily review with improved selection algorithm"""
-    # Reset any outdated review dates first
-    reset_outdated_review_dates()
+def reset_outdated_review_dates(user_id):
+    """Reset outdated dates for a specific user only"""
+    try:
+        usercol = connect_to_mongoDB()
+        user = usercol.find_one({"user_id": user_id})
+        
+        if not user or "supermemo" not in user:
+            return
+            
+        # Only process this specific user
+        supermemo_data = user["supermemo"]
+        needs_practice = supermemo_data.get("needs_practice", {})
+        mastered = supermemo_data.get("mastered", {})
+        today = datetime.now().date()
+        updated = False
+
+        # Reset outdated next_review dates for needs_practice
+        for vocab, state in needs_practice.items():
+            try:
+                next_review = datetime.fromisoformat(state.get("next_review", str(today))).date()
+                if next_review < today:
+                    print(f"[SuperMemo] Resetting next_review for '{vocab}' (was {next_review})")
+                    state["next_review"] = str(today)
+                    updated = True
+            except Exception as e:
+                print(f"[SuperMemo] Error parsing next_review for '{vocab}': {e}")
+
+        # Reset outdated next_review dates for mastered
+        for vocab, state in mastered.items():
+            try:
+                next_review = datetime.fromisoformat(state.get("next_review", str(today))).date()
+                if next_review < today:
+                    print(f"[SuperMemo] Resetting next_review for '{vocab}' (was {next_review})")
+                    state["next_review"] = str(today)
+                    updated = True
+            except Exception as e:
+                print(f"[SuperMemo] Error parsing next_review for '{vocab}': {e}")
+
+        if updated:
+            usercol.update_one(
+                {"user_id": user_id},
+                {"$set": {"supermemo.needs_practice": needs_practice, "supermemo.mastered": mastered}}
+            )
+        
+    except Exception as e:
+        print(f"[SuperMemo] Error resetting dates for user {user_id}: {e}")
+
+def calculate_priority_score(vocab, state, review_history, days_overdue, bkt_proficiency, vocab_type):
+    """Calculate priority score based on multiple factors"""
+    vocab_history = review_history.get(vocab, {})
     
+    # Get days since last reviewed
+    last_reviewed = vocab_history.get("last_reviewed")
+    if last_reviewed:
+        days_since_last_review = (datetime.now().date() - datetime.fromisoformat(last_reviewed).date()).days
+    else:
+        days_since_last_review = 100
+    
+    # Get skip count
+    times_skipped = vocab_history.get("times_skipped", 0)
+    
+    # Base priority calculation
+    priority_score = (
+        max(0, days_overdue) * 15 +           # Overdue penalty (increased weight)
+        days_since_last_review * 3 +          # Recency factor
+        times_skipped * 8 +                   # Skip penalty (increased)
+        (25 if vocab_type == "needs_practice" else 5)  # Type bonus
+    )
+    
+    # PROFICIENCY-BASED ADJUSTMENT
+    # Lower proficiency = higher priority (inverse relationship)
+    proficiency_factor = (1.0 - bkt_proficiency) * 20
+    priority_score += proficiency_factor
+    
+    # EFactor consideration (lower EFactor = more difficult = higher priority)
+    efactor = state.get("efactor", 2.5)
+    efactor_factor = (2.5 - efactor) * 10  # Lower EFactor gets more priority
+    priority_score += efactor_factor
+    
+    return priority_score
+
+def select_balanced_review_items(candidates, max_questions):
+    """Select review items with proficiency balance"""
+    if len(candidates) <= max_questions:
+        return candidates
+    
+    # Sort candidates into proficiency buckets
+    low_prof = [c for c in candidates if c["bkt_proficiency"] < 0.4]      # Struggling
+    med_prof = [c for c in candidates if 0.4 <= c["bkt_proficiency"] < 0.7]  # Learning  
+    high_prof = [c for c in candidates if c["bkt_proficiency"] >= 0.7]    # Strong
+    
+    # Allocate slots: prioritize low proficiency, but include variety
+    selected = []
+    
+    # 60% for low proficiency (struggling vocabs)
+    low_slots = min(len(low_prof), max(1, int(max_questions * 0.6)))
+    selected.extend(low_prof[:low_slots])
+    
+    # 30% for medium proficiency
+    remaining_slots = max_questions - len(selected)
+    med_slots = min(len(med_prof), max(0, int(remaining_slots * 0.75)))
+    selected.extend(med_prof[:med_slots])
+    
+    # Remaining slots for high proficiency or overflow
+    remaining_slots = max_questions - len(selected)
+    if remaining_slots > 0:
+        remaining_candidates = high_prof + low_prof[low_slots:] + med_prof[med_slots:]
+        selected.extend(remaining_candidates[:remaining_slots])
+    
+    print(f"[PRIORITY] Selected: {len([s for s in selected if s['bkt_proficiency'] < 0.4])} low-prof, "
+          f"{len([s for s in selected if 0.4 <= s['bkt_proficiency'] < 0.7])} med-prof, "
+          f"{len([s for s in selected if s['bkt_proficiency'] >= 0.7])} high-prof")
+    
+    return selected[:max_questions]
+
+def prepare_daily_review(user_id, threshold=0.85, max_questions=10):
+    """Prepare daily review with proficiency-based selection"""
+    # Reset any outdated review dates first
+    reset_outdated_review_dates(user_id)
+
     # Get user data
     usercol = connect_to_mongoDB()
     user = usercol.find_one({"user_id": user_id})
-    supermemo_data = user.get("supermemo", {})
-    needs_practice_states = supermemo_data.get("needs_practice", {})
-    mastered_states = supermemo_data.get("mastered", {})
-    
-    if "needs_practice" not in supermemo_data:
-        supermemo_data["needs_practice"] = {}
-    
-    if "mastered" not in supermemo_data:
-        supermemo_data["mastered"] = {}
-
-    # Get the "last reviewed" tracking data
+    supermemo_data = user.get("supermemo", {}) 
     review_history = user.get("review_history", {})
     
-    # Today's date
-    today = datetime.now().date()
+    # FIXED: Get BKT proficiency scores and convert to dictionary
+    bkt_predictions = {}
+    try:
+        from bkt_engine import get_all_p_masteries, get_custom_bkt
+        mastery_list = get_all_p_masteries(user_id)
+        
+        if mastery_list and isinstance(mastery_list, list):
+            # Get vocabulary order to map list to dictionary
+            custom_bkt = get_custom_bkt(user_id)
+            if custom_bkt and hasattr(custom_bkt, 'get_vocabulary_in_order'):
+                ordered_vocab = custom_bkt.get_vocabulary_in_order()
+                if len(ordered_vocab) == len(mastery_list):
+                    bkt_predictions = dict(zip(ordered_vocab, mastery_list))
+                    print(f"[DEBUG] Created BKT predictions dict with {len(bkt_predictions)} items")
+                else:
+                    print(f"[DEBUG] Vocab count mismatch: {len(ordered_vocab)} vs {len(mastery_list)}")
+            
+        if not bkt_predictions:
+            print("[DEBUG] Could not create BKT predictions dict, using empty dict")
+            bkt_predictions = {}
+            
+    except Exception as e:
+        print(f"[DEBUG] Error getting BKT predictions: {e}")
+        bkt_predictions = {}
     
-    # Gather all vocabulary items that need review
+    today = datetime.now().date()
     review_candidates = []
     
-    for vocab_type, states in [("needs_practice", needs_practice_states), 
-                              ("mastered", mastered_states)]:
-        for vocab, state in states.items():
-            if vocab and state and "next_review" in state:
-                try:
-                    review_date = datetime.fromisoformat(state["next_review"]).date()
+    # Process needs_practice items (higher priority)
+    for vocab, state in supermemo_data.get("needs_practice", {}).items():
+        if vocab and state and "next_review" in state:
+            try:
+                review_date = datetime.fromisoformat(state["next_review"]).date()
+                days_overdue = (today - review_date).days
+                
+                # FIXED: Now bkt_predictions is a dictionary
+                bkt_proficiency = bkt_predictions.get(vocab, 0.3)  # Default low proficiency
+                
+                # Calculate enhanced priority score
+                priority_score = calculate_priority_score(
+                    vocab, state, review_history, days_overdue, bkt_proficiency, "needs_practice"
+                )
+                
+                review_candidates.append({
+                    "vocab": vocab,
+                    "state": state,
+                    "priority_score": priority_score,
+                    "bkt_proficiency": bkt_proficiency,
+                    "days_overdue": days_overdue,
+                    "vocab_type": "needs_practice"
+                })
+                
+            except (ValueError, TypeError) as e:
+                print(f"[WARNING] Error processing {vocab}: {e}")
+    
+    # Process mastered items (lower priority unless overdue)
+    for vocab, state in supermemo_data.get("mastered", {}).items():
+        if vocab and state and "next_review" in state:
+            try:
+                review_date = datetime.fromisoformat(state["next_review"]).date()
+                days_overdue = (today - review_date).days
+                
+                # Only include mastered items if they're significantly overdue
+                if days_overdue >= 1:
+                    bkt_proficiency = bkt_predictions.get(vocab, 0.8)  # Default high proficiency
                     
-                    # Calculate days overdue (negative if not due yet)
-                    days_overdue = (today - review_date).days
-                    
-                    # Get days since last reviewed (default to 100 if never reviewed)
-                    last_reviewed = review_history.get(vocab, {}).get("last_reviewed")
-                    if last_reviewed:
-                        days_since_last_review = (today - datetime.fromisoformat(last_reviewed).date()).days
-                    else:
-                        days_since_last_review = 100  # High number for never reviewed
-                    
-                    # Get number of times this item was skipped
-                    times_skipped = review_history.get(vocab, {}).get("times_skipped", 0)
-                    
-                    # Calculate priority score
-                    # Higher priority for:
-                    # 1. Items that are more days overdue
-                    # 2. Items that haven't been reviewed in a long time
-                    # 3. Items that have been skipped multiple times
-                    # 4. Items that need practice (vs. mastered items)
-                    priority_score = (
-                        max(0, days_overdue) * 10 +  # Overdue days (if any)
-                        days_since_last_review * 2 +  # Days since last review
-                        times_skipped * 5 +           # Skip penalty
-                        (20 if vocab_type == "needs_practice" else 0)  # Needs practice bonus
+                    priority_score = calculate_priority_score(
+                        vocab, state, review_history, days_overdue, bkt_proficiency, "mastered"
                     )
                     
                     review_candidates.append({
                         "vocab": vocab,
                         "state": state,
                         "priority_score": priority_score,
+                        "bkt_proficiency": bkt_proficiency,
                         "days_overdue": days_overdue,
-                        "vocab_type": vocab_type
+                        "vocab_type": "mastered"
                     })
                     
-                except (ValueError, TypeError) as e:
-                    print(f"[WARNING] Error processing {vocab}: {e}")
-                    
-    # Sort candidates by priority score
+            except (ValueError, TypeError) as e:
+                print(f"[WARNING] Error processing {vocab}: {e}")
+    
+    # Sort by priority score (highest first)
     review_candidates.sort(key=lambda x: x["priority_score"], reverse=True)
     
-    # Select candidates for today's review
-    selected_candidates = review_candidates[:max_questions]
+    # Select candidates with balanced proficiency distribution
+    selected_candidates = select_balanced_review_items(review_candidates, max_questions)
     
-    # Update skip counter for items that were due but not selected
-    unselected_due = [item for item in review_candidates[max_questions:] 
-                     if item["days_overdue"] >= 0]
-    
-    # Update the review history
-    for item in unselected_due:
-        vocab = item["vocab"]
-        if vocab not in review_history:
-            review_history[vocab] = {"times_skipped": 1}
-        else:
-            review_history[vocab]["times_skipped"] = review_history[vocab].get("times_skipped", 0) + 1
-    
-    # Update review history for selected items
-    for item in selected_candidates:
-        vocab = item["vocab"]
-        if vocab not in review_history:
-            review_history[vocab] = {}
-        review_history[vocab]["times_skipped"] = 0  # Reset skip counter
-    
-    # Save updated review history
-    usercol.update_one(
-        {"user_id": user_id},
-        {"$set": {"review_history": review_history}}
-    )
-    
-    # Get vocabulary list from selected candidates
-    vocab_list = [item["vocab"] for item in selected_candidates]
+    print(f"[DEBUG] Selected {len(selected_candidates)} items for review")
+    print(f"[DEBUG] {len(review_candidates) - len(selected_candidates)} due items scheduled for later")
     
     # Generate questions
+    vocab_list = [item["vocab"] for item in selected_candidates]
     if not vocab_list:
-        print("[WARNING] No vocabulary items ready for review")
         return []
     
     proficiency = get_user_proficiency(user_id)
     review_questions = get_review_questions_for_user(user_id, vocab_list, proficiency)
-    
-    print(f"[DEBUG] Selected {len(selected_candidates)} items for review")
-    print(f"[DEBUG] {len(unselected_due)} due items couldn't be included today")
     
     return review_questions
 
@@ -685,7 +840,7 @@ def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
         vocab_quality_map: Dictionary mapping vocabulary words to quality scores
     """
     if not vocab_quality_map:
-        return
+        return False
         
     try:
         usercol = connect_to_mongoDB()
@@ -699,9 +854,19 @@ def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
         review_history = user.get("review_history", {})
         supermemo_data = user.get("supermemo", {})
         
+        # Ensure structure exists
+        if "needs_practice" not in supermemo_data:
+            supermemo_data["needs_practice"] = {}
+        if "mastered" not in supermemo_data:
+            supermemo_data["mastered"] = {}
+        
         # Prepare updates
         today = datetime.now().date()
         updates = {}
+        
+        # Track items that need to move categories
+        move_to_mastered = []
+        move_to_needs_practice = []
         
         # Track schedule changes for better visibility
         schedule_changes = []
@@ -716,9 +881,10 @@ def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
                 
             review_history[vocab]["last_reviewed"] = str(today)
             review_history[vocab]["last_quality"] = quality
+            review_history[vocab]["times_reviewed"] = review_history[vocab].get("times_reviewed", 0) + 1
             review_history[vocab]["times_skipped"] = 0
             
-            # Update SuperMemo state
+            # Update SuperMemo state and check for movement
             if vocab in supermemo_data.get("needs_practice", {}):
                 state = supermemo_data["needs_practice"][vocab]
                 old_next_review = state.get("next_review", "unknown")
@@ -728,11 +894,17 @@ def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
                 # Track schedule change
                 schedule_changes.append({
                     "vocab": vocab,
+                    "category": "needs_practice",
                     "old_next_review": old_next_review,
                     "new_next_review": state["next_review"],
-                    "interval": state["interval"]
+                    "interval": state["interval"],
+                    "quality": quality
                 })
                 
+                # Check if should move to mastered
+                if state.get("should_move_to_mastered", False):
+                    move_to_mastered.append((vocab, state))
+                    
             elif vocab in supermemo_data.get("mastered", {}):
                 state = supermemo_data["mastered"][vocab]
                 old_next_review = state.get("next_review", "unknown")
@@ -742,33 +914,81 @@ def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
                 # Track schedule change
                 schedule_changes.append({
                     "vocab": vocab,
+                    "category": "mastered",
                     "old_next_review": old_next_review,
                     "new_next_review": state["next_review"],
-                    "interval": state["interval"]
+                    "interval": state["interval"],
+                    "quality": quality
                 })
+                
+                # Check if should move to needs practice
+                if state.get("should_move_to_needs_practice", False):
+                    move_to_needs_practice.append((vocab, state))
+            else:
+                # Vocabulary not in SuperMemo yet - shouldn't happen in batch review
+                print(f"[WARNING] Vocabulary '{vocab}' not found in SuperMemo data during batch review")
+        
+        # Perform category movements
+        for vocab, state in move_to_mastered:
+            # Remove from needs_practice and add to mastered
+            del supermemo_data["needs_practice"][vocab]
+            clean_state = {k: v for k, v in state.items() if not k.startswith("should_move")}
+            supermemo_data["mastered"][vocab] = clean_state
+            updates[f"supermemo.mastered.{vocab}"] = clean_state
+            updates[f"supermemo.needs_practice.{vocab}"] = None  # Mark for deletion
+            print(f"[SUPERMEMO] ✅ Moved '{vocab}' from needs_practice to mastered")
+        
+        for vocab, state in move_to_needs_practice:
+            # Remove from mastered and add to needs_practice
+            del supermemo_data["mastered"][vocab]
+            clean_state = {k: v for k, v in state.items() if not k.startswith("should_move")}
+            supermemo_data["needs_practice"][vocab] = clean_state
+            updates[f"supermemo.needs_practice.{vocab}"] = clean_state
+            updates[f"supermemo.mastered.{vocab}"] = None  # Mark for deletion
+            print(f"[SUPERMEMO] ⚠️ Moved '{vocab}' from mastered to needs_practice")
         
         # Add review history to updates
         updates["review_history"] = review_history
         
-        # Apply all updates at once
-        usercol.update_one(
-            {"user_id": user_id},
-            {"$set": updates}
-        )
+        # Apply all updates at once (set operations)
+        if updates:
+            usercol.update_one(
+                {"user_id": user_id},
+                {"$set": {k: v for k, v in updates.items() if v is not None}}
+            )
         
-        print("\n=== SUPERMEMO SCHEDULE SUMMARY ===")
-        for vocab, state in supermemo_data.get("needs_practice", {}).items():
-            if "next_review" in state:
-                print(f"  • {vocab}: Next review on {state['next_review']} (interval: {state.get('interval', 0)} days)")
-        for vocab, state in supermemo_data.get("mastered", {}).items():
-            if "next_review" in state:
-                print(f"  • {vocab}: Next review on {state['next_review']} (interval: {state.get('interval', 0)} days)")
-        print("===================================\n")
+        # Apply deletions (unset operations) - separate operation required
+        delete_ops = {k: "" for k, v in updates.items() if v is None}
+        if delete_ops:
+            usercol.update_one(
+                {"user_id": user_id},
+                {"$unset": delete_ops}
+            )
+        
+        # Display schedule summary
+        print("\n=== SUPERMEMO BATCH UPDATE SUMMARY ===")
+        print(f"Processed {len(vocab_quality_map)} vocabulary items")
+        
+        if schedule_changes:
+            print("\nSchedule Changes:")
+            for change in schedule_changes:
+                interval_text = f"{change['interval']} day{'s' if change['interval'] != 1 else ''}"
+                print(f"  • {change['vocab']} ({change['category']}): Q{change['quality']} → next review {change['new_next_review']} ({interval_text})")
+        
+        if move_to_mastered:
+            print(f"\n✅ Promoted to mastered: {', '.join([vocab for vocab, _ in move_to_mastered])}")
+        
+        if move_to_needs_practice:
+            print(f"\n⚠️ Demoted to needs_practice: {', '.join([vocab for vocab, _ in move_to_needs_practice])}")
+        
+        print("=====================================\n")
         
         return True
         
     except Exception as e:
         print(f"[ERROR] Error in batch update: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def mark_vocabulary_reviewed(user_id, vocab, performance_quality):
@@ -952,18 +1172,17 @@ def update_vocab_supermemo_state(user_id, vocab, quality):
     return False
 
 def update_supermemo_state(state, quality):
-    """
-    Updates the SuperMemo state for a vocab after a review.
-    quality: int (0-5), 5 = perfect recall, 0 = complete blackout
-    """
+    """Update SuperMemo state with enhanced category movement logic"""
     assert 0 <= quality <= 5
-    efactor = state["efactor"]
-    repetition = state["repetition"]
-    interval = state["interval"]
+    efactor = state.get("efactor", 2.5)
+    repetition = state.get("repetition", 0)
+    interval = state.get("interval", 1)
+    consecutive_correct = state.get("consecutive_correct", 0)
 
     if quality < 3:
         repetition = 0
         interval = 1
+        consecutive_correct = 0
     else:
         if repetition == 0:
             interval = 1
@@ -972,44 +1191,48 @@ def update_supermemo_state(state, quality):
         else:
             interval = int(interval * efactor)
         repetition += 1
+        consecutive_correct += 1
 
-    # Update efactor
+    # Update efactor with more sensitivity
     efactor = efactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
     if efactor < 1.3:
         efactor = 1.3
-        
-    # Cap interval at 7 days (1 week) - per existing code
-    MAX_INTERVAL = 7
+
+    # Enhanced interval capping with quality consideration
+    MAX_INTERVAL = 7 if quality >= 4 else 5
     if interval > MAX_INTERVAL:
-        print(f"[SuperMemo] Capping interval from {interval} to {MAX_INTERVAL} days")
         interval = MAX_INTERVAL
 
     today = datetime.now().date()
     next_review_date = today + timedelta(days=interval)
-    
-    # Schedule display for better visibility
-    print(f"[SuperMemo] Scheduling next review for {next_review_date} (interval: {interval} days)")
     
     state.update({
         "interval": interval,
         "repetition": repetition,
         "efactor": efactor,
         "last_review": str(today),
-        "next_review": str(next_review_date)
+        "next_review": str(next_review_date),
+        "consecutive_correct": consecutive_correct,
+        "recent_quality": quality
     })
+    
+    # ENHANCED CATEGORY MOVEMENT LOGIC
+    # Move to mastered: require more evidence of mastery
+    state["should_move_to_mastered"] = (
+        consecutive_correct >= 4 and  # Increased from 3
+        quality >= 4 and 
+        efactor >= 2.3 and  # Slightly higher threshold
+        repetition >= 3  # Must have some repetition history
+    )
+    
+    # Move to needs practice: more forgiving, focus on recent performance
+    state["should_move_to_needs_practice"] = (
+        quality <= 2 or 
+        (efactor <= 1.5 and consecutive_correct == 0) or
+        (quality <= 3 and efactor <= 1.6 and repetition >= 2)  # Struggling repeatedly
+    )
+    
     return state
-
-def get_due_for_review(user_id):
-    usercol = connect_to_mongoDB()
-    user = usercol.find_one({"user_id": user_id})
-    today = datetime.now().date()
-    due = []
-    if user and "supermemo" in user:
-        for vocab, state in user["supermemo"].get("needs_practice", {}).items():
-            vocab = normalize_vocab(vocab)
-            if datetime.fromisoformat(state["next_review"]).date() <= today:
-                due.append((vocab, state))
-    return due
 
 # Add this to supermemo_engine.py
 def display_supermemo_schedule(user_id):
@@ -1083,7 +1306,7 @@ def normalize_vocab(vocabulary):
     """Normalize vocabulary to prevent case-sensitive duplicates"""
     if not vocabulary:
         return None
-    return vocabulary.lower()  # Always store and lookup as lowercase
+    return vocabulary.lower().strip()
 
 def merge_duplicate_vocab_entries(user_id):
     """Find and merge vocabulary entries that differ only by capitalization"""
@@ -1191,45 +1414,37 @@ def compare_states(state1, state2):
 # Add these functions if they don't exist
 
 def get_average_efactor(user_id):
-    """
-    Get average EFactor for all vocabulary items in SuperMemo
-    
-    Args:
-        user_id: User ID
-        
-    Returns:
-        Average EFactor (typically between 1.3 and 2.5)
-        or None if no data available
-    """
+    """Get average efactor only if user has completed reviews"""
     try:
         usercol = connect_to_mongoDB()
-        user = usercol.find_one({"user_id": int(user_id)})
+        user = usercol.find_one({"user_id": user_id})
         
-        if not user or "supermemo" not in user:
-            return None
+        if user:
+            review_history = user.get("review_history", {})
             
-        supermemo_data = user["supermemo"]
-        efactors = []
-        
-        # Get EFactors from needs_practice
-        for vocab, state in supermemo_data.get("needs_practice", {}).items():
-            if "efactor" in state:
-                efactors.append(state["efactor"])
+            # Check if any vocabulary has actually been reviewed
+            total_reviews = 0
+            total_efactor = 0
+            
+            for vocab, data in review_history.items():
+                times_reviewed = data.get("times_reviewed", 0)
+                if times_reviewed > 0:  # Only count if actually reviewed
+                    efactor = data.get("efactor", 2.5)
+                    total_efactor += efactor
+                    total_reviews += 1
+            
+            if total_reviews > 0:
+                avg_efactor = total_efactor / total_reviews
+                print(f"[SuperMemo] Average efactor from {total_reviews} reviewed items: {avg_efactor:.3f}")
+                return avg_efactor
+            else:
+                print(f"[SuperMemo] No items have been reviewed yet")
+                return None  # Return None instead of default value
                 
-        # Get EFactors from mastered
-        for vocab, state in supermemo_data.get("mastered", {}).items():
-            if "efactor" in state:
-                efactors.append(state["efactor"])
-                
-        # Calculate average
-        if efactors:
-            avg_efactor = sum(efactors) / len(efactors)
-            return avg_efactor
-        return None
-        
     except Exception as e:
-        print(f"[SuperMemo] Error getting average EFactor: {e}")
-        return None
+        print(f"[SuperMemo] Error getting average efactor: {e}")
+    
+    return None  # Return None instead of default value
 
 def get_completion_rate(user_id):
     """
@@ -1260,55 +1475,140 @@ def get_completion_rate(user_id):
         print(f"[SuperMemo] Error getting completion rate: {e}")
         return 0
     
-def reset_outdated_review_dates():
-    """Reset outdated review dates to today for items that have passed their review date"""
+def reset_user_outdated_dates(user_id):
+    """Reset outdated dates for a specific user only"""
     try:
-        # Connect to database
         usercol = connect_to_mongoDB()
-        today = datetime.now().date()
-        today_str = str(today)
+        user = usercol.find_one({"user_id": user_id})
         
-        # Get all users
-        users = usercol.find({})
-        updates_made = 0
-        
-        for user in users:
-            user_id = user.get("user_id")
-            if not user_id or "supermemo" not in user:
-                continue
-                
-            supermemo_data = user["supermemo"]
-            needs_update = False
-            update_ops = {}
-            updated_vocab_count = 0
+        if not user or "supermemo" not in user:
+            return
             
-            # Check needs_practice items
-            for vocab, state in supermemo_data.get("needs_practice", {}).items():
-                next_review = state.get("next_review")
-                if next_review and next_review < today_str:
-                    state["next_review"] = today_str
-                    update_ops[f"supermemo.needs_practice.{vocab}.next_review"] = today_str
-                    needs_update = True
-                    updated_vocab_count += 1
-            
-            # Check mastered items
-            for vocab, state in supermemo_data.get("mastered", {}).items():
-                next_review = state.get("next_review")
-                if next_review and next_review < today_str:
-                    state["next_review"] = today_str
-                    update_ops[f"supermemo.mastered.{vocab}.next_review"] = today_str
-                    needs_update = True
-                    updated_vocab_count += 1
-            
-            # Update database if needed
-            if needs_update:
-                usercol.update_one({"user_id": user_id}, {"$set": update_ops})
-                updates_made += 1
-                print(f"[SuperMemo] Reset outdated review dates for user {user_id} ({updated_vocab_count} items)")
-        
-        print(f"[SuperMemo] Updated {updates_made} users with outdated review dates")
-        return updates_made
+        # Only process this specific user
+        # ... reset logic for single user only
         
     except Exception as e:
-        print(f"[SuperMemo] Error resetting review dates: {e}")
-        return 0
+        print(f"[SuperMemo] Error resetting dates for user {user_id}: {e}")
+
+# Add this function to reviewFrame.py after the imports
+def calculate_dynamic_quality(user_id, question_data, is_correct, response_time=None, review_history=None, is_daily_review=False):
+    """Calculate SuperMemo quality with moderated scoring for daily reviews"""
+    vocab = getattr(question_data, 'vocabulary', None)
+    if not vocab:
+        return 3 if is_correct else 2  # More moderate defaults
+    
+    vocab = vocab.lower().strip()
+    difficulty = getattr(question_data, 'difficulty', 2)
+    question_type = getattr(question_data, 'type', 'Unknown')
+    
+    # Get BKT proficiency for this vocabulary
+    try:
+        from bkt_engine import get_vocab_mastery
+        vocab_mastery = get_vocab_mastery(vocab, user_id=user_id)
+    except:
+        vocab_mastery = 0.5
+    
+    # Get user's review history for this vocab
+    if not review_history:
+        try:
+            from bkt_engine import connect_to_mongoDB
+            usercol = connect_to_mongoDB()
+            user = usercol.find_one({"user_id": user_id})
+            review_history = user.get("review_history", {}).get(vocab, {}) if user else {}
+        except:
+            review_history = {}
+    
+    times_reviewed = review_history.get("times_reviewed", 0)
+    last_quality = review_history.get("last_quality", 3)
+    
+    print(f"[QUALITY] Calculating for '{vocab}': correct={is_correct}, difficulty={difficulty}, mastery={vocab_mastery:.2f}, daily_review={is_daily_review}")
+    
+    # MODERATED BASE QUALITY for daily reviews
+    if is_daily_review:
+        # More conservative quality range for daily reviews (2-4 instead of 0-5)
+        base_quality = 3.5 if is_correct else 2.5
+        print(f"[QUALITY] Daily review mode - using moderated base quality: {base_quality}")
+    else:
+        # Full range for lessons (0-5)
+        base_quality = 4 if is_correct else 1
+    
+    # FACTOR 1: Response Time Analysis (reduced impact for daily reviews)
+    time_factor = 0
+    time_weight = 0.5 if is_daily_review else 1.0  # Reduce time factor impact for daily reviews
+    
+    if response_time is not None:
+        expected_times = {
+            'True or False': 3.0,
+            'Word Select': 4.0,
+            'Image Picker': 5.0,
+            'Translate Sentence': 8.0,
+            'Pronunciation': 6.0,
+            'Lesson': 10.0
+        }
+        
+        expected_time = expected_times.get(question_type, 5.0)
+        time_ratio = response_time / expected_time
+        
+        if time_ratio <= 0.5:
+            time_factor = +1 * time_weight
+            print(f"[QUALITY] Fast response: +{time_factor}")
+        elif time_ratio <= 1.0:
+            time_factor = 0
+            print(f"[QUALITY] Normal response time: +{time_factor}")
+        elif time_ratio <= 2.0:
+            time_factor = -0.5 * time_weight  # Reduced penalty for daily reviews
+            print(f"[QUALITY] Slow response: {time_factor}")
+        else:
+            time_factor = -1 * time_weight  # Reduced penalty for daily reviews
+            print(f"[QUALITY] Very slow response ({response_time:.1f}s): {time_factor}")
+    else:
+        print(f"[QUALITY] Normal response time: +0")
+    
+    # FACTOR 2: Difficulty vs Mastery (reduced impact for daily reviews)
+    difficulty_factor = 0
+    difficulty_weight = 0.5 if is_daily_review else 1.0
+    
+    if is_correct:
+        if difficulty >= 4 and vocab_mastery < 0.5:
+            difficulty_factor = +1 * difficulty_weight
+            print(f"[QUALITY] Hard question with low mastery: +{difficulty_factor}")
+        elif difficulty <= 2 and vocab_mastery > 0.8:
+            difficulty_factor = -0.5 * difficulty_weight  # Reduced penalty
+            print(f"[QUALITY] Easy question for high mastery: {difficulty_factor}")
+    else:
+        if difficulty <= 2:
+            difficulty_factor = -1 * difficulty_weight  # Reduced penalty for daily reviews
+            print(f"[QUALITY] Failed easy question: {difficulty_factor}")
+        elif difficulty >= 4:
+            difficulty_factor = +0.5 * difficulty_weight
+            print(f"[QUALITY] Failed hard question: +{difficulty_factor}")
+    
+    # FACTOR 3: Learning Progression (same logic but reduced impact)
+    progression_factor = 0
+    progression_weight = 0.7 if is_daily_review else 1.0
+    
+    if times_reviewed > 0:
+        if is_correct and last_quality <= 2:
+            progression_factor = +0.5 * progression_weight
+            print(f"[QUALITY] Improved from poor performance: +{progression_factor}")
+        elif not is_correct and last_quality >= 4:
+            progression_factor = -1 * progression_weight
+            print(f"[QUALITY] Regressed from good performance: {progression_factor}")
+        elif is_correct and times_reviewed >= 3 and last_quality >= 4:
+            progression_factor = +0.5 * progression_weight
+            print(f"[QUALITY] Consistent good performance: +{progression_factor}")
+    
+    # Calculate final quality with moderation
+    final_quality = base_quality + time_factor + difficulty_factor + progression_factor
+    
+    # CRITICAL: Different clamping for daily reviews vs lessons
+    if is_daily_review:
+        final_quality = max(2, min(4, final_quality))  # Clamp to 2-4 for daily reviews
+        print(f"[QUALITY] Daily review final (clamped 2-4): {final_quality}")
+    else:
+        final_quality = max(0, min(5, final_quality))  # Full range for lessons
+        print(f"[QUALITY] Lesson final (clamped 0-5): {final_quality}")
+    
+    print(f"[QUALITY] Final calculation: base={base_quality} + time={time_factor} + difficulty={difficulty_factor} + progression={progression_factor} = {final_quality}")
+    
+    return int(round(final_quality))  # Return integer quality
