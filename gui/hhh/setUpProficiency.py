@@ -533,8 +533,9 @@ def add_proficiency_to_db(user_id, proficiency):
 
 def goto_time(page, user_id):
     """Navigates to the time setup page and passes the user_id data via session."""
-    page.session.set("user_id", user_id)  # Store id in session
-    route = "/setup-time"
+    usercol = connect_to_mongoDB()
+    usercol.update_one({"user_id": user_id}, {"$set": {"time": 0}})
+    route = "/login"
     page.go(route)
     page.update()
 

@@ -80,30 +80,9 @@ def sync_user_progress(page, user_id):
             except Exception as e:
                 print(f"[Error] Failed to load modules from database: {e}")
         
-        # IMPROVED: Count completed lessons with better detection
-        lessons_completed = 0
-        for module in modules:
-            for level in getattr(module, "levels", []):
-                # Check all possible ways a level might be marked as completed
-                level_completed = False
-                
-                # If level is a dictionary
-                if isinstance(level, dict):
-                    level_completed = level.get("completed", False)
-                # If level is an object with completed attribute
-                elif hasattr(level, "completed"):
-                    level_completed = level.completed
-                # If level has grade_percentage that indicates completion
-                elif hasattr(level, "grade_percentage") and getattr(level, "grade_percentage", 0) > 0:
-                    level_completed = True
-                    
-                if level_completed:
-                    lessons_completed += 1
-                    print(f"[DEBUG] Found completed level: {getattr(level, 'lesson_id', 'unknown')}")
-        
         # Debug output to verify lesson count
-        print(f"[Progress] Found {lessons_completed} completed lessons")
-        
+        print(f"[Progress] Found {completed_lessons} completed lessons")
+
         # Get vocabulary count (case-insensitive unique words)
         unique_words = set(word.lower() for word in user_library if word)
         words_learned = len(unique_words)
@@ -111,20 +90,31 @@ def sync_user_progress(page, user_id):
         # Calculate progress percentage based on lessons completed
         # Find total lessons count
         total_lessons = 0
+        completed_lessons = 0
         for module in modules:
+            # Count levels
             if hasattr(module, 'levels'):
-                total_lessons += len(module.levels)
-                
+                for level in module.levels:
+                    total_lessons += 1
+                    if getattr(level, 'completed', False):
+                        completed_lessons += 1
+            # Count chapter test
+            if hasattr(module, 'chapter_test'):
+                total_lessons += 1
+                chapter_test = module.chapter_test
+                if getattr(chapter_test, 'completed', False):
+                    completed_lessons += 1
+
         # Avoid division by zero
         progress_percentage = 0
         if total_lessons > 0:
-            progress_percentage = int((lessons_completed / total_lessons) * 100)
-            print(f"[Progress] Calculated: {lessons_completed}/{total_lessons} = {progress_percentage}%")
+            progress_percentage = int((completed_lessons / total_lessons) * 100)
+            print(f"[Progress] Calculated: {completed_lessons}/{total_lessons} = {progress_percentage}%")
             
         # Update achievement_data in session with progress percentage
         achievement_data = page.session.get("achievement_data") or {}
         achievement_data.update({
-            "lessons_completed": lessons_completed,
+            "lessons_completed": completed_lessons,
             "words_learned": words_learned,
             "progress_percentage": progress_percentage  # Add this line!
         })
@@ -136,11 +126,11 @@ def sync_user_progress(page, user_id):
             {"user_id": int(user_id)},
             {"$set": {
                 "library": list(user_library),
-                "lessons_completed": lessons_completed,
+                "lessons_completed": completed_lessons,
                 "words_learned": words_learned
             }}
         )
-        print(f"[Database] Updated user profile with {words_learned} words and {lessons_completed} lessons")
+        print(f"[Database] Updated user profile with {words_learned} words and {completed_lessons} lessons")
         
         return True
     except Exception as e:
@@ -148,40 +138,30 @@ def sync_user_progress(page, user_id):
         return False
 
 def calculate_completion_percentage(user):
-    """Calculate accurate completion percentage"""
+    """Calculate accurate completion percentage based on completed lessons and chapter tests"""
     if not hasattr(user, 'modules') or not user.modules:
         return 0
-        
+
     total_lessons = 0
     completed_lessons = 0
-    
-    # Count all lessons across all modules with better completion detection
+
     for module in user.modules:
+        # Count levels
         if hasattr(module, 'levels'):
             for level in module.levels:
                 total_lessons += 1
-                
-                # Check all possible ways a level might be marked as completed
-                level_completed = False
-                
-                if hasattr(level, "completed"):
-                    level_completed = level.completed
-                elif isinstance(level, dict):
-                    level_completed = level.get("completed", False)
-                elif hasattr(level, "grade_percentage") and getattr(level, "grade_percentage", 0) > 0:
-                    level_completed = True
-                    
-                if level_completed:
+                if getattr(level, 'completed', False):
                     completed_lessons += 1
-                    print(f"[DEBUG] Counting completed level: {getattr(level, 'lesson_id', 'unknown')}")
-    
-    # Print detailed breakdown
-    print(f"[Progress] Detailed calculation: {completed_lessons} completed of {total_lessons} total lessons")
-    
-    # Calculate percentage with proper float division and bounds
+        # Count chapter test
+        if hasattr(module, 'chapter_test'):
+            total_lessons += 1
+            chapter_test = module.chapter_test
+            if getattr(chapter_test, 'completed', False):
+                completed_lessons += 1
+
     if total_lessons > 0:
-        percentage = int((float(completed_lessons) / float(total_lessons)) * 100)
-        percentage = min(100, max(0, percentage))  # Cap between 0-100%
+        percentage = int((completed_lessons / total_lessons) * 100)
+        print(f"[Progress] Calculated: {completed_lessons}/{total_lessons} = {percentage}%")
         return percentage
     return 0
 
@@ -656,7 +636,8 @@ def clear_all_temp_files(user_id=None, preserve_files=None):
         "temp_library.json",
         "bkt_predictions.json",
         "temp_bkt_data.json",
-        "temp_state.json"
+        "temp_state.json",
+        "validation_data.json",
     ]
     
     # Add user-specific files if user_id provided
@@ -666,6 +647,7 @@ def clear_all_temp_files(user_id=None, preserve_files=None):
             f"temp_state_{user_id}.json",
             f"lesson_session_{user_id}.json",
             f"achievements_{user_id}.json"
+            f"daily_review_{user_id}.json",
         ]
         files_to_remove.extend(user_files)
         
@@ -673,7 +655,6 @@ def clear_all_temp_files(user_id=None, preserve_files=None):
         bkt_files = [
             f"lesson_bkt_predictions_{user_id}.json",
             f"bkt_sequence_{user_id}",
-            f"custom_bkt_predictor_{user_id}.pkl"
         ]
         
         for bkt_file in bkt_files:
@@ -1540,24 +1521,29 @@ def main_menu_page(page: ft.Page, image_urls: list):
     )
 
     def calculate_completion_percentage(user):
-        """Calculate accurate completion percentage based on completed lessons"""
+        """Calculate accurate completion percentage based on completed lessons and chapter tests"""
         if not hasattr(user, 'modules') or not user.modules:
             return 0
-            
+
         total_lessons = 0
         completed_lessons = 0
-        
-        # Count all lessons across all modules
+
         for module in user.modules:
+            # Count levels
             if hasattr(module, 'levels'):
                 for level in module.levels:
                     total_lessons += 1
                     if getattr(level, 'completed', False):
                         completed_lessons += 1
-        
-        # Calculate percentage (prevent division by zero)
+            # Count chapter test
+            if hasattr(module, 'chapter_test'):
+                total_lessons += 1
+                chapter_test = module.chapter_test
+                if getattr(chapter_test, 'completed', False):
+                    completed_lessons += 1
+
         if total_lessons > 0:
-            percentage = int((completed_lessons / (total_lessons + 5)) * 100)
+            percentage = int((completed_lessons / total_lessons) * 100)
             print(f"[Progress] Calculated: {completed_lessons}/{total_lessons} = {percentage}%")
             return percentage
         return 0
@@ -1565,42 +1551,31 @@ def main_menu_page(page: ft.Page, image_urls: list):
     def navigate_to_achievements(e, user):
         # Calculate the correct completion percentage
         completion_percentage = calculate_completion_percentage(user)
-        
-        # Update the user's completion_percentage attribute
         user.completion_percentage = completion_percentage
         unique_words = set(w.lower() for w in user.library)
         words_learned = len(unique_words)
-        
-        # Store in user data
-        try:
-            arami = pymongo.MongoClient(uri)["arami"]
-            users_col = arami["users"]
-            users_col.update_one(
-                {"user_id": int(user.user_id)},
-                {"$set": {"completion_percentage": completion_percentage}}
-            )
-            print(f"[Progress] Updated completion percentage: {completion_percentage}%")
-        except Exception as e:
-            print(f"Error updating completion percentage: {e}")
-        
-        # Extract proficiency properly regardless of format
-        prof_value = user.proficiency
-        print(f"[DEBUG] Raw proficiency value: {prof_value}, type: {type(prof_value)}")
-        
-        # Handle dictionary format
-        if isinstance(prof_value, dict):
-            if "proficiency" in prof_value:
-                prof_value = float(prof_value["proficiency"])
-            elif "value" in prof_value:
-                prof_value = float(prof_value["value"])
-            else:
-                # Find any numeric value in the dict
-                for key, val in prof_value.items():
-                    if isinstance(val, (int, float)):
-                        prof_value = float(val)
-                        break
-                else:
-                    prof_value = 0
+
+        # --- FIX: Get latest LSTM proficiency ---
+        lstm_proficiency = None
+        # Try session first
+        session_lstm = e.page.session.get("lstm_proficiency") if hasattr(e, "page") else None
+        if session_lstm is not None:
+            lstm_proficiency = float(session_lstm)
+            print(f"[DEBUG] Got LSTM proficiency from session: {lstm_proficiency}")
+        else:
+            # Try database
+            try:
+                arami = pymongo.MongoClient(uri)["arami"]
+                users_col = arami["users"]
+                user_db = users_col.find_one({"user_id": int(user.user_id)})
+                if user_db and "lstm_proficiency" in user_db:
+                    lstm_proficiency = float(user_db["lstm_proficiency"])
+                    print(f"[DEBUG] Got LSTM proficiency from DB: {lstm_proficiency}")
+            except Exception as ex:
+                print(f"[ERROR] Could not get LSTM proficiency from DB: {ex}")
+
+        # Use fallback if still None
+        prof_value = lstm_proficiency if lstm_proficiency is not None else user.proficiency
         
         # Convert to float and scale if needed
         try:

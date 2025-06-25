@@ -972,7 +972,7 @@ def build_lesson_question(page, question_data, progress_value, on_next, on_back,
                                 size=24,
                                 weight=ft.FontWeight.BOLD,
                                 text_align=ft.TextAlign.CENTER,
-                                max_lines=3,  # Allow up to 3 lines
+                                max_lines=10,  # Allow up to 3 lines
                                 overflow=ft.TextOverflow.VISIBLE,  # Show all text
                             )
                         ],
@@ -989,7 +989,7 @@ def build_lesson_question(page, question_data, progress_value, on_next, on_back,
                         color="grey",
                         size=16,
                         text_align=ft.TextAlign.CENTER,
-                        max_lines=4,  # Allow up to 4 lines
+                        max_lines=10,  # Allow up to 4 lines
                         overflow=ft.TextOverflow.VISIBLE
                     ),
                     margin=ft.margin.only(bottom=20)
@@ -1014,7 +1014,7 @@ def build_lesson_question(page, question_data, progress_value, on_next, on_back,
                         size=16,
                         weight=ft.FontWeight.W_500,
                         color="#000000",
-                        max_lines=8,  # Allow up to 8 lines
+                        max_lines=10,  # Allow up to 8 lines
                         overflow=ft.TextOverflow.VISIBLE
                     ),
                     margin=ft.margin.only(bottom=20),
@@ -1502,7 +1502,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                 size=18,
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER,
-                max_lines=3,  # Allow up to 3 lines
+                max_lines=10,  # Allow up to 3 lines
                 overflow=ft.TextOverflow.VISIBLE
             ),
             width=320,
@@ -1544,7 +1544,7 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
                     size=18,
                     weight=ft.FontWeight.BOLD,
                     text_align=ft.TextAlign.CENTER,
-                    max_lines=4,  # Allow multiple lines
+                    max_lines=10,  # Allow multiple lines
                     overflow=ft.TextOverflow.VISIBLE
                 ),
                 width=320,
@@ -1759,7 +1759,7 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back, cur
                         size=20,
                         weight=ft.FontWeight.BOLD,
                         text_align=ft.TextAlign.CENTER,
-                        max_lines=6,  # Allow up to 6 lines
+                        max_lines=10,  # Allow up to 6 lines
                         overflow=ft.TextOverflow.VISIBLE
                     ),
                     width=320,
@@ -2065,7 +2065,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
                 size=18,
                 weight=ft.FontWeight.BOLD,
                 text_align=ft.TextAlign.CENTER,
-                max_lines=3,  # Allow up to 3 lines
+                max_lines=10,  # Allow up to 3 lines
                 overflow=ft.TextOverflow.VISIBLE
             ),
             width=320,
@@ -2107,7 +2107,7 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
                     size=18,
                     weight=ft.FontWeight.BOLD,
                     text_align=ft.TextAlign.CENTER,
-                    max_lines=4,  # Allow multiple lines
+                    max_lines=10,  # Allow multiple lines
                     overflow=ft.TextOverflow.VISIBLE
                 ),
                 width=320,
@@ -2220,7 +2220,22 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
     # Set the actual word to recognize
     recognition_target = target_word
     print(f"Will recognize pronunciation for: '{recognition_target}'")
+    # Attempt tracking
+    if not hasattr(question_data, "attempts"):
+        question_data.attempts = 0
+    if not hasattr(question_data, "best_accuracy"):
+        question_data.best_accuracy = 0.0
+
+    MAX_ATTEMPTS = 3
     accuracy_threshold = getattr(question_data, 'accuracy_threshold', 0.6)
+
+    def grading_label(accuracy):
+        if accuracy >= 0.9:
+            return "Excellent"
+        elif accuracy >= 0.6:
+            return "Good"
+        else:
+            return "Needs Improvement"
     
     # Remove the incorrect Page._current reference
     # Instead, we'll use the page reference from the update function context
@@ -2332,66 +2347,99 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
     import threading
 
     def start_recording(e):
+        if question_data.attempts >= MAX_ATTEMPTS:
+            txt_transcription.value = f"Maximum attempts reached."
+            button_mic.disabled = True
+            page.update()
+            return
         button_mic.disabled = True
         button_mic.bgcolor = "#FF9800"  # Darker yellow when recording
         mic_icon.content = ft.ProgressRing(width=40, height=40, color="black")  # Show loading spinner
-        txt_transcription.value = "Loading..."
+        txt_transcription.value = "Calibrating ambient noise..."
         txt_accuracy.value = ""
         pronunciation_tips.visible = False
         pronunciation_chart.visible = False
         e.page.update()
-        
+
         recording["is_recording"] = True
-        threading.Thread(target=lambda: record_audio(e.page)).start()
+
+        # Start the async calibration and wait in a thread
+        import threading
+        threading.Thread(target=lambda: record_audio(page)).start()
 
     def record_audio(page):
-
-        time.sleep(2.5)
-        # Update UI to show listening state
-        mic_icon.content = ft.Icon(
-            name=ft.Icons.MIC,
-            color="black",
-            size=40
-        )  # Restore mic icon
-        txt_transcription.value = "Listening..."
-        page.update()
-
-
-        if not model_available:
-            # Simulate audio processing when model isn't available
-            time.sleep(2)
-            txt_transcription.value = vocabulary  # Assume correct for demo
-            txt_accuracy.value = "Model not available - simulating correct pronunciation"
-            txt_accuracy.color = "orange"
-            button_mic.disabled = False
-            button_mic.bgcolor = "#FFC107"
-            button_mic.icon_color = "white"
-            page.update()
-            return
-            
         try:
-            recording["file_path"] = capture_audio(duration=3)
-            
-            if recording["file_path"] and os.path.exists(recording["file_path"]):
-                process_recording(page)
-            else:
-                txt_transcription.value = "No audio detected. Please try again."
-                txt_accuracy.value = ""
+            wait_time = 2.5
+            calibration_done = threading.Event()
+
+            def do_calibration():
+                try:
+                    print("INFO:voice_recognition.speech_recognition_utils:Adjusting for ambient noise...")
+                    if speech_processor and hasattr(speech_processor, "adjust_for_ambient_noise"):
+                        speech_processor.adjust_for_ambient_noise()
+                    else:
+                        time.sleep(1.0)  # Simulate calibration if not available
+                except Exception as e:
+                    print(f"Error during ambient noise calibration: {e}")
+                finally:
+                    calibration_done.set()
+
+            # Start calibration in a thread
+            calibration_thread = threading.Thread(target=do_calibration)
+            calibration_thread.start()
+
+            # Wait for both calibration and the async wait (whichever is longer)
+            start_time = time.time()
+            while True:
+                elapsed = time.time() - start_time
+                if elapsed >= wait_time and calibration_done.is_set():
+                    break
+                time.sleep(0.05)
+
+            # Now update UI to "Speak now"
+            mic_icon.content = ft.Icon(
+                name=ft.Icons.MIC,
+                color="black",
+                size=40
+            )
+            txt_transcription.value = "Speak now..."
+            page.update()
+
+            if not model_available:
+                # Simulate audio processing when model isn't available
+                time.sleep(2)
+                txt_transcription.value = vocabulary  # Assume correct for demo
+                txt_accuracy.value = "Model not available - simulating correct pronunciation"
+                txt_accuracy.color = "orange"
+                button_mic.disabled = False
+                button_mic.bgcolor = "#FFC107"
+                button_mic.icon_color = "white"
+                page.update()
+                return
+
+            # Start actual audio capture (without calibration, since it's already done)
+            try:
+                recording["file_path"] = capture_audio(duration=3)  # If your capture_audio supports this flag
+                if recording["file_path"] and os.path.exists(recording["file_path"]):
+                    process_recording(page)
+                else:
+                    txt_transcription.value = "No audio detected. Please try again."
+                    txt_accuracy.value = ""
+                    button_mic.bgcolor = "#FFC107"  # Reset button color
+                    button_mic.disabled = False
+                    page.update()
+            except Exception as e:
+                txt_transcription.value = f"Error recording audio: {str(e)}"
                 button_mic.bgcolor = "#FFC107"  # Reset button color
                 button_mic.disabled = False
                 page.update()
-        except Exception as e:
-            txt_transcription.value = f"Error recording audio: {str(e)}"
-            button_mic.bgcolor = "#FFC107"  # Reset button color
-            button_mic.disabled = False
-            page.update()
         finally:
             recording["is_recording"] = False
             
     def process_recording(page):
         if not model_available:
             return
-            
+
         try:
             # Pass the target_word instead of vocabulary
             predicted_word, confidence, phoneme_confidence = speech_processor.predict_speech(
@@ -2399,102 +2447,119 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
             )
 
             button_mic.bgcolor = "#FFC107"  # Reset button color
-            
+
             # Compare with the specific target word not the full vocabulary
             if predicted_word:
                 txt_transcription.value = f"You said: {predicted_word}"
-                
+
                 # Get any pronunciation errors from the NLTK analysis that was performed
                 nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
-                
+
                 if predicted_word.lower() == recognition_target.lower():
                     accuracy = confidence if confidence else 0.75
-                    txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
-                    
-                    if accuracy >= accuracy_threshold:
-                        txt_accuracy.color = "green"
-                        question_data.accuracy = accuracy
-                        
-                        # Show detailed phoneme feedback
-                        if phoneme_confidence:
-                            # Identify problematic phonemes
-                            problem_phonemes = [(p, s) for p, s in phoneme_confidence.items() if s < 0.7]
-                            if problem_phonemes:
-                                feedback_text = "Work on: "
-                                feedback_text += ", ".join([f"{p} ({s:.0%})" for p, s in problem_phonemes])
-                                
-                                # Add NLTK analysis if available
-                                if nltk_errors:
-                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
-                                    
-                                pronunciation_tips.value = feedback_text
-                                pronunciation_tips.visible = True
-                            else:
-                                pronunciation_tips.visible = False
-                                
-                            # Generate and display visualization
-                            viz_buffer = visualize_pronunciation_feedback(vocabulary, phoneme_confidence)
-                            if viz_buffer:
-                                pronunciation_chart.src_base64 = base64.b64encode(viz_buffer.read()).decode('utf-8')
-                                pronunciation_chart.visible = True
+
+                    # Track attempts and best accuracy
+                    question_data.attempts += 1
+                    if accuracy > question_data.best_accuracy:
+                        question_data.best_accuracy = accuracy
+
+                    # Show grading label instead of raw accuracy
+                    txt_accuracy.value = f"Grade: {grading_label(question_data.best_accuracy)}"
+                    txt_accuracy.color = "green" if question_data.best_accuracy >= accuracy_threshold else "orange"
+                    # Show attempts left
+                    attempts_left = MAX_ATTEMPTS - question_data.attempts
+                    txt_transcription.value = f"Attempts left: {attempts_left}"
+
+                    # Disable mic if max attempts reached or perfect score
+                    if question_data.attempts >= MAX_ATTEMPTS or question_data.best_accuracy >= 0.9:
+                        button_mic.disabled = True
+                        txt_transcription.value = "Attempts finished."
                     else:
-                        txt_accuracy.color = "orange"
-                        question_data.accuracy = accuracy
-                        
-                        # Show pronunciation tips for specific syllables
-                        if phoneme_confidence:
-                            problem_syllables = speech_processor._identify_problem_syllables(
-                                [(p, s) for p, s in phoneme_confidence.items() if s < 0.7],
-                                speech_processor._map_phonemes_to_syllables(vocabulary.lower())
-                            )
-                            
-                            feedback_text = ""
-                            if problem_syllables:
-                                feedback_text = f"Focus on syllables: {', '.join(problem_syllables)}"
-                            
-                            # Add NLTK analysis if available
+                        button_mic.disabled = False
+                    page.update()
+
+                    # Show detailed phoneme feedback
+                    if phoneme_confidence:
+                        problem_phonemes = [(p, s) for p, s in phoneme_confidence.items() if s < 0.7]
+                        if problem_phonemes:
+                            feedback_text = "Work on: "
+                            feedback_text += ", ".join([f"{p} ({s:.0%})" for p, s in problem_phonemes])
                             if nltk_errors:
-                                if feedback_text:
-                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
-                                else:
-                                    feedback_text = "Google analysis: " + "\n• ".join([""] + nltk_errors)
-                            
+                                feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
                             pronunciation_tips.value = feedback_text
-                            pronunciation_tips.visible = bool(feedback_text)
+                            pronunciation_tips.visible = True
+                        else:
+                            pronunciation_tips.visible = False
+
+                        # Generate and display visualization
+                        viz_buffer = visualize_pronunciation_feedback(vocabulary, phoneme_confidence)
+                        if viz_buffer:
+                            pronunciation_chart.src_base64 = base64.b64encode(viz_buffer.read()).decode('utf-8')
+                            pronunciation_chart.visible = True
                 else:
+                    # Incorrect word detected
+                    question_data.attempts += 1
                     txt_transcription.value = f"You said: {predicted_word}. Try saying '{target_word}'"
                     txt_accuracy.value = f"Incorrect word detected"
                     txt_accuracy.color = "red"
-                    question_data.accuracy = 0.0
-                    
+                    # Do not update best_accuracy
                     # Show general pronunciation tips with NLTK analysis
                     feedback_text = "Try again, focusing on clear pronunciation"
-                    
                     if nltk_errors:
                         feedback_text += "\n\nPronunciation analysis: " + "\n• ".join([""] + nltk_errors)
-                    
                     pronunciation_tips.value = feedback_text
                     pronunciation_tips.visible = True
                     pronunciation_chart.visible = False
+
+                    # Show attempts left
+                    attempts_left = MAX_ATTEMPTS - question_data.attempts
+                    txt_transcription.value = f"Attempts left: {attempts_left}"
+                    if question_data.attempts >= MAX_ATTEMPTS:
+                        button_mic.disabled = True
+                        txt_transcription.value = "Attempts finished."
+                    else:
+                        button_mic.disabled = False
+                    page.update()
             else:
+                # No speech recognized
+                question_data.attempts += 1
                 txt_transcription.value = "Speech not recognized clearly. Please try again."
                 txt_accuracy.value = ""
-                question_data.accuracy = 0.0
                 pronunciation_tips.visible = False
                 pronunciation_chart.visible = False
-                
+
+                # Show attempts left
+                attempts_left = MAX_ATTEMPTS - question_data.attempts
+                txt_transcription.value = f"Attempts left: {attempts_left}"
+                if question_data.attempts >= MAX_ATTEMPTS:
+                    button_mic.disabled = True
+                    txt_transcription.value = "Attempts finished."
+                else:
+                    button_mic.disabled = False
+                page.update()
+
         except Exception as e:
+            question_data.attempts += 1
             txt_transcription.value = f"Error processing speech: {str(e)}"
             txt_accuracy.value = ""
             button_mic.bgcolor = "#FFC107"  # Reset button color
             pronunciation_tips.visible = False
             pronunciation_chart.visible = False
-            
-        finally:
-            button_mic.disabled = False
-            button_mic.bgcolor = "#FFC107"  # Reset button color
+
+            # Show attempts left
+            attempts_left = MAX_ATTEMPTS - question_data.attempts
+            txt_transcription.value = f"Attempts left: {attempts_left}"
+            if question_data.attempts >= MAX_ATTEMPTS:
+                button_mic.disabled = True
+                txt_transcription.value = "Attempts finished."
+            else:
+                button_mic.disabled = False
             page.update()
-            
+        finally:
+            recording["is_recording"] = False
+            button_mic.disabled = False
+            button_mic.bgcolor = "#FFC107"
+            page.update()
             # Clean up temp file
             try:
                 if recording["file_path"] and os.path.exists(recording["file_path"]):
@@ -2514,12 +2579,11 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
             print(f"[PRONUNCIATION] Initialized accuracy to 0.0 for '{question_data.vocabulary}'")
         
         # FIXED: Determine if pronunciation was correct based on accuracy threshold
-        is_pronunciation_correct = question_data.accuracy >= accuracy_threshold
-        
-        print(f"[PRONUNCIATION] Question accuracy: {question_data.accuracy:.2f}, threshold: {accuracy_threshold:.2f}, correct: {is_pronunciation_correct}")
-        
-        # CRITICAL: Set the correct attribute for BKT processing
+        is_pronunciation_correct = question_data.best_accuracy >= accuracy_threshold
+        question_data.accuracy = question_data.best_accuracy
         question_data.correct = is_pronunciation_correct
+        
+        print(f"[PRONUNCIATION] Best accuracy: {question_data.best_accuracy:.2f}, Grade: {grading_label(question_data.best_accuracy)}, Correct: {is_pronunciation_correct}")
         
         # Update global tracking based on actual result
         if is_pronunciation_correct:
@@ -2687,7 +2751,8 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
                         ),
                         width=280,  
                         height=50,
-                        on_click=handle_next
+                        on_click=handle_next,
+                        disabled=lambda: question_data.attempts < MAX_ATTEMPTS and question_data.best_accuracy < 0.9
                     )
                 )
             ],
@@ -3080,21 +3145,18 @@ def lesson_page(page: ft.Page, image_urls: list):
                         
                         if better_question:
                             new_difficulty = getattr(better_question, 'difficulty', current_difficulty)
-                            
-                            if new_difficulty != current_difficulty:
+                            # Replace if current difficulty is NOT in target range and better_question is in target range
+                            if current_difficulty not in target_difficulties and new_difficulty in target_difficulties:
                                 from types import SimpleNamespace
                                 if isinstance(better_question, dict):
                                     better_question = SimpleNamespace(**better_question)
-                                
                                 better_question.lesson_id = getattr(question, 'lesson_id', lesson_id)
                                 better_question.module_name = getattr(question, 'module_name', 'Module 1')
-                                
                                 questions[i] = better_question
                                 questions_replaced += 1
-                                
                                 print(f"[LESSON] REPLACED {q_type} - {vocab}: difficulty {current_difficulty} → {new_difficulty}")
                             else:
-                                print(f"[LESSON] KEPT {q_type} - {vocab}: difficulty {current_difficulty} (already optimal)")
+                                print(f"[LESSON] KEPT {q_type} - {vocab}: difficulty {current_difficulty} (already optimal or no better in target range)")
                         else:
                             print(f"[LESSON] KEPT {q_type} - {vocab}: difficulty {current_difficulty} (no better option)")
                     

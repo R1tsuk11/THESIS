@@ -429,17 +429,43 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
             print(f"[LSTM] Error displaying predictions table: {e}")
         
         # Calculate BKT confidence score
+
+        from bkt_engine import calculate_bkt_confidence, get_custom_bkt
         try:
-            bkt_score = sum(current_bkt_sequence) / len(current_bkt_sequence) if current_bkt_sequence else 0.5
+            custom_bkt = get_custom_bkt(user_id)
+            vocab_list = custom_bkt.get_vocabulary_in_order() if custom_bkt else []
+            bkt_confidences = []
+            if vocab_list:
+                for vocab in vocab_list:
+                    params = custom_bkt.vocab_parameters.get(vocab, {})
+                    mastery = params.get("p_mastery", 0.5)
+                    guess = params.get("guess", 0.25)
+                    slip = params.get("slip", 0.1)
+                    conf = calculate_bkt_confidence(mastery, guess, slip, vocab=vocab, params=params)
+                    bkt_confidences.append(conf)
+                    print(f"[BKT] Calculated confidence for {vocab}: {conf:.4f}")
+                bkt_score = sum(bkt_confidences) / len(bkt_confidences)
+            else:
+                # Fallback: calculate from current_bkt_sequence if available
+                if current_bkt_sequence:
+                    avg_mastery = sum(current_bkt_sequence) / len(current_bkt_sequence)
+                    # Use default guess/slip for fallback
+                    conf = calculate_bkt_confidence(avg_mastery, 0.25, 0.1)
+                    bkt_score = conf
+                    print(f"[BKT] Fallback confidence from sequence: {conf:.4f}")
+                else:
+                    bkt_score = 0.5
+            print(f"[BKT] Average BKT confidence score: {bkt_score:.3f}")
+        except Exception as e:
+            print(f"[BKT] Error calculating BKT confidence: {e}")
+            bkt_score = 0.5
+
+        try:
             print(f"[BKT] Average mastery score: {bkt_score:.3f}")
             
             # Get value from the table generation (which has the 0.76 value)
-            display_result = page.session.get("lstm_display_result")
-            if display_result and "confidence" in display_result:
-                lstm_score = display_result.get("confidence")
-                print(f"[DEBUG] Using display result confidence: {lstm_score}")
-            else:
-                lstm_score = lstm_confidence
+            lstm_score = lstm_display_result
+            print(f"[LSTM] Using LSTM model confidence: {lstm_score}")
             
             # Get SuperMemo data if available
             try:
@@ -465,7 +491,7 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
                 supermemo_score = None
             
             # Calculate overall system confidence - LET IT HANDLE ALL PRINTING
-            confidence_result = get_system_confidence(bkt_score, lstm_confidence, supermemo_score, page=page)
+            confidence_result = get_system_confidence(bkt_score, lstm_score, supermemo_score, page=page)
             system_confidence = confidence_result["system_confidence"]
             confidence_interpretation = confidence_result["interpretation"]
             

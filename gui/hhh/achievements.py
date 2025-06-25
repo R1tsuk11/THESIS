@@ -500,7 +500,7 @@ def achievement_page(page: ft.Page, image_urls: list):
             
             if user_data and "lstm_mastery" in user_data:
                 raw_mastery = user_data["lstm_mastery"]
-                vocabulary_mastery = float(raw_mastery)
+                vocabulary_mastery = float(raw_mastery) * 100
                 print(f"[Vocab] Using database LSTM mastery: {vocabulary_mastery:.1f}%")
             else:
                 # Fallback for new users
@@ -531,7 +531,7 @@ def achievement_page(page: ft.Page, image_urls: list):
                     db_proficiency = user_data.get("proficiency")
                     
                 if db_proficiency is not None:
-                    raw_proficiency = float(db_proficiency)
+                    raw_proficiency = float(db_proficiency) * 100
                     print(f"[Proficiency] Using database proficiency: {raw_proficiency:.1f}%")
                     
                     # Also store in session for future use
@@ -539,7 +539,7 @@ def achievement_page(page: ft.Page, image_urls: list):
                 else:
                     # Use vocabulary mastery as fallback for proficiency
                     # (mastery was already loaded above)
-                    raw_proficiency = vocabulary_mastery
+                    raw_proficiency = vocabulary_mastery 
                     print(f"[Proficiency] No proficiency in database, using mastery: {raw_proficiency:.1f}%")
             else:
                 # Use extracted (likely 0.0)
@@ -570,17 +570,6 @@ def achievement_page(page: ft.Page, image_urls: list):
                             size=15,
                             color="#FFFFFF",
                             weight=ft.FontWeight.BOLD,
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.INFO_OUTLINE,
-                            icon_color="#FFFFFF",
-                            icon_size=14,  # Smaller icon
-                            tooltip="More information",
-                            on_click=show_info_dialog,
-                            padding=ft.padding.all(0),  # Minimal padding
-                            style=ft.ButtonStyle(
-                                overlay_color=ft.Colors.TRANSPARENT,  # Remove button overlay
-                            ),
                         ),
                     ], spacing=-5, tight=True),  # Minimal spacing, tight layout
                     ft.Text(
@@ -641,17 +630,6 @@ def achievement_page(page: ft.Page, image_urls: list):
                             size=15,
                             color="#FFFFFF",
                             weight=ft.FontWeight.BOLD,
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.INFO_OUTLINE,
-                            icon_color="#FFFFFF",
-                            icon_size=14,  # Smaller icon
-                            tooltip="More information",
-                            on_click=show_info_dialog_new,
-                            padding=ft.padding.all(0),  # Minimal padding
-                            style=ft.ButtonStyle(
-                                overlay_color=ft.Colors.TRANSPARENT,  # Remove button overlay
-                            ),
                         ),
                     ], spacing=-5, tight=True),  # Minimal spacing, tight layout
                     ft.Text(

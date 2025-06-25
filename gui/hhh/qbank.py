@@ -4325,7 +4325,7 @@ module_3 = {
         "question": "Pwede tumawad translates to 'pwede ba'ng tumawad' in Filipino.",
         "choices": ["True", "False"],
         "correct_answer": "True",
-        "vocabulary": "Pwede tumawad?",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 1,
         "response_time": 0
     },
@@ -4335,7 +4335,7 @@ module_3 = {
         "question": "Pwede tumawad translates to 'how much is this?' in English.",
         "choices": ["True", "False"],
         "correct_answer": "False",
-        "vocabulary": "Pwede tumawad?",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 1,
         "response_time": 0
     },
@@ -4345,7 +4345,7 @@ module_3 = {
         "question": "'Pwede tumawad?' translates to 'Can I ask for a discount?'",
         "choices": ["True", "False"],
         "correct_answer": "True",
-        "vocabulary": "Pwede tumawad?",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 2,
         "response_time": 0
     },
@@ -4354,8 +4354,8 @@ module_3 = {
         "type": "Translate Sentence",
         "question": "How would you ask for a discount at the market?\n\nChoose the correct answer:",
         "choices": ["Pwede tumawad?", "Pwede maluoy?"],
-        "correct_answer": "Pwede tumawad?",
-        "vocabulary": "Pwede tumawad?",
+        "correct_answer": "Pwede tumawad",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 3,
         "response_time": 0
     },
@@ -4364,8 +4364,8 @@ module_3 = {
         "type": "Translate Sentence",
         "question": "How would you tell the vendor for a discount",
         "choices": ["Pwede tumawad?", "Tagpira ito"],
-        "correct_answer": "Pwede tumawad?",
-        "vocabulary": "Pwede tumawad?",
+        "correct_answer": "Pwede tumawad",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 3,
         "response_time": 0
     },
@@ -4374,8 +4374,8 @@ module_3 = {
         "type": "Translate Sentence",
         "question": "Vendor: 500 pesos ini.\n\nYou think it's too expensive. How would you ask if you can negotiate?\nChoose the correct answer:",
         "choices": ["Pwede tumawad?", "Barato la?"],
-        "correct_answer": "Pwede tumawad?",
-        "vocabulary": "Pwede tumawad?",
+        "correct_answer": "Pwede tumawad",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 4,
         "response_time": 0
     },
@@ -4385,7 +4385,7 @@ module_3 = {
         "question": "Pwede tumawad translates to 'magkano ito?' in Filipino.",
         "choices": ["True", "False"],
         "correct_answer": "False",
-        "vocabulary": "Pwede tumawad?",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 4,
         "response_time": 0
     },
@@ -4395,7 +4395,7 @@ module_3 = {
         "question": "Translate this: I don't think my money (kwarta) is enough, can I ask for a discount please?",
         "choices": ["Pwede tumawad? Diri sakto an akon kwarta", "Tagpira ito? Diri mahal?"],
         "correct_answer": "Pwede tumawad? Diri sakto an akon kwarta",
-        "vocabulary": "Pwede tumawad?",
+        "vocabulary": "Pwede tumawad",
         "difficulty": 5,
         "response_time": 0
     }
