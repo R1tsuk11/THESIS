@@ -2042,7 +2042,7 @@ module_2 = {
     },
     {
         "id": 193,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "How would you ask the jeepney driver to stop?",
         "choices": ["Alayon", "Para"],
         "correct_answer": "Para",
@@ -3101,7 +3101,7 @@ module_3 = {
     },
     {
         "id": 292, 
-        "type": "Word Select", 
+        "type": "Translate Sentence", 
         "question": "How would you say 'What is this?' in Waray?", 
         "choices": ["Ano iton?", "Ano ini?"], 
         "correct_answer": "Ano ini?", 
@@ -3194,7 +3194,7 @@ module_3 = {
     },
     {
         "id": 301, 
-        "type": "Word Select", 
+        "type": "Translate Sentence", 
         "question": "How would you say 'What is that?' in Waray?", 
         "choices": ["Ano iton?", "Ano ini?"], 
         "correct_answer": "Ano iton?", 
@@ -3273,9 +3273,10 @@ module_3 = {
     {
         "id": 308, 
         "type": "Word Select", 
-        "question": "Which means 'to buy' in Waray?", 
-        "choices": ["Maaro", "Mapalit"], 
-        "correct_answer": "Mapalit", 
+        "question": "Translate to English", 
+        "word_to_translate": "Mapalit ako hin",
+        "choices": ["I want to buy (item)", "I need (item)"], 
+        "correct_answer": "I want to buy (item)", 
         "vocabulary": "Mapalit ako hin", 
         "difficulty": 1, 
         "response_time": 0
@@ -4297,7 +4298,7 @@ module_3 = {
     },
     {
         "id": 405,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "How would a vendor tell the customer that that's all the stock they have?",
         "choices": ["Amo la an stock", "Mabugat an stock"],
         "correct_answer": "Amo la an stock",
@@ -4493,7 +4494,7 @@ module_4 = {
     },
     {
         "id": 423,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "How do you invite someone to come over and eat?",
         "choices": ["Pakadi, kaon kita", "Kadto, aro hin pagkaon"],
         "correct_answer": "Pakadi, kaon kita",
@@ -4547,7 +4548,7 @@ module_4 = {
     },
     {
         "id": 428,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "What is the correct meaning of pagkaon?\n\nChoose the correct answer:",
         "choices": ["Pagkaon = Eat", "Pagkaon = Food"],
         "correct_answer": "Pagkaon = Food",
@@ -4557,7 +4558,7 @@ module_4 = {
     },
     {
         "id": 429,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "How would you say 'There is food now?'\n\nChoose the correct sentence:",
         "choices": ["May pagkaon na.", "Kaon na kita."],
         "correct_answer": "May pagkaon na.",
@@ -5748,7 +5749,7 @@ module_4 = {
     },
     {
         "id": 541,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "Friend: reaches for food\nYou: ______\nChoose the correct answer:",
         "choices": ["Hinay, mapaso!", "Kaon na!", "Pakadto na"],
         "correct_answer": "Hinay, mapaso!",
@@ -6039,7 +6040,7 @@ module_5 = {
     },
     {
         "id": 568,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "You want to ask the reason, so you say: '______ ka nahulog?'\nChoose the correct answer:",
         "choices": ["Kay ano", "Hain", "Hino"],
         "correct_answer": "Kay ano",
@@ -6114,7 +6115,7 @@ module_5 = {
     },
     {
         "id": 575,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "You want to say 'Good thing it didn’t rain,' so you say:\n______ diri nag-uran.\nChoose the correct answer:",
         "choices": ["Maupay na la", "Sayang", "Kayano"],
         "correct_answer": "Maupay na la",
@@ -6338,7 +6339,7 @@ module_5 = {
     },
     {
         "id": 596,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": 'To tell someone "Be kind," you say:\n"Mag-______ ka."\nChoose the correct answer:',
         "choices": ["buutan", "mahusay", "baktas"],
         "correct_answer": "buutan",
@@ -6799,9 +6800,8 @@ module_5 = {
     },
     {
         "id": 639,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "Which expression can you use when something smells bad?\nChoose the correct answer:",
-        "word_to_translate": None,
         "choices": ["Pastilan!", "Maupay!", "Mahamot"],
         "correct_answer": "Pastilan!",
         "vocabulary": "Pastilan",
@@ -6975,9 +6975,8 @@ module_5 = {
     },
     {
         "id": 655,
-        "type": "Word Select",
+        "type": "Translate Sentence",
         "question": "How do you say 'He is sleepy' in Waray?\nChoose the correct answer:",
-        "word_to_translate": None,
         "choices": ["Piraw hiya.", "Gutom hiya.", "Karigo"],
         "correct_answer": "Piraw hiya.",
         "vocabulary": "Mapiraw",
@@ -7624,7 +7623,7 @@ chapterTest_mod4 = [
     {
         "id": 1037, 
         "type": "Word Select", 
-        "question": "Translate to Waray:\nfood", 
+        "question": "Translate to Waray", 
         "word_to_translate": "food", 
         "choices": ["pagkaon", "kaon", "lakat"], 
         "correct_answer": "pagkaon",
@@ -7809,7 +7808,8 @@ chapterTest_mod5 = [
     },
     {
         "id": 1055, 
-        "type": "Word Select", "question": "Translate to Waray: Why?", 
+        "type": "Word Select", 
+        "question": "Translate to Waray", 
         "word_to_translate": "Why", 
         "choices": ["Kakano?", "Kay ano?", "Paano?"], 
         "correct_answer": "Kay ano?",
@@ -7820,7 +7820,7 @@ chapterTest_mod5 = [
     {
         "id": 1056, 
         "type": "Word Select", 
-        "question": "Translate to Waray: kind\n\nChoose the correct answer:", 
+        "question": "Translate to Waray", 
         "word_to_translate": "kind", 
         "choices": ["buutan", "mahusay", "marasa"], 
         "correct_answer": "buutan",
