@@ -472,7 +472,7 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
             scores["supermemo"] = min(0.95, max(0.05, float(supermemo_score)))
             print(f"  - supermemo: score={supermemo_score:.2f}")
         else:
-            print(f"  - supermemo: Not available - user hasn't completed any daily reviews yet")
+            pass
         
         # Add pronunciation score if available
         if pronunciation_score is not None:
@@ -496,7 +496,7 @@ def get_system_confidence(bkt_score, lstm_score, supermemo_score=None, pronuncia
         
         # Print explicit note if SuperMemo is not included
         if supermemo_score is None:
-            print("SUPERMEMO: Not available - user hasn't completed any daily reviews yet")
+            pass
         
         # ENHANCED: Show additional raw calculation details
         print(f"Overall System Confidence: {final_confidence:.8f}")

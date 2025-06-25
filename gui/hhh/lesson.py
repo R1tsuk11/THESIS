@@ -1,3 +1,4 @@
+from collections import defaultdict
 import flet as ft
 import re
 import os
@@ -15,7 +16,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 from bkt_engine import should_rebatch, select_adaptive_questions, get_vocab_mastery
 import threading
 
-used_question_ids = set()  # Track used question IDs to avoid duplicates
+used_question_ids_by_vocab = defaultdict(set)
 correct_answers = {}
 incorrect_answers = {}
 grade_percentage = 0.0
@@ -92,57 +93,55 @@ class LessonQuestionPool:
         if not self.initialized:
             print("[POOL] Warning: Pool not initialized")
             return None
-        
+
         vocab_lower = vocab.lower()
-        
+
         # Get all questions for this vocabulary and type
         if vocab_lower not in self.pool_by_vocab:
             print(f"[POOL] No questions found for vocabulary '{vocab}'")
             return None
-        
+
         matching_questions = []
         for q in self.pool_by_vocab[vocab_lower]:
             # Handle both dict and object formats
             if isinstance(q, dict):
                 q_difficulty = q.get('difficulty', None)
                 q_id = q.get('id', 'unknown')
-                if q_id in used_question_ids:
-                    continue
                 q_q_type = q.get('type', '')
             else:
                 q_q_type = getattr(q, 'type', '')
                 q_difficulty = getattr(q, 'difficulty', None)
                 q_id = getattr(q, 'id', 'unknown')
 
-            # IGNORE question type: Only match on vocab and difficulty
-            if (q_difficulty is not None and 
-                isinstance(q_difficulty, (int, float)) and
-                q_q_type != 'Lesson'):  # Still skip lesson questions
+            # Only skip if this question was used for THIS vocab
+            if q_id in used_question_ids_by_vocab[vocab_lower]:
+                continue
+            if (q_difficulty is not None and isinstance(q_difficulty, (int, float)) and q_q_type != 'Lesson'):
                 matching_questions.append((q, q_difficulty, q_id))
-        
+
         if not matching_questions:
             print(f"[POOL] No {q_type} questions found for '{vocab}' with valid difficulties")
             return None
-        
+
         print(f"[POOL] Found {len(matching_questions)} {q_type} questions for '{vocab}' with valid difficulties:")
         for q, diff, qid in matching_questions:
             print(f"[POOL]   - ID: {qid}, Difficulty: {diff}")
-        
+
         # Strategy 1: Find exact match first
         exact_matches = [(q, diff, qid) for q, diff, qid in matching_questions if diff == target_difficulty]
         if exact_matches:
             selected = exact_matches[0]
-            print(f"[POOL] Found EXACT match for {q_type} '{vocab}': difficulty {target_difficulty} (ID: {selected[2]})")
-            # FIXED: Ensure the returned question has the difficulty properly set
             selected_question = selected[0]
+            # Mark as used for this vocab
+            used_question_ids_by_vocab[vocab_lower].add(selected[2])
+            print(f"[POOL] Found EXACT match for {q_type} '{vocab}': difficulty {target_difficulty} (ID: {selected[2]})")
             return self._ensure_question_attributes(selected_question)
-        
+
         # Strategy 2: Find closest match, preferring higher difficulties for increases
         matching_questions.sort(key=lambda x: (abs(x[1] - target_difficulty), x[1]))
         best_question, actual_difficulty, best_id = matching_questions[0]
-        
+        used_question_ids_by_vocab[vocab_lower].add(best_id)
         print(f"[POOL] Found CLOSEST match for {q_type} '{vocab}': target {target_difficulty}, got {actual_difficulty} (ID: {best_id})")
-        # FIXED: Ensure the returned question has the difficulty properly set
         return self._ensure_question_attributes(best_question)
 
     def _ensure_question_attributes(self, question):
@@ -201,7 +200,7 @@ class LessonQuestionPool:
             q_question_type = getattr(q, 'type', '') if hasattr(q, 'type') else q.get('type', '')
             difficulty = getattr(q, 'difficulty', None) if hasattr(q, 'difficulty') else q.get('difficulty', None)
             q_id = getattr(q, 'id', None) if hasattr(q, 'id') else q.get('id', None)
-            if q_id in used_question_ids:
+            if q_id in used_question_ids_by_vocab[vocab_lower]:
                 continue  # Skip already used questions
             if (difficulty is not None and 
                 min_diff <= difficulty <= max_diff and
@@ -3117,7 +3116,8 @@ def lesson_page(page: ft.Page, image_urls: list):
             q_question_type = q.get('type', '') if isinstance(q, dict) else getattr(q, 'type', '')
             q_difficulty = q.get('difficulty', None) if isinstance(q, dict) else getattr(q, 'difficulty', None)
             q_id = q.get('id', None) if isinstance(q, dict) else getattr(q, 'id', None)
-            if q_id in used_question_ids:
+            vocab_lower = vocab.lower()
+            if q_id in used_question_ids_by_vocab[vocab_lower]:
                 continue  # Skip already used
             if (q_vocab.lower() == vocab.lower() and 
                 q_difficulty in target_difficulties):
@@ -3508,7 +3508,8 @@ def lesson_page(page: ft.Page, image_urls: list):
                             
                             new_id = getattr(better_question, 'id', None)
                             if new_id:
-                                used_question_ids.add(new_id)
+                                vocab_lower = vocab.lower()
+                                used_question_ids_by_vocab[vocab_lower].add(new_id)
 
                             # Restore metadata
                             if original_lesson_id:
@@ -3658,11 +3659,7 @@ def lesson_page(page: ft.Page, image_urls: list):
     def render_current_question(progress_value):
         page.views.clear()
         question = questions[current_question_index["value"]]
-        
-        # Mark this question as used
-        question_id = getattr(question, 'id', None)
-        if question_id:
-            used_question_ids.add(question_id)
+
         
         user_id = page.session.get("user_id")
         
@@ -3686,6 +3683,12 @@ def lesson_page(page: ft.Page, image_urls: list):
         if vocab and vocab not in performance_tracker:
             performance_tracker[vocab] = {"answers": [], "predicted_mastery": getattr(question, "predicted_mastery", 0.5)}
             
+        # Mark this question as used
+        question_id = getattr(question, 'id', None)
+        if question_id:
+            vocab_lower = vocab.lower()
+            used_question_ids_by_vocab[vocab_lower].add(question_id)
+
         content = render_question_layout(
             page=page,
             question_data=question,
@@ -4093,6 +4096,7 @@ def lesson_page(page: ft.Page, image_urls: list):
             # Re-select questions for each vocabulary group
             new_batch = []
             for vocab_name, vocab_questions in vocab_groups.items():
+                used_question_ids_by_vocab[vocab.lower()].clear()
                 # Pass relevant performance data for this vocab
                 vocab_performance = {
                     vocab_name: performance_tracker.get(vocab_name, {"answers": [], "predicted_mastery": 0.4})

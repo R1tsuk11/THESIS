@@ -108,7 +108,8 @@ def batch_update_supermemo(user_id, correct_answers, incorrect_answers):
             
             vocab_quality_map[vocab] = quality
             print(f"[SuperMemo] Incorrect vocab: '{vocab}' with moderated daily review quality {quality}")
-            bkt_incorrect_answers[q_id] = q
+            if vocab not in bkt_correct_answers:  # Prevent double-counting
+                bkt_incorrect_answers[q_id] = q
     
     # CRITICAL FIX: Process BKT updates for daily review with MORE GENTLE impact
     if bkt_correct_answers or bkt_incorrect_answers:
@@ -122,7 +123,7 @@ def batch_update_supermemo(user_id, correct_answers, incorrect_answers):
                 user_id, 
                 bkt_correct_answers, 
                 bkt_incorrect_answers, 
-                impact_scale=2.0,  # INCREASED from 1.5 to 2.0 for MORE GENTLE updates
+                impact_scale=0.5,
                 is_daily_review=True
             )
             

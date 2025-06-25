@@ -15,26 +15,26 @@ def build_lstm_model(input_shape):
     return model
 
 def generate_learning_data(sequence_length=3, num_sequences=50):
-    """Generate synthetic data that simulates realistic learning patterns"""
+    """Generate synthetic data that simulates realistic learning patterns, including high and low mastery"""
     # Create patterns with upward trend + occasional dips
     base_patterns = np.linspace(0.3, 0.8, num_sequences)
-    
+    # Add high mastery and low mastery patterns
+    high_patterns = np.linspace(0.85, 0.99, num_sequences // 4)
+    low_patterns = np.linspace(0.01, 0.2, num_sequences // 4)
+    all_patterns = np.concatenate([low_patterns, base_patterns, high_patterns])
+
     # Add some noise and learning plateaus
     sequences = []
     labels = []
-    
-    for i in range(num_sequences - sequence_length):
-        # Add noise to sequence
-        seq = base_patterns[i:i+sequence_length] + np.random.normal(0, 0.05, sequence_length)
-        seq = np.clip(seq, 0.01, 0.99)  # Keep values in range
-        
-        # Predict next value (with noise)
-        label = base_patterns[i+sequence_length] + np.random.normal(0, 0.03)
+
+    for i in range(len(all_patterns) - sequence_length):
+        seq = all_patterns[i:i+sequence_length] + np.random.normal(0, 0.03, sequence_length)
+        seq = np.clip(seq, 0.01, 0.99)
+        label = all_patterns[i+sequence_length] + np.random.normal(0, 0.02)
         label = np.clip(label, 0.01, 0.99)
-        
         sequences.append(seq)
         labels.append(label)
-    
+
     return sequences, labels
 
 def create_base_model(output_dir="lstm_models"):

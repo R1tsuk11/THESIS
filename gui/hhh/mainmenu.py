@@ -1190,6 +1190,7 @@ class User:  # User class
         
         usercol = connect_to_mongoDB()
         user_data = self.to_dict()
+        user_data = stringify_keys(user_data)
 
         result = usercol.update_one(
             {"user_id": self.user_id},
@@ -1211,6 +1212,14 @@ class User:  # User class
         page.session.clear()
         page.go("/login")
 
+def stringify_keys(obj):
+    """Recursively convert all dict keys to strings (for MongoDB compatibility)."""
+    if isinstance(obj, dict):
+        return {str(k): stringify_keys(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [stringify_keys(i) for i in obj]
+    else:
+        return obj
 
 def get_user_id(page):
     """Retrieves user_id from previous page session."""

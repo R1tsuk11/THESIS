@@ -406,15 +406,15 @@ class LessonSession:
 # Global session management functions
 
 def create_or_get_session(user_id, session_id=None):
-    """Create a new session or get an existing one"""
     with session_lock:
-        # Create session key
         session_key = f"{user_id}_{session_id}" if session_id else f"{user_id}_default"
-        
-        # Create new session if it doesn't exist
         if session_key not in active_sessions:
-            active_sessions[session_key] = LessonSession(user_id, session_id)
-        
+            session = LessonSession(user_id, session_id)
+            # Load database predictions into session_predictions if session_predictions is empty
+            session._load_database_predictions()
+            if not session.session_predictions and session.database_predictions:
+                session.session_predictions = session.database_predictions.copy()
+            active_sessions[session_key] = session
         return active_sessions[session_key]
 
 def get_vocab_mastery_from_session(user_id, vocab, session_id=None):
@@ -738,7 +738,7 @@ def process_lesson_question(user_id, question_id, question, is_correct, response
     current_pred['correct'] = 1 if is_correct else 0
 
     observation = {
-        'correct': is_correct,
+        'correct': int(is_correct),
         'timestamp': int(time.time()),
         'question_id': question_id,
         'difficulty': difficulty,
@@ -1501,29 +1501,41 @@ def get_next_vocabulary_simple(user_id, current_vocab=None, session_id=None):
 def display_lesson_bkt_predictions(user_id):
     """Display current BKT predictions for lesson session - RAW VALUES"""
     try:
+        # 1. Try to get in-session predictions
         session = create_or_get_session(user_id)
-        if not session:
-            print("[LessonBKT] No active session found")
-            return 0
-        
-        session_predictions = session.session_predictions
-        
-        # Get database predictions for comparison
+        session_predictions = session.session_predictions if session else {}
+
+        # 2. If no session predictions, try database
         db_predictions = {}
-        try:
-            arami = pymongo.MongoClient(uri)["arami"]
-            user_doc = arami["users"].find_one({"user_id": int(user_id)})
-            if user_doc and "bkt_data" in user_doc:
-                bkt_data = user_doc["bkt_data"]
-                if "predictions" in bkt_data:
-                    db_predictions = bkt_data["predictions"]
-        except Exception as e:
-            print(f"[LessonBKT] Error loading database predictions: {e}")
-        
-        # Combine predictions
+        if not session_predictions:
+            try:
+                arami = pymongo.MongoClient(uri)["arami"]
+                user_doc = arami["users"].find_one({"user_id": int(user_id)})
+                if user_doc and "bkt_data" in user_doc:
+                    bkt_data = user_doc["bkt_data"]
+                    if "predictions" in bkt_data:
+                        db_predictions = bkt_data["predictions"]
+            except Exception as e:
+                print(f"[LessonBKT] Error loading database predictions: {e}")
+
+        # 3. If neither, try bkt_predictions.json as a last resort
+        file_predictions = {}
+        if not session_predictions and not db_predictions:
+            try:
+                if os.path.exists('bkt_predictions.json'):
+                    with open('bkt_predictions.json', 'r') as f:
+                        file_predictions = json.load(f)
+                        print(f"[LessonBKT] Loaded {len(file_predictions)} predictions from file")
+            except Exception as e:
+                print(f"[LessonBKT] Error loading predictions from file: {e}")
+
+        # 4. Merge predictions: session > db > file
         all_predictions = {}
         for vocab, pred in db_predictions.items():
             all_predictions[vocab] = {**pred, 'source': 'Database'}
+        for vocab, pred in file_predictions.items():
+            if vocab not in all_predictions:
+                all_predictions[vocab] = {**pred, 'source': 'File'}
         for vocab, pred in session_predictions.items():
             all_predictions[vocab] = {**pred, 'source': 'Session'}
         

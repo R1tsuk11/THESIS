@@ -112,7 +112,7 @@ class CustomBKTPredictor:
                 # Last resort - simple alphabetical sort
                 return sorted(self.vocab_parameters.keys())
     
-    def observe_with_scale(self, vocab, correct, impact_scale=1.0, difficulty=None):
+    def observe_with_scale(self, vocab, correct, impact_scale=1.0, difficulty=None, is_daily_review=False):
         """
         Update BKT parameters based on observation with adaptive learning
         but without random variations
@@ -169,7 +169,9 @@ class CustomBKTPredictor:
         
         # Calculate final adaptive learning rate - no randomness
         learn = params.get('learn', 0.15) * impact_scale * difficulty_factor * history_factor * mastery_factor
-        
+        if is_daily_review:
+            learn = min(learn, 0.07)  # Clamp for gentle daily review
+    
         # Log the learning rate factors
         print(f"[BKT] Learning rate factors for '{vocab}': difficulty={difficulty_factor:.2f}, " +
             f"history={history_factor:.2f}, mastery={mastery_factor:.2f}")
@@ -276,7 +278,6 @@ class CustomBKTPredictor:
             print(f"[BKT] Marked '{vocab}' as reviewed with observation")
         else:
             # Initialize vocabulary if it doesn't exist
-            import time
             self.vocab_parameters[vocab] = {
                 'prior': 0.5,
                 'guess': 0.25,
@@ -425,6 +426,17 @@ def load_custom_bkt(user_id):
 
 def get_custom_bkt(user_id=None):
     """Get or create custom BKT predictor with proper user ID handling."""
+
+    predictor_path = f"custom_bkt_predictor_{user_id}.pkl"
+    if os.path.exists(predictor_path):
+        with open(predictor_path, "rb") as f:
+            return pickle.load(f)
+    # If not found, create and save a new one
+    predictor = CustomBKTPredictor({})
+    with open(predictor_path, "wb") as f:
+        pickle.dump(predictor, f)
+        return predictor
+
     if user_id is None:
         # Try to get from global context
         global uid
@@ -1363,6 +1375,9 @@ def calculate_bkt_confidence(mastery, guess, slip, vocab=None, params=None):
 def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is_daily_review=False):
     """Update BKT model with new observations, with optional impact scaling."""
     try:
+
+        print(f"[DEBUG] correct_answers: {correct_answers}")
+        print(f"[DEBUG] incorrect_answers: {incorrect_answers}")
         reset_bkt_update_counters()
         
         # Store user_id for parameter initialization
@@ -1383,8 +1398,16 @@ def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is
         # Get existing BKT state
         custom_bkt = get_custom_bkt(user_id)
         if not custom_bkt:
-            print("[update_bkt] No custom BKT predictor found. Creating one.")
-            custom_bkt = CustomBKTPredictor({})
+            custom_bkt = CustomBKTPredictor()
+        else:
+            # Try to merge in latest DB parameters if available
+            usercol = connect_to_mongoDB()
+            user = usercol.find_one({"user_id": user_id})
+            if user and "bkt_data" in user and "predictions" in user["bkt_data"]:
+                db_predictions = user["bkt_data"]["predictions"]
+                for vocab, params in db_predictions.items():
+                    if vocab not in custom_bkt.vocab_parameters:
+                        custom_bkt.vocab_parameters[vocab] = params
         
         # Apply time decay before updates
         if custom_bkt:
@@ -1396,68 +1419,57 @@ def update_bkt(user_id, correct_answers, incorrect_answers, impact_scale=1.0, is
         history = state.get("history", {})
         
         # CRITICAL FIX: Process vocabularies from the session answers
-        vocabularies_processed = set()
-        
-        # Process correct answers
-        for question_id, question_data in correct_answers.items():
-            vocab = get_vocabulary_from_question(question_data)
+        all_vocabs = set()
+        for q in correct_answers.values():
+            vocab = get_vocabulary_from_question(q)
             if vocab:
-                vocab = normalize_vocabulary(vocab)
-                vocabularies_processed.add(vocab)
-                
-                # Get difficulty
-                difficulty = getattr(question_data, 'difficulty', 1)
-                
-                # Update BKT with correct answer
-                print(f"[BKT] Processing correct answer for '{vocab}' (difficulty: {difficulty})")
-                new_mastery = custom_bkt.observe_with_scale(vocab, True, impact_scale, difficulty)
-                
-                # CRITICAL: Mark as reviewed in daily review context
-                if is_daily_review:
-                    custom_bkt.mark_vocabulary_reviewed(vocab)
-                    print(f"[BKT] Marked '{vocab}' as reviewed (daily review)")
-                
-                # Update history
-                if vocab not in history:
-                    history[vocab] = {"corrects": [], "incorrects": []}
-                
-                timestamp = int(time.time())
+                all_vocabs.add(normalize_vocabulary(vocab))
+        for q in incorrect_answers.values():
+            vocab = get_vocabulary_from_question(q)
+            if vocab:
+                all_vocabs.add(normalize_vocabulary(vocab))
+
+        vocabularies_processed = set()
+        for vocab in all_vocabs:
+            # Was this vocab ever answered correctly in this session?
+            was_correct = any(
+                normalize_vocabulary(get_vocabulary_from_question(q)) == vocab
+                for q in correct_answers.values()
+            )
+            # Use the first matching question for difficulty
+            question_data = None
+            for q in list(correct_answers.values()) + list(incorrect_answers.values()):
+                if normalize_vocabulary(get_vocabulary_from_question(q)) == vocab:
+                    question_data = q
+                    break
+            difficulty = getattr(question_data, 'difficulty', 1) if question_data else 1
+
+            # Update BKT
+            new_mastery = custom_bkt.observe_with_scale(
+                vocab, was_correct, impact_scale, difficulty, is_daily_review=is_daily_review
+            )
+            if is_daily_review:
+                custom_bkt.mark_vocabulary_reviewed(vocab)
+                print(f"[BKT] Marked '{vocab}' as reviewed (daily review)")
+
+            # Update history
+            if vocab not in history:
+                history[vocab] = {"corrects": [], "incorrects": []}
+            timestamp = int(time.time())
+            if was_correct:
                 history[vocab]["corrects"].append({
-                    "timestamp": timestamp, 
+                    "timestamp": timestamp,
                     "is_review": is_daily_review
                 })
-        
-        # Process incorrect answers
-        for question_id, question_data in incorrect_answers.items():
-            vocab = get_vocabulary_from_question(question_data)
-            if vocab:
-                vocab = normalize_vocabulary(vocab)
-                vocabularies_processed.add(vocab)
-                
-                # Get difficulty
-                difficulty = getattr(question_data, 'difficulty', 1)
-                
-                # Update BKT with incorrect answer
-                print(f"[BKT] Processing incorrect answer for '{vocab}' (difficulty: {difficulty})")
-                new_mastery = custom_bkt.observe_with_scale(vocab, False, impact_scale, difficulty)
-                
-                # CRITICAL: Mark as reviewed in daily review context
-                if is_daily_review:
-                    custom_bkt.mark_vocabulary_reviewed(vocab)
-                    print(f"[BKT] Marked '{vocab}' as reviewed (daily review)")
-                
-                # Update history
-                if vocab not in history:
-                    history[vocab] = {"corrects": [], "incorrects": []}
-                
-                timestamp = int(time.time())
+            else:
                 history[vocab]["incorrects"].append({
                     "timestamp": timestamp,
                     "is_review": is_daily_review
                 })
-        
+            vocabularies_processed.add(vocab)
+
         print(f"[BKT] Processed {len(vocabularies_processed)} unique vocabularies: {list(vocabularies_processed)}")
-        
+
         # Update predictions with review status
         for vocab in vocabularies_processed:
             # Get latest parameters from custom_bkt

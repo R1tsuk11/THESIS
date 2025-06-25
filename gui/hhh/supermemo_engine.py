@@ -198,6 +198,18 @@ def get_supermemo_confidence(user_id):
         print(f"[SuperMemo] Error getting SuperMemo confidence: {e}")
         return None
 
+def get_initial_quality_from_mastery(mastery):
+    if mastery < 0.3:
+        return 1
+    elif mastery < 0.5:
+        return 2
+    elif mastery < 0.7:
+        return 3
+    elif mastery < 0.85:
+        return 4
+    else:
+        return 5
+
 def schedule_pending_vocabulary(user_id, session_data=None, force=False):
     """
     Schedule any newly learned vocabulary that hasn't been scheduled yet
@@ -230,6 +242,7 @@ def schedule_pending_vocabulary(user_id, session_data=None, force=False):
     
     # Get current SuperMemo data with proper initialization
     supermemo_data = user.get("supermemo", {})
+    review_history = user.get("review_history", {})  # <-- Add this line
     
     # Ensure the required structure exists
     if "needs_practice" not in supermemo_data:
@@ -255,32 +268,40 @@ def schedule_pending_vocabulary(user_id, session_data=None, force=False):
         if not in_needs_practice and not in_mastered:
             print(f"[SuperMemo] Scheduling new vocabulary: {vocab}")
             mastery = get_vocab_mastery(vocab, user_id=user_id)
-            
-            # Create initial SuperMemo state
             today = datetime.now().date()
-            tomorrow = today + timedelta(days=1)  # Schedule for tomorrow
-            
+            tomorrow = today + timedelta(days=1)
+            initial_quality = get_initial_quality_from_mastery(mastery)
+
             state = {
-                "interval": 1,              # Start with 1-day interval
-                "repetition": 0,            # No repetitions yet
-                "efactor": 2.5,             # Default easiness factor
-                "last_review": str(today),  # Mark as "reviewed" today
-                "next_review": str(tomorrow)  # Schedule for tomorrow
+                "interval": 1,
+                "repetition": 0,
+                "efactor": 2.5,
+                "last_review": str(today),
+                "next_review": str(tomorrow),
+                "quality": initial_quality
             }
-            
-            # Decide whether it goes to needs_practice or mastered
-            if mastery >= 0.7:  # If decent mastery, consider it "mastered"
+
+            # --- Initialize review_history for this vocab ---
+            review_history[vocab] = {
+                "last_reviewed": str(today),
+                "quality": initial_quality,
+                "last_quality": initial_quality,
+                "times_reviewed": 0,
+                "times_skipped": 0
+            }
+
+            if mastery >= 0.7:
                 supermemo_data["mastered"][vocab] = state
-            else:  # Otherwise needs more practice
+            else:
                 supermemo_data["needs_practice"][vocab] = state
-                
+
             scheduled_count += 1
-    
-    # Save updated SuperMemo data if any changes were made
+
+    # Save updated SuperMemo data and review_history if any changes were made
     if scheduled_count > 0:
         usercol.update_one(
             {"user_id": user_id},
-            {"$set": {"supermemo": supermemo_data}}
+            {"$set": {"supermemo": supermemo_data, "review_history": review_history}}
         )
         print(f"[SuperMemo] Scheduled {scheduled_count} new vocabulary items for user {user_id}")
         return True
@@ -301,6 +322,7 @@ def register_new_vocabulary(user_id, vocabulary_item):
     
     # Get current SuperMemo data with proper initialization
     supermemo_data = user.get("supermemo", {})
+    review_history = user.get("review_history", {})  # <-- Add this line
     
     # Ensure the required structure exists
     if "needs_practice" not in supermemo_data:
@@ -314,34 +336,40 @@ def register_new_vocabulary(user_id, vocabulary_item):
     if vocabulary_item in supermemo_data["needs_practice"] or vocabulary_item in supermemo_data["mastered"]:
         print(f"[SuperMemo] Vocabulary '{vocabulary_item}' already scheduled")
         return False
-        
-    # Get basic BKT prediction to determine initial placement
+
     mastery = get_vocab_mastery(vocabulary_item, user_id=user_id)
-    
-    # Create initial SuperMemo state
     today = datetime.now().date()
-    tomorrow = today + timedelta(days=1)  # Schedule for tomorrow
-    
+    tomorrow = today + timedelta(days=1)
+    initial_quality = get_initial_quality_from_mastery(mastery)
+
     state = {
-        "interval": 1,              # Start with 1-day interval
-        "repetition": 0,            # No repetitions yet
-        "efactor": 2.5,             # Default easiness factor
-        "last_review": str(today),  # Mark as "reviewed" today
-        "next_review": str(tomorrow)  # Schedule for tomorrow
+        "interval": 1,
+        "repetition": 0,
+        "efactor": 2.5,
+        "last_review": str(today),
+        "next_review": str(tomorrow),
+        "quality": initial_quality
     }
-    
-    # Decide whether it goes to needs_practice or mastered
-    if mastery >= 0.7:  # If decent mastery, consider it "mastered"
+
+    # --- Initialize review_history for this vocab ---
+    review_history[vocabulary_item] = {
+        "last_reviewed": str(today),
+        "quality": initial_quality,
+        "last_quality": initial_quality,
+        "times_reviewed": 0,
+        "times_skipped": 0
+    }
+
+    if mastery >= 0.7:
         supermemo_data["mastered"][vocabulary_item] = state
-    else:  # Otherwise needs more practice
+    else:
         supermemo_data["needs_practice"][vocabulary_item] = state
-    
-    # Save updated SuperMemo data
+
     usercol.update_one(
         {"user_id": user_id},
-        {"$set": {"supermemo": supermemo_data}}
+        {"$set": {"supermemo": supermemo_data, "review_history": review_history}}
     )
-    
+
     print(f"[SuperMemo] Registered vocabulary '{vocabulary_item}' for user {user_id}")
     return True
 
@@ -361,6 +389,7 @@ def register_new_vocabulary_batch(user_id, vocabulary_items):
     
     # Get current SuperMemo data with proper initialization
     supermemo_data = user.get("supermemo", {})
+    review_history = user.get("review_history", {})
     
     # Ensure the required structure exists
     if "needs_practice" not in supermemo_data:
@@ -385,6 +414,7 @@ def register_new_vocabulary_batch(user_id, vocabulary_items):
         try:
             # Use cached BKT predictor to avoid reloading for each word
             mastery = get_vocab_mastery(vocab, user_id=user_id)
+            initial_quality = get_initial_quality_from_mastery(mastery)
         
             # Create initial SuperMemo state
             state = {
@@ -392,17 +422,29 @@ def register_new_vocabulary_batch(user_id, vocabulary_items):
                 "repetition": 0,
                 "efactor": 2.5,
                 "last_review": str(today),
-                "next_review": str(tomorrow)
+                "next_review": str(tomorrow),
+                "quality": 3
             }
             
-            # Add to appropriate category
+            review_history[vocab] = {
+                "last_reviewed": str(today),
+                "quality": initial_quality,
+                "last_quality": initial_quality,
+                "times_reviewed": 0,
+                "times_skipped": 0
+            }
             if mastery >= 0.7:
                 supermemo_data["mastered"][vocab] = state
             else:
                 supermemo_data["needs_practice"][vocab] = state
-                
-            updates_made = True
-            print(f"[SuperMemo] Registered vocabulary '{vocab}' for user {user_id}")
+                updates_made = True
+                print(f"[SuperMemo] Registered vocabulary '{vocab}' for user {user_id}")
+                # Save updated data if changes were made
+            if updates_made:
+                usercol.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"supermemo": supermemo_data, "review_history": review_history}}
+                )
             
         except Exception as e:
             print(f"[SuperMemo] Error registering vocabulary '{vocab}': {e}")
@@ -441,24 +483,36 @@ def get_review_questions_for_user(user_id, vocab_list, proficiency):
         for lesson in module.values():
             all_questions.extend(lesson)
             
-    # Filter out None values from vocab_list
-    vocab_list = [vocab for vocab in vocab_list if vocab is not None]
-    
-    # For each vocab, select ONLY ONE question
+    # Fetch review history for quality lookup
+    usercol = connect_to_mongoDB()
+    user = usercol.find_one({"user_id": user_id})
+    review_history = user.get("review_history", {}) if user else {}
+
     review_questions = []
-    used_ids = set()  # Track used question IDs to avoid duplicates
+    used_ids = set()
     
     for vocab in vocab_list:
-        questions = select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=1, include_lesson=False)
+        # Get recent quality for this vocab (default to 1 if missing)
+        quality = review_history.get(vocab, {}).get("quality", 1)
+        # Map quality to target difficulty (clamp between 1 and 5)
+        target_difficulty = max(1, min(5, int(quality)))
+        # Select questions matching this difficulty
+        questions = [q for q in all_questions if
+                     q.get("vocabulary", "").lower() == vocab.lower() and
+                     q.get("type") != "Lesson" and q.get("type") != "Image Picker" and q.get("type") != "Pronunciation" and
+                     q.get("difficulty", 1) == target_difficulty]
+        # Fallback: any question for this vocab
+        if not questions:
+            questions = [q for q in all_questions if
+                         q.get("vocabulary", "").lower() == vocab.lower() and
+                         q.get("type") != "Lesson" and q.get("type") != "Image Picker" and q.get("type") != "Pronunciation"]
+        # Pick the first unused question
         for question in questions:
-            # Skip questions with duplicate IDs
-            if question.get('id') in used_ids:
-                print(f"[WARNING] Skipping duplicate question ID: {question.get('id')} for vocab: {vocab}")
-                continue
-                
-            review_questions.append(question)
-            used_ids.add(question.get('id'))
-    
+            if question.get('id') not in used_ids:
+                review_questions.append(question)
+                used_ids.add(question.get('id'))
+                break  # Only one per vocab
+
     return review_questions
 
 def select_questions_for_vocab(vocab, all_questions, proficiency, max_per_vocab=4, include_lesson=False):
@@ -552,14 +606,16 @@ def prioritize_vocabularies(predictions, threshold=0.85):
     print(f"[DEBUG] Mastered: {mastered}")
     return needs_practice, mastered
 
-def initialize_supermemo_state():
+def initialize_supermemo_state(mastery=0.5):
     today = datetime.now().date()
+    quality = get_initial_quality_from_mastery(mastery)
     state = {
         "interval": 1,
         "repetition": 0,
         "efactor": 2.5,
         "last_review": str(today),
-        "next_review": str(today + timedelta(days=1))
+        "next_review": str(today + timedelta(days=1)),
+        "quality": quality
     }
     print(f"[DEBUG] Initialized SuperMemo state: {state}")
     return state
@@ -581,12 +637,14 @@ def save_supermemo_schedule(user_id, needs_practice, mastered):
     needs_practice_states = supermemo_data.get("needs_practice", {})
     for vocab in needs_practice:
         if vocab not in needs_practice_states:
-            needs_practice_states[vocab] = initialize_supermemo_state()
+            mastery = get_vocab_mastery(vocab, user_id=user_id)  # <-- Fetch mastery here
+            needs_practice_states[vocab] = initialize_supermemo_state(mastery)
 
     mastered_states = supermemo_data.get("mastered", {})
     for vocab in mastered:
         if vocab not in mastered_states:
-            mastered_states[vocab] = initialize_supermemo_state()
+            mastery = get_vocab_mastery(vocab, user_id=user_id)  # <-- Fetch mastery here
+            mastered_states[vocab] = initialize_supermemo_state(mastery)
 
     supermemo_data["needs_practice"] = needs_practice_states
     supermemo_data["mastered"] = mastered_states
@@ -880,6 +938,7 @@ def mark_vocabulary_batch_reviewed(user_id, vocab_quality_map):
                 review_history[vocab] = {}
                 
             review_history[vocab]["last_reviewed"] = str(today)
+            review_history[vocab]["quality"] = quality  # <-- Add this line
             review_history[vocab]["last_quality"] = quality
             review_history[vocab]["times_reviewed"] = review_history[vocab].get("times_reviewed", 0) + 1
             review_history[vocab]["times_skipped"] = 0
@@ -1022,6 +1081,7 @@ def mark_vocabulary_reviewed(user_id, vocab, performance_quality):
         
         # Track performance quality
         review_history[vocab]["last_quality"] = performance_quality
+        review_history[vocab]["quality"] = performance_quality  # <-- Add this line
         
         # Reset skip counter since item was reviewed
         review_history[vocab]["times_skipped"] = 0
@@ -1519,7 +1579,7 @@ def calculate_dynamic_quality(user_id, question_data, is_correct, response_time=
             review_history = {}
     
     times_reviewed = review_history.get("times_reviewed", 0)
-    last_quality = review_history.get("last_quality", 3)
+    last_quality = review_history.get("quality", 3)
     
     print(f"[QUALITY] Calculating for '{vocab}': correct={is_correct}, difficulty={difficulty}, mastery={vocab_mastery:.2f}, daily_review={is_daily_review}")
     
