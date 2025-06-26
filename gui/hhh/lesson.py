@@ -2450,7 +2450,6 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
 
             # Compare with the specific target word not the full vocabulary
             if predicted_word:
-                txt_transcription.value = f"You said: {predicted_word}"
 
                 # Get any pronunciation errors from the NLTK analysis that was performed
                 nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
@@ -2499,7 +2498,6 @@ def build_pronounce_question(page, question_data, progress_value, on_next, on_ba
                 else:
                     # Incorrect word detected
                     question_data.attempts += 1
-                    txt_transcription.value = f"You said: {predicted_word}. Try saying '{target_word}'"
                     txt_accuracy.value = f"Incorrect word detected"
                     txt_accuracy.color = "red"
                     # Do not update best_accuracy
