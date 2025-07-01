@@ -7182,7 +7182,7 @@ pretest_data = [
         "choices": ["Aga", "Kulop"],
         "correct_answer": "Kulop",
         "vocabulary": "kulop",
-        "difficulty": 1,
+        "difficulty": 3,
         "response_time": 0
     },
     {
@@ -7192,7 +7192,7 @@ pretest_data = [
         "choices": ["Kaon kita.", "Pagkaon kita."],
         "correct_answer": "Kaon kita.",
         "vocabulary": "kaon kita",
-        "difficulty": 1,
+        "difficulty": 4,
         "response_time": 0
     },
     {
@@ -7202,7 +7202,7 @@ pretest_data = [
         "choices": ["Unsa imong ngaran?", "Ano it imo ngaran?"],
         "correct_answer": "Ano it imo ngaran?",
         "vocabulary": "ano it imo ngaran",
-        "difficulty": 1,
+        "difficulty": 4,
         "response_time": 0
     },
     {
@@ -7212,7 +7212,7 @@ pretest_data = [
         "choices": ["Ara", "Aga"],
         "correct_answer": "Aga",
         "vocabulary": "aga",
-        "difficulty": 1,
+        "difficulty": 2,
         "response_time": 0
     },
     {

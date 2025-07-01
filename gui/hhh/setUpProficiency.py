@@ -12,6 +12,9 @@ incorrect_answers = {}
 grade_percentage = 0.0
 total_response_time = 0.0
 formatted_time = ""
+total_possible_points = 0
+user_score = 0
+proficiency_increase = 0.0
 
 uri = "mongodb+srv://adam:adam123xd@arami.dmrnv.mongodb.net/"
 
@@ -38,6 +41,7 @@ def get_user_id(page):
 
 def get_questions(page):
     """Retrieves questions for the pre-test and converts them to Question objects."""
+    global total_possible_points
     try:
         questions_data = pretest_data
         if not questions_data:
@@ -49,6 +53,7 @@ def get_questions(page):
         for q_dict in questions_data:
             question_obj = Question(q_dict)
             questions.append(question_obj)
+            total_possible_points += q_dict.get("difficulty", 1)
             
         print(f"Loaded {len(questions)} pre-test questions")
         return questions
@@ -119,6 +124,8 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
             )
             unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
             correct_answers[unique_key] = question_data
+            global user_score
+            user_score += getattr(question_data, "difficulty", 1)
 
         else:
             print("Incorrect answer.")
@@ -336,6 +343,8 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
             )
             unique_key = f"{question_data.question}__{question_data.type}__{current_question_index['value']}"
             correct_answers[unique_key] = question_data
+            global user_score
+            user_score += getattr(question_data, "difficulty", 1)
 
         else:
             print("Incorrect answer.")
@@ -843,6 +852,16 @@ def set_up_proficiency_page(page: ft.Page, image_urls: list):
                 
             print(f"Final grade percentage: {grade_percentage}%")
                     
+            global user_score, total_possible_points, proficiency_increase
+            # Calculate weighted score
+            if total_possible_points > 0:
+                weighted_score = user_score / total_possible_points
+            else:
+                weighted_score = 0
+
+            # Max proficiency increase is 10%
+            proficiency_increase = weighted_score * 0.10  # 10% max
+
             formatted_time = f"{int(total_response_time // 60)}:{int(total_response_time % 60):02d}"
             correct_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in correct_answers.items()}
             incorrect_answers_serialized = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in incorrect_answers.items()}
@@ -851,16 +870,19 @@ def set_up_proficiency_page(page: ft.Page, image_urls: list):
 
     def reset_var():
         current_question_index["value"] = 0
-        global correct_answers, incorrect_answers, total_response_time, formatted_time, grade_percentage
+        global correct_answers, incorrect_answers, total_response_time, formatted_time, grade_percentage, total_possible_points, user_score
         total_response_time = 0
         formatted_time = "0:00"
         grade_percentage = 0 
         correct_answers.clear()
         incorrect_answers.clear()
+        total_possible_points = 0
+        user_score = 0
 
     render_current_question(progress_value)
 
 def pretest_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncorrect=0, responseTime="3:01"):
+    global user_score, total_possible_points, proficiency_increase
     """
     Score summary page displaying lesson results
     
@@ -877,15 +899,21 @@ def pretest_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncor
     user_id = get_user_id(page)
 
     # Calculate percentage threshold
-    percentage = (4 / 6) * 100  # This will be 66.67
+    percentage = 0.6
     
     # Determine proficiency level based on score
-    proficiency_value = 0.02 if accuracyPercentage > percentage else 0.0
-    proficiency_text = "BEGINNER" if proficiency_value == 0.02 else "STARTER"
-    proficiency_color = "#75B0FF" if proficiency_value == 0.02 else "#FFB7B7"
+    proficiency_value = proficiency_increase  # Use the calculated proficiency_increase
+
+    if proficiency_value < 0.06: 
+        proficiency_text = "BEGINNER"
+        proficiency_color = "#75B0FF"
+    else:
+        proficiency_text = "STARTER"
+        proficiency_color = "#FFD966"
     
     # Add proficiency to database
-    add_proficiency_to_db(user_id, proficiency_value)
+    add_proficiency_to_db(user_id, proficiency_increase)
+    proficiency_increase = 0.0 # Reset for next use
 
     score_image_urls = [
         "https://res.cloudinary.com/djm2qhi9f/image/upload/v1747653930/tryagain_j5tsjw.png",  # tryagain - 0
@@ -906,7 +934,7 @@ def pretest_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncor
     # Determine which image to show based on accuracy
     img1 = score_image_urls[1]  # goodjob
     img2 = score_image_urls[0]  # tryagain
-    celebration_image = img1 if accuracyPercentage >= percentage else img2
+    celebration_image = img1 if proficiency_increase >= percentage else img2
     
     # Card content
     card_content = ft.Container(
@@ -936,20 +964,26 @@ def pretest_score(page: ft.Page, accuracyPercentage=50, noOfCorrect=0, noOfIncor
                     content=ft.Column(
                         [
                             ft.Text(
-                                "ACCURACY",
+                                "WEIGHTED SCORE",
                                 color="white",
                                 size=14,
                                 weight=ft.FontWeight.W_500
                             ),
                             ft.Container(
                                 content=ft.Text(
-                                    f"{round(accuracyPercentage)} %",
+                                    f"{user_score} / {total_possible_points}",
                                     color="white",
                                     size=40,
                                     weight=ft.FontWeight.BOLD
                                 ),
                                 padding=ft.padding.symmetric(vertical=8)
-                            )
+                            ),
+                            ft.Text(
+                                f"Proficiency Increase: +{round(proficiency_increase*100, 2)}%",
+                                color="#0078D7",
+                                size=16,
+                                weight=ft.FontWeight.BOLD
+                            ),
                         ],
                         alignment=ft.MainAxisAlignment.CENTER,
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,

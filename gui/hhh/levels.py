@@ -457,14 +457,14 @@ def run_bkt_and_lstm(page, completion, user_id, correct_answers, incorrect_answe
                     bkt_score = 0.5
             print(f"[BKT] Average BKT confidence score: {bkt_score:.3f}")
         except Exception as e:
-            print(f"[BKT] Error calculating BKT confidence: {e}")
+            print(f"[BKT] Error calculating BKT confidence: {e}") 
             bkt_score = 0.5
 
         try:
             print(f"[BKT] Average mastery score: {bkt_score:.3f}")
             
             # Get value from the table generation (which has the 0.76 value)
-            lstm_score = lstm_display_result
+            lstm_score = lstm_display_result.get("confidence", 0.5) if isinstance(lstm_display_result, dict) else 0.5
             print(f"[LSTM] Using LSTM model confidence: {lstm_score}")
             
             # Get SuperMemo data if available

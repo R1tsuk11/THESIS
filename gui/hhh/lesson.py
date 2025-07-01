@@ -15,6 +15,7 @@ from voice_recognition.speech_recognition_utils import SpeechProcessor, capture_
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 from bkt_engine import should_rebatch, select_adaptive_questions, get_vocab_mastery
 import threading
+from lesson_bkt_engine import get_session_bkt
 
 used_question_ids_by_vocab = defaultdict(set)
 correct_answers = {}
@@ -1202,6 +1203,26 @@ def build_imgpicker_question(page, question_data, progress_value, on_next, on_ba
 
         question_data.answer = question_data.choices[selected_option["value"]]
 
+        user_id = page.session.get("user_id")
+        vocab = getattr(question_data, 'vocabulary', '').lower()
+        try:
+            session = get_session_bkt(user_id)
+            if session and vocab in session.session_predictions:
+                params = session.session_predictions[vocab]
+                p_mastery = params.get('p_mastery', 0.5)
+                guess = params.get('guess', 0.25)
+                slip = params.get('slip', 0.1)
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+            else:
+                p_mastery = get_user_overall_proficiency(user_id, page)
+                guess = 0.25
+                slip = 0.1
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+        except Exception as e:
+            print("Next correct chance: Error")
+
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correctDlg.content.controls[0].content = ft.Icon(
@@ -1440,6 +1461,26 @@ def build_wordselect_question(page, question_data, progress_value, on_next, on_b
 
         question_data.answer = question_data.choices[selected_option["value"]]
 
+        user_id = page.session.get("user_id")
+        vocab = getattr(question_data, 'vocabulary', '').lower()
+        try:
+            session = get_session_bkt(user_id)
+            if session and vocab in session.session_predictions:
+                params = session.session_predictions[vocab]
+                p_mastery = params.get('p_mastery', 0.5)
+                guess = params.get('guess', 0.25)
+                slip = params.get('slip', 0.1)
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+            else:
+                p_mastery = get_user_overall_proficiency(user_id, page)
+                guess = 0.25
+                slip = 0.1
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+        except Exception as e:
+            print("Next correct chance: Error")
+
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
             correctDlg.content.controls[0].content = ft.Icon(
@@ -1654,6 +1695,26 @@ def build_tf_question(page, question_data, progress_value, on_next, on_back, cur
             return
 
         question_data.answer = question_data.choices[selected_option["value"]]
+
+        user_id = page.session.get("user_id")
+        vocab = getattr(question_data, 'vocabulary', '').lower()
+        try:
+            session = get_session_bkt(user_id)
+            if session and vocab in session.session_predictions:
+                params = session.session_predictions[vocab]
+                p_mastery = params.get('p_mastery', 0.5)
+                guess = params.get('guess', 0.25)
+                slip = params.get('slip', 0.1)
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+            else:
+                p_mastery = get_user_overall_proficiency(user_id, page)
+                guess = 0.25
+                slip = 0.1
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+        except Exception as e:
+            print("Next correct chance: Error")
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
@@ -2002,6 +2063,26 @@ def build_translate_sentence_question(page, question_data, progress_value, on_ne
             return
 
         question_data.answer = question_data.choices[selected_option["value"]]
+
+        user_id = page.session.get("user_id")
+        vocab = getattr(question_data, 'vocabulary', '').lower()
+        try:
+            session = get_session_bkt(user_id)
+            if session and vocab in session.session_predictions:
+                params = session.session_predictions[vocab]
+                p_mastery = params.get('p_mastery', 0.5)
+                guess = params.get('guess', 0.25)
+                slip = params.get('slip', 0.1)
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+            else:
+                p_mastery = get_user_overall_proficiency(user_id, page)
+                guess = 0.25
+                slip = 0.1
+                p_correct = p_mastery * (1 - slip) + (1 - p_mastery) * guess
+                print(f"Next correct chance: {p_correct*100:.1f}%")
+        except Exception as e:
+            print("Next correct chance: Error")
 
         if question_data.choices[selected_option["value"]] == correct_answer:
             print("Correct answer!")
