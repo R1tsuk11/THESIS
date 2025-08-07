@@ -16,3 +16,5 @@ pyBkt
 pyMongo
 fastdtw
 PyAudio 
+
+# ffmpeg (ffmpeg.org)
